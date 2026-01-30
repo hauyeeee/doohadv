@@ -5,7 +5,7 @@ import {
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
-  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare
+  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -30,16 +30,13 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Config State ---
-  const [pricingConfig, setPricingConfig] = useState({
-      baseImpressions: 10000,
-      primeMultiplier: 3.5,
-      goldMultiplier: 1.8,
-      weekendMultiplier: 1.5,
-      bundleMultiplier: 1.25,
-      urgentFee24h: 1.5,
-      urgentFee1h: 2.0
+  // --- Pricing Config States (Global & Active) ---
+  const [globalPricingConfig, setGlobalPricingConfig] = useState({
+      baseImpressions: 10000, primeMultiplier: 3.5, goldMultiplier: 1.8,
+      weekendMultiplier: 1.5, bundleMultiplier: 1.25, urgentFee24h: 1.5, urgentFee1h: 2.0
   });
+  const [activeConfig, setActiveConfig] = useState({}); // Current editing config
+  const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); // 'global' or 'screenId'
   
   // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -48,11 +45,11 @@ const AdminPanel = () => {
   const [reviewNote, setReviewNote] = useState("");
   
   // --- Advanced Filter States ---
-  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics 多選
-  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       // Bulk Action 多選
-  const [editingScreens, setEditingScreens] = useState({});                  // Screen Editing
+  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics Multi-select
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       // Bulk Action Multi-select
+  const [editingScreens, setEditingScreens] = useState({});                  // Inline Screen Editing
 
-  // --- New Rule Form State ---
+  // --- Forms ---
   const [newRule, setNewRule] = useState({
       screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: ''
   });
@@ -91,13 +88,17 @@ const AdminPanel = () => {
 
       // 4. Config (One-time)
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) setPricingConfig(docSnap.data());
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              setGlobalPricingConfig(data);
+              setActiveConfig(data); // Initial view is global
+          }
       });
 
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // --- 🧠 Helper: VIP Identification ---
+  // --- 🧠 Logic: VIP Customer Identification ---
   const customerHistory = useMemo(() => {
       const history = {};
       orders.forEach(order => {
@@ -108,7 +109,7 @@ const AdminPanel = () => {
       return history;
   }, [orders]);
 
-  // --- 📊 Dashboard Stats ---
+  // --- 📊 Logic: Dashboard Stats ---
   const stats = useMemo(() => {
     let totalRevenue = 0;
     let validOrders = 0;
@@ -134,10 +135,10 @@ const AdminPanel = () => {
     };
   }, [orders]);
 
-  // --- 📈 Real-time Market Stats (Multi-Screen) ---
+  // --- 📈 Logic: Real-time Market Stats (Multi-Screen) ---
   const realMarketStats = useMemo(() => {
       const statsMap = {}; 
-      // Init Grid
+      // Init Grid 7x24
       for(let d=0; d<7; d++) {
           for(let h=0; h<24; h++) {
               statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
@@ -147,6 +148,7 @@ const AdminPanel = () => {
       orders.forEach(order => {
           if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
+                  // If selectedStatScreens is empty, it means "All"
                   const isSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
                   if (isSelected) {
                       const dateObj = new Date(slot.date); 
@@ -165,7 +167,48 @@ const AdminPanel = () => {
       }));
   }, [orders, selectedStatScreens]);
 
-  // --- 🛠 Bulk Actions Logic ---
+  // --- ⚙️ Logic: Pricing Configuration (Global vs Screen) ---
+  useEffect(() => {
+      if (selectedConfigTarget === 'global') {
+          setActiveConfig(globalPricingConfig);
+      } else {
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
+          if (screen && screen.customPricing) {
+              setActiveConfig(screen.customPricing); // Load custom config
+          } else {
+              setActiveConfig(globalPricingConfig); // Fallback to global for editing
+          }
+      }
+  }, [selectedConfigTarget, globalPricingConfig, screens]);
+
+  const handleConfigChange = (key, val) => {
+      setActiveConfig(prev => ({ ...prev, [key]: parseFloat(val) }));
+  };
+
+  const savePricingConfig = async () => {
+      if (selectedConfigTarget === 'global') {
+          await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig);
+          setGlobalPricingConfig(activeConfig);
+          alert("🌍 全局價格公式已更新");
+      } else {
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
+          if (!screen) return;
+          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig });
+          alert(`✅ Screen ${screen.name} 的專屬公式已更新`);
+      }
+  };
+
+  // --- 🛠 Logic: Bulk Actions ---
+  // Helper to filter orders for display AND for "Select All" logic
+  const filteredOrders = useMemo(() => {
+      return orders.filter(o => {
+          if (activeTab === 'review') return o.status === 'won' && o.hasVideo && !o.isApproved && !o.isRejected;
+          const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase());
+          const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
+          return matchesSearch && matchesStatus;
+      });
+  }, [orders, activeTab, searchTerm, statusFilter]);
+
   const handleSelectOrder = (id) => {
       const newSet = new Set(selectedOrderIds);
       if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
@@ -174,52 +217,52 @@ const AdminPanel = () => {
 
   const handleSelectAll = (e) => {
       if (e.target.checked) {
-          // 只選取當前過濾後的訂單
-          const filtered = orders.filter(order => {
-             const matchesSearch = (order.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (order.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase());
-             const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-             return matchesSearch && matchesStatus;
-          });
-          setSelectedOrderIds(new Set(filtered.map(o => o.id)));
+          setSelectedOrderIds(new Set(filteredOrders.map(o => o.id)));
       } else {
           setSelectedOrderIds(new Set());
       }
   };
 
-  const handleBulkCancel = async () => {
-      if (!window.confirm(`⚠️ 確定要批量取消選中的 ${selectedOrderIds.size} 張訂單嗎？`)) return;
+  const handleBulkAction = async (action) => {
+      if (selectedOrderIds.size === 0) return;
+      if (!window.confirm(`⚠️ 確認對選中的 ${selectedOrderIds.size} 張訂單執行 ${action === 'cancel' ? '批量取消' : action}?`)) return;
+      
       try {
           const batch = writeBatch(db);
           selectedOrderIds.forEach(id => {
               const ref = doc(db, "orders", id);
-              batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email });
+              if (action === 'cancel') {
+                  batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email });
+              }
           });
           await batch.commit();
-          alert("✅ 批量取消成功");
+          alert("✅ 批量操作完成");
           setSelectedOrderIds(new Set());
-      } catch (e) { console.error(e); alert("❌ 批量操作失敗"); }
+      } catch (e) { console.error(e); alert("❌ 操作失敗"); }
   };
 
-  // --- 📅 Special Rules Logic ---
+  // --- 📅 Logic: Special Rules ---
   const handleAddRule = async () => {
-      if (!newRule.date) return alert("請選擇日期");
+      if (!newRule.date) return alert("❌ 請選擇日期");
+      
       let hours = [];
       const inputStr = newRule.hoursStr.trim();
 
       if (!inputStr || inputStr.toLowerCase() === 'all') {
           hours = Array.from({length: 24}, (_, i) => i);
       } else {
-          if (inputStr.includes('-')) { // 0-23 support
+          // Support "0-23" or "18,19,20"
+          if (inputStr.includes('-')) {
               const [start, end] = inputStr.split('-').map(n => parseInt(n));
               if (!isNaN(start) && !isNaN(end) && start <= end) {
                   for (let i = start; i <= end; i++) if (i >= 0 && i <= 23) hours.push(i);
               }
-          } else { // comma support
+          } else {
               hours = inputStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23);
           }
       }
 
-      if (hours.length === 0) return alert("❌ 時段格式錯誤");
+      if (hours.length === 0) return alert("❌ 時段格式錯誤 (e.g., 0-23 or 18,19)");
 
       try {
           await addDoc(collection(db, "special_rules"), {
@@ -234,10 +277,10 @@ const AdminPanel = () => {
   };
 
   const handleDeleteRule = async (id) => {
-      if(window.confirm("刪除此規則？")) await deleteDoc(doc(db, "special_rules", id));
+      if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id));
   };
 
-  // --- 🎬 Review Logic ---
+  // --- 🎬 Logic: Review ---
   const handleReview = async (orderId, action) => {
     const targetOrder = orders.find(o => o.id === orderId);
     if (!targetOrder || !window.confirm(`確定要 ${action === 'approve' ? '通過' : '拒絕'}?`)) return;
@@ -252,11 +295,11 @@ const AdminPanel = () => {
             sendBidConfirmation({ email: targetOrder.userEmail, displayName: targetOrder.userName || 'Client' }, targetOrder, 'video_approved');
         }
         alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕");
-        setReviewNote(""); // Reset note
+        setReviewNote("");
     } catch (e) { alert("操作失敗"); }
   };
 
-  // --- 📺 Screen Management Logic ---
+  // --- 📺 Logic: Screen Management ---
   const handleScreenChange = (fid, field, val) => {
       setEditingScreens(prev => ({ ...prev, [fid]: { ...prev[fid], [field]: val } }));
   };
@@ -273,60 +316,48 @@ const AdminPanel = () => {
               delete finalData.lockedHoursStr;
           }
           await updateDoc(doc(db, "screens", screen.firestoreId), finalData);
-          alert("✅ 屏幕已更新");
+          alert("✅ 屏幕設定已更新");
           setEditingScreens(prev => { const n={...prev}; delete n[screen.firestoreId]; return n; });
       } catch (e) { alert("❌ 更新失敗"); }
   };
 
   const toggleScreenActive = async (screen) => {
-      if(!window.confirm(`確定要 ${!screen.isActive ? '解鎖' : '鎖定'} ${screen.name} 嗎？`)) return;
+      if(!window.confirm(`確定要 ${!screen.isActive ? '解鎖 (Unlock)' : '鎖定 (Lock)'} 整部 ${screen.name} 嗎？`)) return;
       try { await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: !screen.isActive }); } catch(e) { alert("❌ 操作失敗"); }
   };
 
-  // --- ⚙️ Config Logic ---
-  const savePricingConfig = async () => {
-      try { await setDoc(doc(db, "system_config", "pricing_rules"), pricingConfig); alert("✅ 設定已更新"); } 
-      catch (e) { alert("❌ 更新失敗"); }
-  };
-
-  // --- Render Helpers ---
-  const filteredOrders = orders.filter(order => {
-      if (activeTab === 'review') return order.status === 'won' && order.hasVideo && !order.isApproved && !order.isRejected;
-      const matchesSearch = (order.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (order.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-      return matchesSearch && matchesStatus;
-  });
+  // ---------------- Render ----------------
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH Ultimate</h1>
+            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH V5.0 Ultimate</h1>
             <div className="flex gap-2">
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">返回首頁</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
             </div>
         </div>
 
-        {/* Tabs */}
+        {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2">
             {[
-                { id: 'dashboard', label: '儀表板', icon: <LayoutDashboard size={16}/> },
-                { id: 'orders', label: '訂單管理', icon: <List size={16}/> },
-                { id: 'review', label: `影片審核 (${stats.pendingReview})`, icon: <Video size={16}/>, alert: stats.pendingReview > 0 },
-                { id: 'rules', label: '特別規則', icon: <Calendar size={16}/> },
-                { id: 'screens', label: '屏幕管理', icon: <Monitor size={16}/> },
-                { id: 'analytics', label: '市場數據', icon: <TrendingUp size={16}/> },
-                { id: 'config', label: '價格公式', icon: <Settings size={16}/> },
-            ].map(tab => (
-                <button key={tab.id} onClick={() => {setActiveTab(tab.id); setSelectedOrderIds(new Set());}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
-                    {tab.icon} {tab.label} {tab.alert && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
+                {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:'儀表板'},
+                {id:'orders',icon:<List size={16}/>,label:'訂單管理'},
+                {id:'review',icon:<Video size={16}/>,label:`審核 (${stats.pendingReview})`, alert:stats.pendingReview>0},
+                {id:'rules',icon:<Calendar size={16}/>,label:'特別規則'},
+                {id:'screens',icon:<Monitor size={16}/>,label:'屏幕管理'},
+                {id:'analytics',icon:<TrendingUp size={16}/>,label:'市場數據'},
+                {id:'config',icon:<Settings size={16}/>,label:'價格公式 (進階)'},
+            ].map(t => (
+                <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
+                    {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                 </button>
             ))}
         </div>
 
-        {/* === Tab Content === */}
+        {/* === CONTENT === */}
 
         {/* 1. Dashboard */}
         {activeTab === 'dashboard' && (
@@ -344,7 +375,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 2. Orders Management (With Bulk Actions) */}
+        {/* 2. Orders Management (Restored Bulk Actions & VIP) */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
@@ -353,7 +384,8 @@ const AdminPanel = () => {
                         <input type="text" placeholder="搜尋 ID / Email..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="pl-2 border rounded px-2 py-1 text-sm outline-none w-64"/>
                         <select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm"><option value="all">所有狀態</option><option value="paid_pending_selection">競價中</option><option value="won">成功 (Won)</option><option value="paid">已完成 (Paid)</option><option value="cancelled">已取消</option></select>
                     </div>
-                    {selectedOrderIds.size > 0 && <button onClick={handleBulkCancel} className="text-red-600 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 flex items-center gap-1"><Trash2 size={14}/> 批量取消 ({selectedOrderIds.size})</button>}
+                    {/* 🔥 Bulk Action Bar */}
+                    {selectedOrderIds.size > 0 && <button onClick={() => handleBulkAction('cancel')} className="text-red-600 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 flex items-center gap-1 animate-pulse"><Trash2 size={14}/> 批量取消 ({selectedOrderIds.size})</button>}
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
@@ -378,6 +410,7 @@ const AdminPanel = () => {
                                             <div className="font-mono text-xs font-bold text-slate-700">{order.id.slice(0,8)}...</div>
                                             <div className="text-xs text-slate-500 flex items-center gap-2">
                                                 {order.userEmail}
+                                                {/* 🔥 VIP Tag */}
                                                 {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP ({customerHistory[order.userEmail]})</span>}
                                             </div>
                                         </td>
@@ -395,7 +428,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 3. Review (Detailed) */}
+        {/* 3. Review (Restored Detailed View) */}
         {activeTab === 'review' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in">
                 {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
@@ -409,7 +442,8 @@ const AdminPanel = () => {
                             <div><p className="text-xs text-slate-400">客戶</p><p className="font-bold text-sm">{order.userEmail}</p></div>
                             <div>
                                 <p className="text-xs text-slate-400">影片素材</p>
-                                <a href={order.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 text-sm font-bold underline truncate block">{order.videoName || 'Video Link'}</a>
+                                {/* 🔥 Video Link */}
+                                <a href={order.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 text-sm font-bold underline truncate block">{order.videoName || 'Download Video'}</a>
                             </div>
                             <div className="pt-2 border-t flex flex-col gap-2">
                                 <button onClick={() => handleReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2 rounded font-bold text-xs hover:bg-green-700 shadow-sm">✅ 通過並發送 Email</button>
@@ -528,20 +562,50 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 7. Config */}
+        {/* 7. Config (Updated: Global vs Screen) */}
         {activeTab === 'config' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto animate-in fade-in">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3>
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <ConfigInput label="Bundle (聯播) 溢價" value={pricingConfig.bundleMultiplier} onChange={v => setPricingConfig({...pricingConfig, bundleMultiplier: parseFloat(v)})} />
-                        <ConfigInput label="Prime Hour 倍率" value={pricingConfig.primeMultiplier} onChange={v => setPricingConfig({...pricingConfig, primeMultiplier: parseFloat(v)})} />
-                        <ConfigInput label="Gold Hour 倍率" value={pricingConfig.goldMultiplier} onChange={v => setPricingConfig({...pricingConfig, goldMultiplier: parseFloat(v)})} />
-                        <ConfigInput label="週末 (五六) 倍率" value={pricingConfig.weekendMultiplier} onChange={v => setPricingConfig({...pricingConfig, weekendMultiplier: parseFloat(v)})} />
-                        <ConfigInput label="急單 (24h) 附加費" value={pricingConfig.urgentFee24h} onChange={v => setPricingConfig({...pricingConfig, urgentFee24h: parseFloat(v)})} />
-                        <ConfigInput label="極速 (1h) 附加費" value={pricingConfig.urgentFee1h} onChange={v => setPricingConfig({...pricingConfig, urgentFee1h: parseFloat(v)})} />
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <div>
+                        <h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3>
+                        <p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p>
                     </div>
-                    <button onClick={savePricingConfig} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800"><Save size={18} className="inline mr-2"/> 儲存設定</button>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-600">編輯對象:</span>
+                        <select 
+                            value={selectedConfigTarget} 
+                            onChange={e => setSelectedConfigTarget(e.target.value)} 
+                            className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"
+                        >
+                            <option value="global">🌍 Global System Default (全局)</option>
+                            <option disabled>──────────</option>
+                            {screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <ConfigSection title="時段倍率 (Time Multipliers)">
+                        <ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/>
+                        <ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/>
+                        <ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/>
+                    </ConfigSection>
+                    
+                    <ConfigSection title="附加費率 (Surcharges)">
+                        <ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/>
+                        <ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/>
+                        <ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/>
+                    </ConfigSection>
+                </div>
+
+                <div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <div className="text-xs text-slate-500 flex items-center gap-2">
+                        <AlertTriangle size={14}/> 
+                        {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}
+                    </div>
+                    <button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2">
+                        <Save size={18}/> 儲存設定
+                    </button>
                 </div>
             </div>
         )}
@@ -552,7 +616,8 @@ const AdminPanel = () => {
 };
 
 // --- Sub-Components ---
-const ConfigInput = ({ label, value, onChange }) => (<div className="bg-slate-50 p-3 rounded border border-slate-200"><label className="text-xs font-bold text-slate-500 block mb-1">{label}</label><input type="number" step="0.1" value={value || 0} onChange={e => onChange(e.target.value)} className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"/></div>);
+const ConfigSection = ({title, children}) => (<div className="space-y-3"><h4 className="text-sm font-bold text-slate-700 border-b pb-1">{title}</h4><div className="space-y-2">{children}</div></div>);
+const ConfigInput = ({ label, val, onChange, desc }) => (<div className="flex justify-between items-center"><div className="text-xs font-bold text-slate-500">{label} <span className="text-[10px] font-normal text-slate-400 block">{desc}</span></div><input type="number" step="0.1" value={val||0} onChange={e=>onChange(e.target.value)} className="w-16 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:border-blue-500"/></div>);
 const StatCard = ({ title, value, icon, bg, border }) => (<div className={`p-4 rounded-xl border ${bg} ${border} flex items-center justify-between shadow-sm`}><div><p className="text-xs font-bold text-slate-500 mb-1 uppercase">{title}</p><p className="text-xl font-bold text-slate-800">{value}</p></div><div className="bg-white p-2 rounded-full shadow-sm">{icon}</div></div>);
 const StatusBadge = ({ status }) => { 
     const map = { 
