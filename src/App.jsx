@@ -163,9 +163,9 @@ const DOOHBiddingSystem = () => {
     return () => unsubscribeAuth();
   }, []);
 
-  // 🔥 修改 1: Occupied Slots 加入 'paid_pending_selection' (競價中)
+  // 🔥 這裡的邏輯確保了一入去就能見到被 Book 的 Slot
+  // 因為它在 Component Mount 時 (依賴 []) 就會運行，並監聽資料庫變化
   useEffect(() => {
-      // 加入 "paid_pending_selection"
       const q = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "paid_pending_selection"]));
       const unsubscribe = onSnapshot(q, (snapshot) => {
           const sold = new Set();
@@ -198,19 +198,12 @@ const DOOHBiddingSystem = () => {
       return groups;
   }, [screens]);
 
-  // 🔥 修改 2: 增強 Bundle ID 匹配邏輯 (String vs Number)
   const isBundleMode = useMemo(() => {
     if (selectedScreens.size < 2) return false;
-    
-    // 將已選的 ID 全部轉為字串，方便比對
     const selectedIdsStr = new Set(Array.from(selectedScreens).map(id => String(id)));
-
     for (const [groupName, groupScreens] of Object.entries(availableBundles)) {
         const groupTotal = groupScreens.length;
-        // 將 group 裡的 screen.id 也轉為字串再比對
         const groupSelected = groupScreens.filter(s => selectedIdsStr.has(String(s.id))).length;
-        
-        // 必須全選該 Group 內所有屏幕才算 Bundle
         if (groupTotal > 1 && groupSelected === groupTotal) return true;
     }
     return false;
@@ -586,21 +579,6 @@ const DOOHBiddingSystem = () => {
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段僅限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
-  const testEmail = async () => {
-    if (!user) { alert("請先登入"); return; }
-    console.log("🚀 測試 Email 發送中...");
-    const testOrder = { 
-        id: "TEST-" + Math.floor(Math.random() * 1000), 
-        amount: 888, 
-        type: "bidding", 
-        timeSlotSummary: "測試時段" 
-    };
-    
-    const success = await sendBidConfirmation(user, testOrder);
-    if (success) alert("✅ Email 發送成功！請檢查郵箱。");
-    else alert("❌ Email 發送失敗，請查看 Console。");
-  };
-
   const renderCalendar = () => { 
     const year = currentDate.getFullYear(); 
     const month = currentDate.getMonth(); 
@@ -633,8 +611,15 @@ const DOOHBiddingSystem = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
+      {/* 🔥 改動：Logo 及 標語 */}
       <header className="bg-white border-b sticky top-8 z-30 px-4 py-3 shadow-sm flex items-center justify-between">
-        <div className="flex items-center gap-2"><div className="bg-blue-600 text-white p-1.5 rounded-lg"><Monitor size={20} /></div><h1 className="font-bold text-lg text-slate-800">DOOH Adv <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded ml-1">Pro</span></h1></div>
+        <div className="flex items-center gap-2">
+            <div className="bg-blue-600 text-white p-1.5 rounded-lg"><Monitor size={20} /></div>
+            <div className="flex flex-col">
+                <h1 className="font-bold text-xl text-slate-800 tracking-tight leading-none">DOOHadv</h1>
+                <span className="text-[10px] text-slate-500 font-bold">自己廣告自己投 Bid your own adv here!</span>
+            </div>
+        </div>
         
         <div className="flex items-center gap-4">
             {modalPaymentStatus === 'paid' && (
@@ -643,9 +628,8 @@ const DOOHBiddingSystem = () => {
                 </button>
             )}
 
-            <button onClick={testEmail} className="bg-red-50 text-red-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-red-100 border border-red-200">
-                📧 測試 Email
-            </button>
+            {/* 🔥 改動：已移除測試 Email 按鈕 */}
+
             {user ? (<button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-2 hover:bg-slate-50 p-1 rounded-lg transition-colors"><img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-slate-200" /></button>) : (<button onClick={() => setIsLoginModalOpen(true)} className="flex items-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors"><LogIn size={16} /> 登入</button>)}
         </div>
       </header>
@@ -717,7 +701,7 @@ const DOOHBiddingSystem = () => {
               <h2 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2"><Clock size={16}/> 3. 選擇時段</h2>
               <div className="flex gap-3 text-[10px] mb-3"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> Prime</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400"></span> Gold</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300"></span> Normal</span></div>
               <div className="grid grid-cols-4 gap-1.5 overflow-y-auto max-h-[300px]">
-                  {/* 🔥 修改 3: 顯示變灰的佔用時段 */}
+                  {/* 🔥 確保這裡會即時顯示 "已售" 狀態 */}
                   {HOURS.map(h => {
                       const dateStr = formatDateKey(previewDate.getFullYear(), previewDate.getMonth(), previewDate.getDate());
                       
