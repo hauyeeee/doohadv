@@ -454,6 +454,9 @@ const DOOHBiddingSystem = () => {
                     buyoutPrice: finalBuyout,
                     marketAverage: historicalAvg, 
                     isPrime: basePricing.isPrime,
+// 🔥【必需加入這一行】接收 Engine 傳來的「禁止買斷」信號
+    isBuyoutDisabled: basePricing.isBuyoutDisabled,
+
                     canBid: basePricing.canBid && !isLocked, // Lock check
                     hoursUntil,
                     isUrgent, 
@@ -491,7 +494,8 @@ const DOOHBiddingSystem = () => {
         buyoutTotal += slot.buyoutPrice; 
         minBidTotal += slot.minBid; 
 
-        if (slot.isPrime) hasRestrictedBuyout = true; 
+       // ✅ 新代碼：檢查 Engine 傳回來的 isBuyoutDisabled (包含 Prime 和 特別規則)
+        if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) hasRestrictedBid = true; 
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
         if (slot.isUrgent) urgentCount++; 
