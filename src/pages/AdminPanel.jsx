@@ -45,7 +45,9 @@ const AdminPanel = () => {
   const [reviewNote, setReviewNote] = useState("");
   
   // --- Advanced Filter States ---
-  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics Multi-select
+  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics Multi-select (Screens)
+  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); // Analytics Multi-select (Hours) 🔥 NEW
+  
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       // Bulk Action Multi-select
   const [editingScreens, setEditingScreens] = useState({});                  // Inline Screen Editing
 
@@ -135,7 +137,7 @@ const AdminPanel = () => {
     };
   }, [orders]);
 
-  // --- 📈 Logic: Real-time Market Stats (Multi-Screen) ---
+  // --- 📈 Logic: Real-time Market Stats (Multi-Screen + Multi-Hour Filter) ---
   const realMarketStats = useMemo(() => {
       const statsMap = {}; 
       // Init Grid 7x24
@@ -144,13 +146,17 @@ const AdminPanel = () => {
               statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
           }
       }
+      
       // Populate Data
       orders.forEach(order => {
           if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
                   // If selectedStatScreens is empty, it means "All"
-                  const isSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
-                  if (isSelected) {
+                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
+                  // If selectedAnalyticsHours is empty, it means "All"
+                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
+
+                  if (isScreenSelected && isHourSelected) {
                       const dateObj = new Date(slot.date); 
                       const key = `${dateObj.getDay()}-${slot.hour}`;
                       if (statsMap[key]) {
@@ -161,11 +167,42 @@ const AdminPanel = () => {
               });
           }
       });
-      return Object.values(statsMap).map(item => ({
-          ...item,
-          averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0
-      }));
-  }, [orders, selectedStatScreens]);
+
+      // 🔥 Calculate Summary for the Selection
+      let selectionTotalAmount = 0;
+      let selectionTotalBids = 0;
+      
+      const rows = Object.values(statsMap).map(item => {
+          // 只計算有出價的時段進入總平均 (避免被 0 拉低)
+          if (item.totalBids > 0) {
+              // 注意：這裡 statsMap 已經經過上面的篩選填入數據，所以這裡累加就是準確的
+              // 但為了更嚴謹，我們只累加符合「顯示條件」的行
+              const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour);
+              if (isHourVisible) {
+                  selectionTotalAmount += item.totalAmount;
+                  selectionTotalBids += item.totalBids;
+              }
+          }
+          
+          return {
+              ...item,
+              averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0
+          };
+      });
+
+      // Filter rows for display based on hour selection
+      const displayRows = selectedAnalyticsHours.size > 0 
+          ? rows.filter(r => selectedAnalyticsHours.has(r.hour))
+          : rows;
+
+      return {
+          rows: displayRows,
+          summary: {
+              avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0,
+              totalBids: selectionTotalBids
+          }
+      };
+  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   // --- ⚙️ Logic: Pricing Configuration (Global vs Screen) ---
   useEffect(() => {
@@ -324,6 +361,12 @@ const AdminPanel = () => {
   const toggleScreenActive = async (screen) => {
       if(!window.confirm(`確定要 ${!screen.isActive ? '解鎖 (Unlock)' : '鎖定 (Lock)'} 整部 ${screen.name} 嗎？`)) return;
       try { await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: !screen.isActive }); } catch(e) { alert("❌ 操作失敗"); }
+  };
+
+  const toggleAnalyticsHour = (h) => {
+      const n = new Set(selectedAnalyticsHours);
+      if (n.has(h)) n.delete(h); else n.add(h);
+      setSelectedAnalyticsHours(n);
   };
 
   // ---------------- Render ----------------
@@ -529,35 +572,53 @@ const AdminPanel = () => {
              </div>
         )}
 
-        {/* 6. Analytics (Real-time & Multi-select) */}
+        {/* 6. Analytics (Real-time & Multi-select & Time Filter) */}
         {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
-                <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
-                    <div><h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 真實成交數據</h3><p className="text-xs text-slate-500">已選: {selectedStatScreens.size === 0 ? "全部 (All)" : `${selectedStatScreens.size} 部`}</p></div>
-                    <div className="flex flex-wrap gap-2">
-                        <button onClick={() => setSelectedStatScreens(new Set())} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.size === 0 ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>全部</button>
-                        {screens.map(s => (
-                            <button key={s.id} onClick={() => {const n=new Set(selectedStatScreens); n.has(String(s.id))?n.delete(String(s.id)):n.add(String(s.id)); setSelectedStatScreens(n);}} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.has(String(s.id)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600'}`}>
-                                {s.name}
+                {/* 1. Summary Card (Interactive) */}
+                <div className="mb-6 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white flex justify-between items-center shadow-lg">
+                    <div>
+                        <h3 className="font-bold text-lg mb-1">所選組合平均成交價 (Average Price)</h3>
+                        <p className="text-blue-100 text-sm flex items-center gap-2">
+                            <Monitor size={14}/> 範圍: {selectedStatScreens.size===0?'全部屏幕':selectedStatScreens.size+' 個屏幕'} 
+                            <span className="opacity-50">|</span> 
+                            <Clock size={14}/> 時段: {selectedAnalyticsHours.size===0?'全部時段':Array.from(selectedAnalyticsHours).sort((a,b)=>a-b).join(', ')+' 點'}
+                        </p>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-3xl font-bold">HK$ {realMarketStats.summary.avgPrice.toLocaleString()}</div>
+                        <div className="text-xs text-blue-200">基於 {realMarketStats.summary.totalBids} 次出價</div>
+                    </div>
+                </div>
+
+                {/* 2. Filters */}
+                <div className="flex flex-col gap-4 mb-4">
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <span className="text-xs font-bold text-slate-500 uppercase w-16">Screens:</span>
+                        <button onClick={() => setSelectedStatScreens(new Set())} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.size===0?'bg-slate-800 text-white':'bg-white text-slate-600'}`}>All</button>
+                        {screens.map(s => <button key={s.id} onClick={() => {const n=new Set(selectedStatScreens); n.has(String(s.id))?n.delete(String(s.id)):n.add(String(s.id)); setSelectedStatScreens(n);}} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.has(String(s.id))?'bg-blue-600 text-white border-blue-600':'bg-white text-slate-600'}`}>{s.name}</button>)}
+                    </div>
+                    <div className="flex flex-wrap gap-1 items-center">
+                        <span className="text-xs font-bold text-slate-500 uppercase w-16">Hours:</span>
+                        <button onClick={() => setSelectedAnalyticsHours(new Set())} className={`w-8 h-8 rounded text-xs font-bold border ${selectedAnalyticsHours.size===0?'bg-slate-800 text-white':'bg-white text-slate-600'}`}>All</button>
+                        {Array.from({length:24},(_,i)=>i).map(h => (
+                            <button key={h} onClick={() => toggleAnalyticsHour(h)} className={`w-8 h-8 rounded text-xs border font-bold transition-all ${selectedAnalyticsHours.has(h)?'bg-orange-500 text-white border-orange-500':'bg-white text-slate-600 hover:bg-slate-100'}`}>
+                                {h}
                             </button>
                         ))}
                     </div>
                 </div>
-                <div className="overflow-x-auto h-[500px]">
-                    <table className="w-full text-sm">
-                        <thead className="bg-slate-50 sticky top-0 z-10"><tr><th className="p-3 text-left">星期</th><th className="p-3 text-left">時段</th><th className="p-3 text-right">平均成交價</th><th className="p-3 text-right">出價次數</th><th className="p-3 text-left pl-6">建議</th></tr></thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {realMarketStats.sort((a,b)=>(a.dayOfWeek-b.dayOfWeek)||(a.hour-b.hour)).map((m,i)=>(
-                                <tr key={i} className="hover:bg-slate-50">
-                                    <td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td>
-                                    <td className="p-3">{String(m.hour).padStart(2,'0')}:00</td>
-                                    <td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td>
-                                    <td className="p-3 text-right"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids>0?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-400'}`}>{m.totalBids}</span></td>
-                                    <td className="p-3 pl-6">{m.totalBids>3?<span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 加價</span>:m.totalBids===0?<span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 減價</span>:<span className="text-slate-300">-</span>}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+
+                {/* 3. Table */}
+                <div className="overflow-x-auto h-[400px] border rounded-lg">
+                    <table className="w-full text-sm"><thead className="bg-slate-50 sticky top-0 z-10 text-slate-600 font-bold"><tr><th className="p-3">Day</th><th className="p-3">Hour</th><th className="p-3 text-right">Avg Price</th><th className="p-3 text-right">Bids</th><th className="p-3 text-left pl-6">Advice</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {realMarketStats.rows.sort((a,b)=>(a.dayOfWeek-b.dayOfWeek)||(a.hour-b.hour)).map((m,i)=>(
+                            <tr key={i} className="hover:bg-slate-50">
+                                <td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td><td className="p-3">{String(m.hour).padStart(2,'0')}:00</td><td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td><td className="p-3 text-right"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids>0?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-400'}`}>{m.totalBids}</span></td><td className="p-3 pl-6">{m.totalBids>3?<span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 加價</span>:m.totalBids===0?<span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 減價</span>:<span className="text-slate-300">-</span>}</td>
+                            </tr>
+                        ))}
+                    </tbody></table>
                 </div>
             </div>
         )}

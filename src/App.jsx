@@ -36,6 +36,10 @@ const DOOHBiddingSystem = () => {
   const [screens, setScreens] = useState([]);
   const [isScreensLoading, setIsScreensLoading] = useState(true);
 
+  // 🔥 NEW: Pricing Config & Special Rules States (Fixes the crash)
+  const [pricingConfig, setPricingConfig] = useState({}); 
+  const [specialRules, setSpecialRules] = useState([]);
+
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [previewDate, setPreviewDate] = useState(new Date()); 
 
@@ -119,6 +123,8 @@ const DOOHBiddingSystem = () => {
   // --- Effects ---
   useEffect(() => {
     initEmailService(); 
+    
+    // 1. Fetch Screens
     const fetchScreens = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "screens"));
@@ -127,7 +133,24 @@ const DOOHBiddingSystem = () => {
         setScreens(screensData.filter(s => s.isActive !== false));
       } catch (error) { console.error("Error fetching screens:", error); showToast("❌ 無法載入屏幕資料"); } finally { setIsScreensLoading(false); }
     };
+
+    // 2. 🔥 Fetch Pricing Config & Rules (Critical for Pricing Engine)
+    const fetchConfig = () => {
+        // Listen to Special Rules
+        onSnapshot(collection(db, "special_rules"), (snap) => {
+            setSpecialRules(snap.docs.map(d => d.data()));
+        });
+        
+        // Listen to Global Pricing Config
+        onSnapshot(doc(db, "system_config", "pricing_rules"), (docSnap) => {
+            if (docSnap.exists()) {
+                setPricingConfig(docSnap.data());
+            }
+        });
+    };
+
     fetchScreens();
+    fetchConfig();
   }, []);
 
   useEffect(() => {
@@ -163,8 +186,7 @@ const DOOHBiddingSystem = () => {
     return () => unsubscribeAuth();
   }, []);
 
-  // 🔥 這裡的邏輯確保了一入去就能見到被 Book 的 Slot
-  // 因為它在 Component Mount 時 (依賴 []) 就會運行，並監聽資料庫變化
+  // 🔥 Occupied Slots Logic
   useEffect(() => {
       const q = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "paid_pending_selection"]));
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -395,19 +417,30 @@ const DOOHBiddingSystem = () => {
                 
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
-                const basePricing = calculateDynamicPrice(new Date(d), h, isBundleMode, screen, pricingConfig, specialRules);
+                
+                // 🔥 CRITICAL FIX: Pass pricingConfig and specialRules here!
+                const basePricing = calculateDynamicPrice(
+                    new Date(d), 
+                    h, 
+                    isBundleMode, 
+                    screen, 
+                    pricingConfig, // <--- Passed Config
+                    specialRules   // <--- Passed Rules
+                );
                 
                 const slotTime = new Date(d);
                 slotTime.setHours(h, 0, 0, 0);
                 const now = new Date();
                 const hoursUntil = (slotTime - now) / (1000 * 60 * 60);
                 
+                // Use the calculated pricing values
+                const finalMinBid = basePricing.minBid;
+                const finalBuyout = basePricing.buyoutPrice;
+                const isLocked = basePricing.isLocked || isSoldOut;
+
                 const isUrgent = hoursUntil > 0 && hoursUntil <= 24; 
-                const surchargeRate = isUrgent ? 1.2 : 1.0; 
                 const statsKey = `${screenId}_${dayOfWeek}_${h}`;
-                const historicalAvg = marketStats[statsKey] || Math.ceil(basePricing.minBid * 1.5); 
-                const finalMinBid = Math.ceil(basePricing.minBid * surchargeRate);
-                const finalBuyout = Math.ceil(basePricing.buyoutPrice * surchargeRate);
+                const historicalAvg = marketStats[statsKey] || Math.ceil(finalMinBid * 1.5); 
 
                 let compBid = existingBids[key] || 0;
                 
@@ -418,11 +451,12 @@ const DOOHBiddingSystem = () => {
                     buyoutPrice: finalBuyout,
                     marketAverage: historicalAvg, 
                     isPrime: basePricing.isPrime,
-                    canBid: !isUrgent, 
+                    canBid: basePricing.canBid && !isLocked, // Lock check
                     hoursUntil,
                     isUrgent, 
                     competitorBid: compBid,
-                    isSoldOut 
+                    isSoldOut: isLocked, // Reflect lock status
+                    warning: basePricing.warning
                 });
             });
         });
@@ -433,7 +467,7 @@ const DOOHBiddingSystem = () => {
         if (a.hour !== b.hour) return a.hour - b.hour; 
         return a.screenId - b.screenId; 
     });
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, isBundleMode, screens, occupiedSlots, marketStats]);
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, isBundleMode, screens, occupiedSlots, marketStats, pricingConfig, specialRules]);
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -577,7 +611,7 @@ const DOOHBiddingSystem = () => {
   };
 
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段僅限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
+  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
   const renderCalendar = () => { 
     const year = currentDate.getFullYear(); 
@@ -775,7 +809,7 @@ const DOOHBiddingSystem = () => {
       <MyOrdersModal isOpen={isProfileModalOpen} user={user} myOrders={myOrders} onClose={() => setIsProfileModalOpen(false)} onLogout={handleLogout} onUploadClick={(id) => { setCurrentOrderId(id); setIsUrgentUploadModalOpen(true); setIsProfileModalOpen(false); }} />
       {isBuyoutModalOpen && <BuyoutModal isOpen={isBuyoutModalOpen} onClose={() => setIsBuyoutModalOpen(false)} pricing={pricing} selectedSpecificDates={selectedSpecificDates} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('buyout')} hasUrgentRisk={pricing.hasUrgentRisk} />}
       {isBidModalOpen && <BiddingModal isOpen={isBidModalOpen} onClose={() => setIsBidModalOpen(false)} generateAllSlots={generateAllSlots} slotBids={slotBids} handleSlotBidChange={handleSlotBidChange} batchBidInput={batchBidInput} setBatchBidInput={setBatchBidInput} handleBatchBid={handleBatchBid} isBundleMode={isBundleMode} pricing={pricing} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('bid')} />}
-      {isUrgentUploadModalOpen && <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} />}
+      {isUrgentUploadModalOpen && <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); setTransactionStep('idle'); }} />}
       
       {transactionStep !== 'idle' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
