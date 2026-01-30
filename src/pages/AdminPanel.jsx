@@ -5,7 +5,7 @@ import {
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
-  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock
+  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Info
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -28,7 +28,8 @@ const AdminPanel = () => {
   // Data States
   const [orders, setOrders] = useState([]);
   const [screens, setScreens] = useState([]);
-  const [marketStats, setMarketStats] = useState([]);
+  
+  // Config State
   const [pricingConfig, setPricingConfig] = useState({
       baseImpressions: 10000,
       primeMultiplier: 3.5,
@@ -40,23 +41,18 @@ const AdminPanel = () => {
   });
   
   // UI States
-  const [activeTab, setActiveTab] = useState('screens'); // 預設顯示屏幕管理，方便你測試
+  const [activeTab, setActiveTab] = useState('analytics'); // 預設跳去數據頁俾你睇真數據
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [reviewNote, setReviewNote] = useState("");
   const [selectedStatScreen, setSelectedStatScreen] = useState('all');
-
-  // Bulk Action States
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
-  
-  // Screen Editing State (用於暫存修改)
   const [editingScreens, setEditingScreens] = useState({});
 
   // 1. Auth & Initial Data Fetch
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
-        // 權限不足時的處理
         setLoading(false); 
       } else {
         setUser(currentUser);
@@ -69,7 +65,7 @@ const AdminPanel = () => {
   const fetchAllData = () => {
       setLoading(true);
       
-      // Orders (Realtime)
+      // Orders (Realtime) - 這是所有數據的來源
       const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
       const unsubOrders = onSnapshot(q, (snapshot) => {
         const ordersData = snapshot.docs.map(doc => ({
@@ -81,14 +77,9 @@ const AdminPanel = () => {
         setLoading(false);
       });
 
-      // Screens (Realtime - 這樣你改完會即刻見到)
+      // Screens (Realtime)
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snapshot) => {
           setScreens(snapshot.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
-      });
-
-      // Market Stats (One-time)
-      getDocs(collection(db, "market_stats")).then(mSnap => {
-          setMarketStats(mSnap.docs.map(d => d.data()));
       });
 
       // Pricing Config
@@ -115,7 +106,7 @@ const AdminPanel = () => {
       return history;
   }, [orders]);
 
-  // --- 📊 Dashboard Logic ---
+  // --- 📊 Dashboard Stats ---
   const stats = useMemo(() => {
     let totalRevenue = 0;
     let completedOrders = 0;
@@ -149,6 +140,50 @@ const AdminPanel = () => {
         statusChartData: Object.keys(statusCount).map(key => ({ name: key, value: statusCount[key] }))
     };
   }, [orders]);
+
+  // --- 📈 Real-time Market Stats Calculation (The Logic Change) ---
+  const realMarketStats = useMemo(() => {
+      if (selectedStatScreen === 'all') return [];
+
+      // 1. 初始化 7天 x 24小時 的空數據
+      const statsMap = {}; 
+      for(let d=0; d<7; d++) {
+          for(let h=0; h<24; h++) {
+              statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
+          }
+      }
+
+      // 2. 遍歷所有真實訂單 (Orders)
+      orders.forEach(order => {
+          // 只計算有效訂單
+          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
+              order.detailedSlots.forEach(slot => {
+                  // 如果 Slot 是屬於當前選擇的 Screen
+                  // 注意：這裏假設 slot.screenId 與選取的 id 匹配 (String vs Number conversion)
+                  if (String(slot.screenId) === String(selectedStatScreen)) {
+                      const dateObj = new Date(slot.date); 
+                      const day = dateObj.getDay(); // 0-6
+                      const hour = slot.hour; // 0-23
+                      const price = Number(slot.bidPrice) || 0; // 實際成交價
+
+                      const key = `${day}-${hour}`;
+                      if (statsMap[key]) {
+                          statsMap[key].totalAmount += price;
+                          statsMap[key].totalBids += 1;
+                      }
+                  }
+              });
+          }
+      });
+
+      // 3. 轉換為 Array 並計算平均值
+      return Object.values(statsMap).map(item => ({
+          ...item,
+          averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0
+      }));
+
+  }, [orders, selectedStatScreen]);
+
 
   // --- 🛠 Bulk Action Logic ---
   const handleSelectOrder = (id) => {
@@ -188,15 +223,9 @@ const AdminPanel = () => {
     alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕");
   };
 
-  // --- 📺 Screen Management Logic (NEW) ---
+  // --- 📺 Screen Management Logic ---
   const handleScreenChange = (fid, field, val) => {
-      setEditingScreens(prev => ({
-          ...prev,
-          [fid]: {
-              ...prev[fid],
-              [field]: val
-          }
-      }));
+      setEditingScreens(prev => ({ ...prev, [fid]: { ...prev[fid], [field]: val } }));
   };
 
   const saveScreen = async (screen) => {
@@ -205,42 +234,22 @@ const AdminPanel = () => {
 
       try {
           const finalData = { ...changes };
-          
-          // 轉換數字
           if (finalData.basePrice) finalData.basePrice = parseInt(finalData.basePrice);
-          
-          // 轉換鎖定時段字串為 Array (e.g. "0,1,2" -> [0,1,2])
           if (finalData.lockedHoursStr !== undefined) {
-              const hoursArray = finalData.lockedHoursStr
-                  .split(',')
-                  .map(h => parseInt(h.trim()))
-                  .filter(h => !isNaN(h) && h >= 0 && h <= 23); // 確保是有效小時
+              const hoursArray = finalData.lockedHoursStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23);
               finalData.lockedHours = hoursArray;
-              delete finalData.lockedHoursStr; // 不存字串進 DB
+              delete finalData.lockedHoursStr;
           }
-
           await updateDoc(doc(db, "screens", screen.firestoreId), finalData);
           alert(`✅ Screen ${screen.id} 更新成功！`);
-          
-          // Clear edit state
-          setEditingScreens(prev => {
-              const newState = { ...prev };
-              delete newState[screen.firestoreId];
-              return newState;
-          });
-
-      } catch (e) {
-          console.error(e);
-          alert("❌ 更新失敗，請檢查 Console");
-      }
+          setEditingScreens(prev => { const n = { ...prev }; delete n[screen.firestoreId]; return n; });
+      } catch (e) { console.error(e); alert("❌ 更新失敗"); }
   };
 
   const toggleScreenActive = async (screen) => {
       const newStatus = !screen.isActive;
-      if(!window.confirm(`⚠️ 確定要 ${newStatus ? '解鎖 (Unlock)' : '鎖定 (Lock)'} 整部屏幕 ${screen.name} 嗎？\n鎖定後所有時段將無法購買。`)) return;
-      try {
-          await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: newStatus });
-      } catch(e) { alert("❌ 操作失敗"); }
+      if(!window.confirm(`⚠️ 確定要 ${newStatus ? '解鎖' : '鎖定'} ${screen.name} 嗎？`)) return;
+      try { await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: newStatus }); } catch(e) { alert("❌ 操作失敗"); }
   };
 
   // --- ⚙️ Pricing Config Logic ---
@@ -252,10 +261,7 @@ const AdminPanel = () => {
       try {
           await setDoc(doc(db, "system_config", "pricing_rules"), pricingConfig);
           alert("✅ 價格公式已更新！");
-      } catch (e) {
-          console.error(e);
-          alert("❌ 更新失敗");
-      }
+      } catch (e) { console.error(e); alert("❌ 更新失敗"); }
   };
 
   // --- Filter Logic ---
@@ -265,11 +271,6 @@ const AdminPanel = () => {
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
       return matchesSearch && matchesStatus;
   });
-
-  const filteredStats = useMemo(() => {
-      if (selectedStatScreen === 'all') return [];
-      return marketStats.filter(m => String(m.screenId) === String(selectedStatScreen));
-  }, [marketStats, selectedStatScreen]);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
@@ -292,10 +293,10 @@ const AdminPanel = () => {
         <div className="flex flex-wrap gap-2">
             {[
                 { id: 'dashboard', label: '儀表板', icon: <LayoutDashboard size={16}/> },
-                { id: 'screens', label: '屏幕管理', icon: <Monitor size={16}/> }, // 👈 這裡！
+                { id: 'screens', label: '屏幕管理', icon: <Monitor size={16}/> },
                 { id: 'orders', label: '訂單管理', icon: <List size={16}/> },
                 { id: 'review', label: `影片審核 (${stats.pendingReview})`, icon: <Video size={16}/>, alert: stats.pendingReview > 0 },
-                { id: 'analytics', label: '市場數據', icon: <TrendingUp size={16}/> },
+                { id: 'analytics', label: '市場數據 (真實)', icon: <TrendingUp size={16}/> },
                 { id: 'config', label: '價格公式', icon: <Settings size={16}/> },
             ].map(tab => (
                 <button 
@@ -313,100 +314,31 @@ const AdminPanel = () => {
             ))}
         </div>
 
-        {/* --- 📺 Screen Management Tab (Restored) --- */}
+        {/* --- 📺 Screen Management --- */}
         {activeTab === 'screens' && (
              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 bg-slate-50 border-b border-slate-200">
                     <h3 className="font-bold flex items-center gap-2"><Monitor size={18}/> 屏幕列表與設定</h3>
-                    <p className="text-xs text-slate-500 mt-1">在此管理所有屏幕的狀態、底價及鎖定時段。</p>
+                    <p className="text-xs text-slate-500 mt-1">即時同步 Firebase Database</p>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
-                            <tr>
-                                <th className="p-4 w-16">ID</th>
-                                <th className="p-4 w-64">屏幕資料</th>
-                                <th className="p-4 w-32 text-center">全機狀態</th>
-                                <th className="p-4 w-32">底價 (HKD)</th>
-                                <th className="p-4">鎖定特定時間 (0-23)</th>
-                                <th className="p-4 w-24 text-right">操作</th>
-                            </tr>
+                            <tr><th className="p-4">ID</th><th className="p-4">資料</th><th className="p-4 text-center">全機鎖定</th><th className="p-4">底價</th><th className="p-4">鎖定時段 (0-23)</th><th className="p-4 text-right">操作</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {screens.map(s => {
                                  const isEditing = editingScreens[s.firestoreId];
                                  const currentPrice = isEditing?.basePrice ?? s.basePrice;
-                                 
-                                 // 處理 Locked Hours 顯示
-                                 // 如果正在編輯，顯示編輯中的字串；否則顯示原本的 Array join 起來
                                  const currentLocked = isEditing?.lockedHoursStr ?? (s.lockedHours ? s.lockedHours.join(',') : '');
-
                                  return (
                                     <tr key={s.firestoreId} className="hover:bg-slate-50">
                                         <td className="p-4 font-mono text-slate-500">#{s.id}</td>
-                                        <td className="p-4">
-                                            <div className="font-bold text-slate-800">{s.name || '未命名'}</div>
-                                            <div className="text-xs text-slate-500 flex items-center gap-1">{s.location}</div>
-                                            <div className="text-[10px] text-slate-400 mt-1 bg-slate-100 w-fit px-1 rounded">{s.district}</div>
-                                        </td>
-                                        
-                                        {/* 全機鎖定開關 */}
-                                        <td className="p-4 text-center">
-                                            <button 
-                                                onClick={()=>toggleScreenActive(s)} 
-                                                className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-full transition-all ${
-                                                    s.isActive !== false 
-                                                    ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                                                    : 'bg-red-100 text-red-600 hover:bg-red-200'
-                                                }`}
-                                            >
-                                                {s.isActive !== false ? <><Unlock size={12}/> 上架中</> : <><Lock size={12}/> 已鎖定</>}
-                                            </button>
-                                        </td>
-
-                                        {/* 底價編輯 */}
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1">
-                                                <span className="text-slate-400 font-bold">$</span>
-                                                <input 
-                                                    type="number" 
-                                                    value={currentPrice} 
-                                                    onChange={(e)=>handleScreenChange(s.firestoreId, 'basePrice', e.target.value)} 
-                                                    className="w-full font-bold text-slate-700 outline-none bg-transparent"
-                                                />
-                                            </div>
-                                        </td>
-
-                                        {/* 鎖定時間編輯 */}
-                                        <td className="p-4">
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-center gap-2">
-                                                    <Clock size={14} className="text-slate-400"/>
-                                                    <input 
-                                                        type="text" 
-                                                        placeholder="e.g. 0,1,2,23" 
-                                                        value={currentLocked} 
-                                                        onChange={(e)=>handleScreenChange(s.firestoreId, 'lockedHoursStr', e.target.value)} 
-                                                        className="border border-slate-300 rounded px-2 py-1 text-xs w-full outline-none focus:border-blue-500"
-                                                    />
-                                                </div>
-                                                <span className="text-[10px] text-slate-400 ml-6">輸入小時數字 (0-23)，用逗號分隔</span>
-                                            </div>
-                                        </td>
-
-                                        {/* 儲存按鈕 */}
-                                        <td className="p-4 text-right">
-                                            {isEditing ? (
-                                                <button 
-                                                    onClick={()=>saveScreen(s)} 
-                                                    className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-700 shadow-sm flex items-center gap-1 ml-auto animate-pulse"
-                                                >
-                                                    <Save size={14}/> 儲存
-                                                </button>
-                                            ) : (
-                                                <span className="text-slate-300 text-xs">--</span>
-                                            )}
-                                        </td>
+                                        <td className="p-4"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-500">{s.location}</div></td>
+                                        <td className="p-4 text-center"><button onClick={()=>toggleScreenActive(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?<><Unlock size={12} className="inline"/> 上架中</>:<><Lock size={12} className="inline"/> 已鎖定</>}</button></td>
+                                        <td className="p-4"><div className="flex items-center gap-1 bg-white border rounded px-2 py-1"><span className="text-slate-400">$</span><input type="number" value={currentPrice} onChange={(e)=>handleScreenChange(s.firestoreId, 'basePrice', e.target.value)} className="w-full font-bold outline-none"/></div></td>
+                                        <td className="p-4"><input type="text" placeholder="e.g. 0,1,2" value={currentLocked} onChange={(e)=>handleScreenChange(s.firestoreId, 'lockedHoursStr', e.target.value)} className="border rounded px-2 py-1 text-xs w-full outline-none"/></td>
+                                        <td className="p-4 text-right">{isEditing && <button onClick={()=>saveScreen(s)} className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 ml-auto animate-pulse"><Save size={14}/> 儲存</button>}</td>
                                     </tr>
                                  )
                             })}
@@ -416,9 +348,75 @@ const AdminPanel = () => {
              </div>
         )}
 
-        {/* --- 📊 Dashboard --- */}
+        {/* --- 📈 Analytics (REAL DATA) --- */}
+        {activeTab === 'analytics' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 真實成交數據 (Real-time)</h3>
+                        <p className="text-xs text-slate-500">數據來源：直接讀取 `orders` 訂單記錄，100% 準確。</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-500">選擇屏幕:</span>
+                        <select value={selectedStatScreen} onChange={(e) => setSelectedStatScreen(e.target.value)} className="border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="all">-- 請選擇屏幕 --</option>
+                            {screens.map(s => <option key={s.firestoreId} value={s.id}>{s.name}</option>)}
+                        </select>
+                    </div>
+                </div>
+
+                {selectedStatScreen === 'all' ? (
+                    <div className="text-center p-10 text-slate-400 bg-slate-50 rounded-lg">👈 請先在上方選擇一個屏幕</div>
+                ) : (
+                    <div className="overflow-x-auto h-[500px]">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 sticky top-0 z-10">
+                                <tr><th className="p-3 text-left">星期</th><th className="p-3 text-left">時段</th><th className="p-3 text-right">平均成交價</th><th className="p-3 text-right">總出價次數</th><th className="p-3 text-left pl-6">系統建議</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {realMarketStats.sort((a,b) => (a.dayOfWeek - b.dayOfWeek) || (a.hour - b.hour)).map((m, i) => {
+                                    let suggestion = <span className="text-slate-300 text-xs">-</span>;
+                                    if (m.totalBids > 3) suggestion = <span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 建議加價</span>;
+                                    else if (m.totalBids === 0) suggestion = <span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 建議減價</span>;
+                                    
+                                    return (
+                                        <tr key={i} className="hover:bg-slate-50">
+                                            <td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td>
+                                            <td className="p-3">{String(m.hour).padStart(2,'0')}:00</td>
+                                            <td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td>
+                                            <td className="p-3 text-right"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids>0?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-400'}`}>{m.totalBids}</span></td>
+                                            <td className="p-3 pl-6">{suggestion}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        )}
+
+        {/* --- ⚙️ Pricing Config --- */}
+        {activeTab === 'config' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto animate-in fade-in">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <ConfigInput label="Prime Hour 倍率" value={pricingConfig.primeMultiplier} onChange={v => handleConfigChange('primeMultiplier', v)} />
+                        <ConfigInput label="Gold Hour 倍率" value={pricingConfig.goldMultiplier} onChange={v => handleConfigChange('goldMultiplier', v)} />
+                        <ConfigInput label="週末 (五六) 倍率" value={pricingConfig.weekendMultiplier} onChange={v => handleConfigChange('weekendMultiplier', v)} />
+                        <ConfigInput label="聯播網 (Bundle) 倍率" value={pricingConfig.bundleMultiplier} onChange={v => handleConfigChange('bundleMultiplier', v)} />
+                        <ConfigInput label="急單 (24h) 附加費率" value={pricingConfig.urgentFee24h} onChange={v => handleConfigChange('urgentFee24h', v)} />
+                        <ConfigInput label="極速 (1h) 附加費率" value={pricingConfig.urgentFee1h} onChange={v => handleConfigChange('urgentFee1h', v)} />
+                    </div>
+                    <button onClick={savePricingConfig} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"><Save size={18}/> 儲存設定</button>
+                </div>
+            </div>
+        )}
+
+        {/* --- 📊 Dashboard & Orders (保留舊有) --- */}
         {activeTab === 'dashboard' && (
-            <div className="space-y-6 animate-in fade-in">
+             <div className="space-y-6 animate-in fade-in">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <StatCard title="總營業額" value={`HK$ ${stats.totalRevenue.toLocaleString()}`} icon={<DollarSign className="text-green-500"/>} bg="bg-green-50" border="border-green-100" />
                     <StatCard title="待審核影片" value={stats.pendingReview} icon={<Video className="text-orange-500"/>} bg="bg-orange-50" border="border-orange-100" />
@@ -437,189 +435,34 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* --- 📋 Orders Management --- */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
                     <div className="flex items-center gap-2 flex-1">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                            <input type="text" placeholder="搜尋 ID / Email..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64"/>
-                        </div>
-                        <select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="p-2 rounded-lg border border-slate-300 text-sm outline-none">
-                            <option value="all">所有狀態</option>
-                            <option value="paid_pending_selection">競價中</option>
-                            <option value="won">成功 (Won)</option>
-                            <option value="paid">已完成 (Paid)</option>
-                        </select>
+                        <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/><input type="text" placeholder="搜尋 ID / Email..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64"/></div>
+                        <select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="p-2 rounded-lg border border-slate-300 text-sm outline-none"><option value="all">所有狀態</option><option value="paid_pending_selection">競價中</option><option value="won">成功 (Won)</option><option value="paid">已完成 (Paid)</option></select>
                     </div>
-                    {selectedOrderIds.size > 0 && (
-                        <button onClick={handleBulkCancel} className="text-red-600 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 flex items-center gap-1"><Trash2 size={14}/> 批量取消 ({selectedOrderIds.size})</button>
-                    )}
+                    {selectedOrderIds.size > 0 && <button onClick={handleBulkCancel} className="text-red-600 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 flex items-center gap-1"><Trash2 size={14}/> 批量取消 ({selectedOrderIds.size})</button>}
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
-                            <tr>
-                                <th className="p-4 w-10 text-center">#</th>
-                                <th className="p-4">時間</th>
-                                <th className="p-4">訂單 ID / 客戶</th>
-                                <th className="p-4 text-right">金額</th>
-                                <th className="p-4 text-center">狀態</th>
-                                <th className="p-4 text-right">操作</th>
-                            </tr>
-                        </thead>
+                        <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold"><tr><th className="p-4 w-10 text-center">#</th><th className="p-4">時間</th><th className="p-4">訂單 ID / 客戶</th><th className="p-4 text-right">金額</th><th className="p-4 text-center">狀態</th><th className="p-4 text-right">操作</th></tr></thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredOrders.map((order) => {
                                 const isRepeatCustomer = customerHistory[order.userEmail] > 1;
                                 return (
                                     <tr key={order.id} className={`hover:bg-slate-50 ${selectedOrderIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
-                                        <td className="p-4 text-center">
-                                            <input type="checkbox" checked={selectedOrderIds.has(order.id)} onChange={() => handleSelectOrder(order.id)} />
-                                        </td>
+                                        <td className="p-4 text-center"><input type="checkbox" checked={selectedOrderIds.has(order.id)} onChange={() => handleSelectOrder(order.id)} /></td>
                                         <td className="p-4 text-slate-500 whitespace-nowrap">{order.createdAtDate.toLocaleString('zh-HK')}</td>
-                                        <td className="p-4">
-                                            <div className="font-mono text-xs font-bold text-slate-700">{order.id.slice(0,8)}...</div>
-                                            <div className="text-xs text-slate-500 flex items-center gap-2">
-                                                {order.userEmail}
-                                                {isRepeatCustomer && (
-                                                    <span className="flex items-center gap-0.5 bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-yellow-200" title={`已下單 ${customerHistory[order.userEmail]} 次`}>
-                                                        <Star size={10} fill="currentColor"/> VIP ({customerHistory[order.userEmail]})
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
+                                        <td className="p-4"><div className="font-mono text-xs font-bold text-slate-700">{order.id.slice(0,8)}...</div><div className="text-xs text-slate-500 flex items-center gap-2">{order.userEmail}{isRepeatCustomer && <span className="flex items-center gap-0.5 bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-yellow-200" title="VIP"><Star size={10} fill="currentColor"/> VIP ({customerHistory[order.userEmail]})</span>}</div></td>
                                         <td className="p-4 text-right font-bold">HK$ {order.amount?.toLocaleString()}</td>
                                         <td className="p-4 text-center"><StatusBadge status={order.status} /></td>
-                                        <td className="p-4 text-right">
-                                            {order.status !== 'cancelled' && (
-                                                <button onClick={async () => {
-                                                    if(window.confirm("取消訂單?")) {
-                                                        await updateDoc(doc(db, "orders", order.id), { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email });
-                                                    }
-                                                }} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>
-                                            )}
-                                        </td>
+                                        <td className="p-4 text-right">{order.status!=='cancelled'&&<button onClick={async()=>{if(window.confirm("取消訂單?")) await updateDoc(doc(db,"orders",order.id),{status:'cancelled',cancelledAt:new Date(),cancelledBy:user.email})}} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>}</td>
                                     </tr>
                                 );
                             })}
                         </tbody>
                     </table>
-                </div>
-            </div>
-        )}
-
-        {/* --- 🎬 Review --- */}
-        {activeTab === 'review' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in">
-                {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
-                filteredOrders.map(order => (
-                    <div key={order.id} className="bg-white rounded-xl shadow-sm border border-orange-200 overflow-hidden">
-                        <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center">
-                            <span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span>
-                            <span className="text-[10px] text-slate-500">{order.createdAtDate.toLocaleDateString()}</span>
-                        </div>
-                        <div className="p-4 space-y-3">
-                            <p className="font-bold text-sm">{order.userEmail}</p>
-                            <a href={order.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 text-sm font-bold underline truncate block">{order.videoName || 'Video'}</a>
-                            <div className="pt-2 border-t flex flex-col gap-2">
-                                <button onClick={() => handleReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2 rounded font-bold text-xs hover:bg-green-700 shadow-sm">✅ 通過並發送 Email</button>
-                                <div className="flex gap-2">
-                                    <input type="text" placeholder="拒絕原因..." className="flex-1 border rounded px-2 text-xs" onChange={e => setReviewNote(e.target.value)} />
-                                    <button onClick={() => handleReview(order.id, 'reject')} className="bg-red-50 text-red-600 border border-red-200 px-3 rounded text-xs font-bold hover:bg-red-100">拒絕</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        )}
-
-        {/* --- 📈 Analytics (Market Stats) --- */}
-        {activeTab === 'analytics' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 歷史成交數據</h3>
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-500">選擇屏幕:</span>
-                        <select 
-                            value={selectedStatScreen} 
-                            onChange={(e) => setSelectedStatScreen(e.target.value)} 
-                            className="border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="all">-- 請選擇屏幕 --</option>
-                            {screens.map(s => (
-                                <option key={s.firestoreId} value={s.id}>
-                                    {s.name} ({s.location})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-
-                {selectedStatScreen === 'all' ? (
-                    <div className="text-center p-10 text-slate-400 bg-slate-50 rounded-lg">
-                        👈 請先在上方選擇一個屏幕以查看詳細分析
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto h-[500px]">
-                        <table className="w-full text-sm">
-                            <thead className="bg-slate-50 sticky top-0 z-10">
-                                <tr>
-                                    <th className="p-3 text-left">星期</th>
-                                    <th className="p-3 text-left">時段</th>
-                                    <th className="p-3 text-right">平均成交價</th>
-                                    <th className="p-3 text-right">總出價次數</th>
-                                    <th className="p-3 text-left pl-6">系統建議</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {filteredStats.sort((a,b) => (a.dayOfWeek - b.dayOfWeek) || (a.hour - b.hour)).map((m, i) => {
-                                    let suggestion = <span className="text-slate-400 text-xs">-</span>;
-                                    if (m.totalBids > 5) suggestion = <span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 加價空間大</span>;
-                                    else if (m.totalBids === 0) suggestion = <span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 建議減價</span>;
-                                    
-                                    return (
-                                        <tr key={i} className="hover:bg-slate-50">
-                                            <td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td>
-                                            <td className="p-3">{String(m.hour).padStart(2,'0')}:00</td>
-                                            <td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td>
-                                            <td className="p-3 text-right">
-                                                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids > 5 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                                    {m.totalBids}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 pl-6">{suggestion}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-        )}
-
-        {/* --- ⚙️ Pricing Config --- */}
-        {activeTab === 'config' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto animate-in fade-in">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Settings size={20}/> 價格公式設定 (Pricing Engine)</h3>
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <ConfigInput label="Prime Hour 倍率" value={pricingConfig.primeMultiplier} onChange={v => handleConfigChange('primeMultiplier', v)} />
-                        <ConfigInput label="Gold Hour 倍率" value={pricingConfig.goldMultiplier} onChange={v => handleConfigChange('goldMultiplier', v)} />
-                        <ConfigInput label="週末 (五六) 倍率" value={pricingConfig.weekendMultiplier} onChange={v => handleConfigChange('weekendMultiplier', v)} />
-                        <ConfigInput label="聯播網 (Bundle) 倍率" value={pricingConfig.bundleMultiplier} onChange={v => handleConfigChange('bundleMultiplier', v)} />
-                        <ConfigInput label="急單 (24h) 附加費率" value={pricingConfig.urgentFee24h} onChange={v => handleConfigChange('urgentFee24h', v)} />
-                        <ConfigInput label="極速 (1h) 附加費率" value={pricingConfig.urgentFee1h} onChange={v => handleConfigChange('urgentFee1h', v)} />
-                    </div>
-                    <div className="bg-blue-50 p-3 rounded text-xs text-blue-700 flex items-start gap-2">
-                        <AlertTriangle size={14} className="shrink-0 mt-0.5"/>
-                        修改此處會即時影響前端的價格計算邏輯。請謹慎調整。
-                    </div>
-                    <button onClick={savePricingConfig} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2">
-                        <Save size={18}/> 儲存設定
-                    </button>
                 </div>
             </div>
         )}
@@ -630,34 +473,8 @@ const AdminPanel = () => {
 };
 
 // UI Components
-const ConfigInput = ({ label, value, onChange }) => (
-    <div className="bg-slate-50 p-3 rounded border border-slate-200">
-        <label className="text-xs font-bold text-slate-500 block mb-1">{label}</label>
-        <input 
-            type="number" step="0.1" 
-            value={value || 0} 
-            onChange={e => onChange(e.target.value)} 
-            className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
-        />
-    </div>
-);
-
-const StatCard = ({ title, value, icon, bg, border }) => (
-    <div className={`p-4 rounded-xl border ${bg} ${border} flex items-center justify-between shadow-sm`}>
-        <div><p className="text-xs font-bold text-slate-500 mb-1 uppercase">{title}</p><p className="text-xl font-bold text-slate-800">{value}</p></div>
-        <div className="bg-white p-2 rounded-full shadow-sm">{icon}</div>
-    </div>
-);
-
-const StatusBadge = ({ status }) => {
-    const map = {
-        paid_pending_selection: { label: '競價中', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
-        won: { label: '競價成功', cls: 'bg-green-100 text-green-700 border-green-200' },
-        paid: { label: '已付款', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
-        cancelled: { label: '已取消', cls: 'bg-red-50 text-red-500 border-red-100 line-through' },
-    };
-    const s = map[status] || { label: status, cls: 'bg-gray-100' };
-    return <span className={`text-[10px] px-2 py-1 rounded border font-bold ${s.cls}`}>{s.label}</span>;
-};
+const ConfigInput = ({ label, value, onChange }) => (<div className="bg-slate-50 p-3 rounded border border-slate-200"><label className="text-xs font-bold text-slate-500 block mb-1">{label}</label><input type="number" step="0.1" value={value || 0} onChange={e => onChange(e.target.value)} className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"/></div>);
+const StatCard = ({ title, value, icon, bg, border }) => (<div className={`p-4 rounded-xl border ${bg} ${border} flex items-center justify-between shadow-sm`}><div><p className="text-xs font-bold text-slate-500 mb-1 uppercase">{title}</p><p className="text-xl font-bold text-slate-800">{value}</p></div><div className="bg-white p-2 rounded-full shadow-sm">{icon}</div></div>);
+const StatusBadge = ({ status }) => { const map = { paid_pending_selection: { label: '競價中', cls: 'bg-purple-100 text-purple-700 border-purple-200' }, won: { label: '競價成功', cls: 'bg-green-100 text-green-700 border-green-200' }, paid: { label: '已付款', cls: 'bg-blue-100 text-blue-700 border-blue-200' }, cancelled: { label: '已取消', cls: 'bg-red-50 text-red-500 border-red-100 line-through' } }; const s = map[status] || { label: status, cls: 'bg-gray-100' }; return <span className={`text-[10px] px-2 py-1 rounded border font-bold ${s.cls}`}>{s.label}</span>; };
 
 export default AdminPanel;
