@@ -395,7 +395,7 @@ const DOOHBiddingSystem = () => {
                 
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
-                const basePricing = calculateDynamicPrice(new Date(d), h, isBundleMode, screen);
+                const basePricing = calculateDynamicPrice(new Date(d), h, isBundleMode, screen, pricingConfig, specialRules);
                 
                 const slotTime = new Date(d);
                 slotTime.setHours(h, 0, 0, 0);
