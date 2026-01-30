@@ -14,7 +14,11 @@ export const calculateDynamicPrice = (dateObj, hour, isBundle, screenData, globa
     const now = new Date();
     
     // --- 0. 優先檢查：特別日子規則 (Special Rules) ---
-    const dateStr = dateObj.toISOString().split('T')[0];
+   const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dayDate = String(dateObj.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${dayDate}`; // "2026-02-01"
+    console.log(`正在計算: ${dateStr} ${hour}:00, 規則數: ${specialRules.length}`);
     const screenIdStr = String(screenData.id);
 
     const activeRule = specialRules.find(r => {
