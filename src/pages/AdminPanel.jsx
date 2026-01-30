@@ -46,7 +46,7 @@ const AdminPanel = () => {
   
   // --- Advanced Filter States ---
   const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics Multi-select (Screens)
-  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); // Analytics Multi-select (Hours) 🔥 NEW
+  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); // Analytics Multi-select (Hours)
   
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       // Bulk Action Multi-select
   const [editingScreens, setEditingScreens] = useState({});                  // Inline Screen Editing
@@ -151,9 +151,7 @@ const AdminPanel = () => {
       orders.forEach(order => {
           if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
-                  // If selectedStatScreens is empty, it means "All"
                   const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
-                  // If selectedAnalyticsHours is empty, it means "All"
                   const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
 
                   if (isScreenSelected && isHourSelected) {
@@ -168,29 +166,21 @@ const AdminPanel = () => {
           }
       });
 
-      // 🔥 Calculate Summary for the Selection
+      // Calculate Summary
       let selectionTotalAmount = 0;
       let selectionTotalBids = 0;
       
       const rows = Object.values(statsMap).map(item => {
-          // 只計算有出價的時段進入總平均 (避免被 0 拉低)
           if (item.totalBids > 0) {
-              // 注意：這裡 statsMap 已經經過上面的篩選填入數據，所以這裡累加就是準確的
-              // 但為了更嚴謹，我們只累加符合「顯示條件」的行
               const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour);
               if (isHourVisible) {
                   selectionTotalAmount += item.totalAmount;
                   selectionTotalBids += item.totalBids;
               }
           }
-          
-          return {
-              ...item,
-              averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0
-          };
+          return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 };
       });
 
-      // Filter rows for display based on hour selection
       const displayRows = selectedAnalyticsHours.size > 0 
           ? rows.filter(r => selectedAnalyticsHours.has(r.hour))
           : rows;
@@ -236,7 +226,6 @@ const AdminPanel = () => {
   };
 
   // --- 🛠 Logic: Bulk Actions ---
-  // Helper to filter orders for display AND for "Select All" logic
   const filteredOrders = useMemo(() => {
       return orders.filter(o => {
           if (activeTab === 'review') return o.status === 'won' && o.hasVideo && !o.isApproved && !o.isRejected;
@@ -278,7 +267,7 @@ const AdminPanel = () => {
       } catch (e) { console.error(e); alert("❌ 操作失敗"); }
   };
 
-  // --- 📅 Logic: Special Rules ---
+  // --- 📅 Logic: Special Rules (Robust Version) ---
   const handleAddRule = async () => {
       if (!newRule.date) return alert("❌ 請選擇日期");
       
@@ -301,12 +290,19 @@ const AdminPanel = () => {
 
       if (hours.length === 0) return alert("❌ 時段格式錯誤 (e.g., 0-23 or 18,19)");
 
+      // 🔥 強制將日期格式化為 YYYY-MM-DD，避免時區問題
+      // 這裡直接使用 Admin Panel Input 的值 (YYYY-MM-DD)，這是最安全的
+      const safeDate = newRule.date; 
+
       try {
           await addDoc(collection(db, "special_rules"), {
-              screenId: newRule.screenId, date: newRule.date, hours: hours,
-              type: newRule.action, 
+              screenId: newRule.screenId, // 'all' or specific ID
+              date: safeDate, 
+              hours: hours,
+              type: newRule.action, // 'lock', 'price_override', 'disable_buyout'
               value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null,
-              note: newRule.note, createdAt: new Date()
+              note: newRule.note, 
+              createdAt: new Date()
           });
           alert("✅ 規則已建立");
           setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' });
