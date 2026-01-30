@@ -138,6 +138,9 @@ const DOOHBiddingSystem = () => {
     const fetchConfig = () => {
         // Listen to Special Rules
         onSnapshot(collection(db, "special_rules"), (snap) => {
+            const rules = snap.docs.map(d => d.data());
+            console.log("🔥 Loaded Rules from Firebase:", rules); // <--- Add this
+            setSpecialRules(rules);
             setSpecialRules(snap.docs.map(d => d.data()));
         });
         
