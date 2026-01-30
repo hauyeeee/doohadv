@@ -4,8 +4,8 @@ import {
 } from "firebase/firestore";
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
-  Search, Video, Monitor, Save, Gavel, Trash2, 
-  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown
+  Search, Video, Monitor, Save, Trash2, 
+  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -40,7 +40,7 @@ const AdminPanel = () => {
   });
   
   // UI States
-  const [activeTab, setActiveTab] = useState('dashboard'); 
+  const [activeTab, setActiveTab] = useState('screens'); // 預設顯示屏幕管理，方便你測試
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [reviewNote, setReviewNote] = useState("");
@@ -48,12 +48,15 @@ const AdminPanel = () => {
 
   // Bulk Action States
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+  
+  // Screen Editing State (用於暫存修改)
   const [editingScreens, setEditingScreens] = useState({});
 
   // 1. Auth & Initial Data Fetch
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
+        // 權限不足時的處理
         setLoading(false); 
       } else {
         setUser(currentUser);
@@ -78,9 +81,9 @@ const AdminPanel = () => {
         setLoading(false);
       });
 
-      // Screens (One-time)
-      getDocs(query(collection(db, "screens"), orderBy("id"))).then(sSnap => {
-          setScreens(sSnap.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
+      // Screens (Realtime - 這樣你改完會即刻見到)
+      const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snapshot) => {
+          setScreens(snapshot.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
       });
 
       // Market Stats (One-time)
@@ -95,7 +98,10 @@ const AdminPanel = () => {
           }
       });
 
-      return () => unsubOrders();
+      return () => {
+          unsubOrders();
+          unsubScreens();
+      };
   };
 
   // --- 🧠 Helper: Identify Repeat Customers ---
@@ -182,6 +188,61 @@ const AdminPanel = () => {
     alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕");
   };
 
+  // --- 📺 Screen Management Logic (NEW) ---
+  const handleScreenChange = (fid, field, val) => {
+      setEditingScreens(prev => ({
+          ...prev,
+          [fid]: {
+              ...prev[fid],
+              [field]: val
+          }
+      }));
+  };
+
+  const saveScreen = async (screen) => {
+      const changes = editingScreens[screen.firestoreId];
+      if (!changes) return;
+
+      try {
+          const finalData = { ...changes };
+          
+          // 轉換數字
+          if (finalData.basePrice) finalData.basePrice = parseInt(finalData.basePrice);
+          
+          // 轉換鎖定時段字串為 Array (e.g. "0,1,2" -> [0,1,2])
+          if (finalData.lockedHoursStr !== undefined) {
+              const hoursArray = finalData.lockedHoursStr
+                  .split(',')
+                  .map(h => parseInt(h.trim()))
+                  .filter(h => !isNaN(h) && h >= 0 && h <= 23); // 確保是有效小時
+              finalData.lockedHours = hoursArray;
+              delete finalData.lockedHoursStr; // 不存字串進 DB
+          }
+
+          await updateDoc(doc(db, "screens", screen.firestoreId), finalData);
+          alert(`✅ Screen ${screen.id} 更新成功！`);
+          
+          // Clear edit state
+          setEditingScreens(prev => {
+              const newState = { ...prev };
+              delete newState[screen.firestoreId];
+              return newState;
+          });
+
+      } catch (e) {
+          console.error(e);
+          alert("❌ 更新失敗，請檢查 Console");
+      }
+  };
+
+  const toggleScreenActive = async (screen) => {
+      const newStatus = !screen.isActive;
+      if(!window.confirm(`⚠️ 確定要 ${newStatus ? '解鎖 (Unlock)' : '鎖定 (Lock)'} 整部屏幕 ${screen.name} 嗎？\n鎖定後所有時段將無法購買。`)) return;
+      try {
+          await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: newStatus });
+      } catch(e) { alert("❌ 操作失敗"); }
+  };
+
   // --- ⚙️ Pricing Config Logic ---
   const handleConfigChange = (key, value) => {
       setPricingConfig(prev => ({ ...prev, [key]: parseFloat(value) }));
@@ -231,9 +292,9 @@ const AdminPanel = () => {
         <div className="flex flex-wrap gap-2">
             {[
                 { id: 'dashboard', label: '儀表板', icon: <LayoutDashboard size={16}/> },
+                { id: 'screens', label: '屏幕管理', icon: <Monitor size={16}/> }, // 👈 這裡！
                 { id: 'orders', label: '訂單管理', icon: <List size={16}/> },
                 { id: 'review', label: `影片審核 (${stats.pendingReview})`, icon: <Video size={16}/>, alert: stats.pendingReview > 0 },
-                { id: 'screens', label: '屏幕管理', icon: <Monitor size={16}/> },
                 { id: 'analytics', label: '市場數據', icon: <TrendingUp size={16}/> },
                 { id: 'config', label: '價格公式', icon: <Settings size={16}/> },
             ].map(tab => (
@@ -251,6 +312,109 @@ const AdminPanel = () => {
                 </button>
             ))}
         </div>
+
+        {/* --- 📺 Screen Management Tab (Restored) --- */}
+        {activeTab === 'screens' && (
+             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
+                <div className="p-4 bg-slate-50 border-b border-slate-200">
+                    <h3 className="font-bold flex items-center gap-2"><Monitor size={18}/> 屏幕列表與設定</h3>
+                    <p className="text-xs text-slate-500 mt-1">在此管理所有屏幕的狀態、底價及鎖定時段。</p>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
+                            <tr>
+                                <th className="p-4 w-16">ID</th>
+                                <th className="p-4 w-64">屏幕資料</th>
+                                <th className="p-4 w-32 text-center">全機狀態</th>
+                                <th className="p-4 w-32">底價 (HKD)</th>
+                                <th className="p-4">鎖定特定時間 (0-23)</th>
+                                <th className="p-4 w-24 text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {screens.map(s => {
+                                 const isEditing = editingScreens[s.firestoreId];
+                                 const currentPrice = isEditing?.basePrice ?? s.basePrice;
+                                 
+                                 // 處理 Locked Hours 顯示
+                                 // 如果正在編輯，顯示編輯中的字串；否則顯示原本的 Array join 起來
+                                 const currentLocked = isEditing?.lockedHoursStr ?? (s.lockedHours ? s.lockedHours.join(',') : '');
+
+                                 return (
+                                    <tr key={s.firestoreId} className="hover:bg-slate-50">
+                                        <td className="p-4 font-mono text-slate-500">#{s.id}</td>
+                                        <td className="p-4">
+                                            <div className="font-bold text-slate-800">{s.name || '未命名'}</div>
+                                            <div className="text-xs text-slate-500 flex items-center gap-1">{s.location}</div>
+                                            <div className="text-[10px] text-slate-400 mt-1 bg-slate-100 w-fit px-1 rounded">{s.district}</div>
+                                        </td>
+                                        
+                                        {/* 全機鎖定開關 */}
+                                        <td className="p-4 text-center">
+                                            <button 
+                                                onClick={()=>toggleScreenActive(s)} 
+                                                className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-full transition-all ${
+                                                    s.isActive !== false 
+                                                    ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                                    : 'bg-red-100 text-red-600 hover:bg-red-200'
+                                                }`}
+                                            >
+                                                {s.isActive !== false ? <><Unlock size={12}/> 上架中</> : <><Lock size={12}/> 已鎖定</>}
+                                            </button>
+                                        </td>
+
+                                        {/* 底價編輯 */}
+                                        <td className="p-4">
+                                            <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1">
+                                                <span className="text-slate-400 font-bold">$</span>
+                                                <input 
+                                                    type="number" 
+                                                    value={currentPrice} 
+                                                    onChange={(e)=>handleScreenChange(s.firestoreId, 'basePrice', e.target.value)} 
+                                                    className="w-full font-bold text-slate-700 outline-none bg-transparent"
+                                                />
+                                            </div>
+                                        </td>
+
+                                        {/* 鎖定時間編輯 */}
+                                        <td className="p-4">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    <Clock size={14} className="text-slate-400"/>
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="e.g. 0,1,2,23" 
+                                                        value={currentLocked} 
+                                                        onChange={(e)=>handleScreenChange(s.firestoreId, 'lockedHoursStr', e.target.value)} 
+                                                        className="border border-slate-300 rounded px-2 py-1 text-xs w-full outline-none focus:border-blue-500"
+                                                    />
+                                                </div>
+                                                <span className="text-[10px] text-slate-400 ml-6">輸入小時數字 (0-23)，用逗號分隔</span>
+                                            </div>
+                                        </td>
+
+                                        {/* 儲存按鈕 */}
+                                        <td className="p-4 text-right">
+                                            {isEditing ? (
+                                                <button 
+                                                    onClick={()=>saveScreen(s)} 
+                                                    className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-700 shadow-sm flex items-center gap-1 ml-auto animate-pulse"
+                                                >
+                                                    <Save size={14}/> 儲存
+                                                </button>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">--</span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                 )
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+             </div>
+        )}
 
         {/* --- 📊 Dashboard --- */}
         {activeTab === 'dashboard' && (
@@ -275,7 +439,7 @@ const AdminPanel = () => {
 
         {/* --- 📋 Orders Management --- */}
         {activeTab === 'orders' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-2">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
                     <div className="flex items-center gap-2 flex-1">
                         <div className="relative">
@@ -373,7 +537,7 @@ const AdminPanel = () => {
 
         {/* --- 📈 Analytics (Market Stats) --- */}
         {activeTab === 'analytics' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 歷史成交數據</h3>
                     <div className="flex items-center gap-2">
@@ -438,7 +602,7 @@ const AdminPanel = () => {
 
         {/* --- ⚙️ Pricing Config --- */}
         {activeTab === 'config' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto animate-in fade-in">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Settings size={20}/> 價格公式設定 (Pricing Engine)</h3>
                 <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
