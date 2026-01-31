@@ -1,5 +1,6 @@
 import React from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Repeat, CalendarDays } from 'lucide-react';
+import CalendarGrid from './CalendarGrid'; // 🔥 引入新拆出來的 Grid
 
 const WEEKDAYS_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -8,7 +9,13 @@ const DateSelector = ({
   currentDate, setCurrentDate, 
   selectedWeekdays, toggleWeekday, 
   weekCount, setWeekCount, 
-  renderCalendar 
+  // 這些 Helpers 從 Hook 傳進來，再傳給 Grid
+  toggleDate,
+  getDaysInMonth, 
+  getFirstDayOfMonth, 
+  formatDateKey, 
+  isDateAllowed,
+  selectedSpecificDates // Grid 需要這個來顯示選取狀態
 }) => (
   <section className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col h-full">
     <div className="flex justify-between items-center mb-3">
@@ -67,8 +74,20 @@ const DateSelector = ({
     <div className="grid grid-cols-7 text-center text-[10px] text-slate-400 mb-1">
       {WEEKDAYS_LABEL.map(d => <div key={d}>{d}</div>)}
     </div>
+    
+    {/* 🔥 使用新的 CalendarGrid Component */}
     <div className="grid grid-cols-7 gap-1 flex-1 content-start">
-      {renderCalendar()}
+      <CalendarGrid 
+        currentDate={currentDate}
+        mode={mode}
+        selectedSpecificDates={selectedSpecificDates}
+        selectedWeekdays={selectedWeekdays}
+        toggleDate={toggleDate}
+        getDaysInMonth={getDaysInMonth}
+        getFirstDayOfMonth={getFirstDayOfMonth}
+        formatDateKey={formatDateKey}
+        isDateAllowed={isDateAllowed}
+      />
     </div>
   </section>
 );
