@@ -185,10 +185,7 @@ const DOOHBiddingSystem = () => {
   }, []);
 
   useEffect(() => {
-      // 1. 監聽真正已售出的 (Won, Paid, Completed) -> 這些要變灰色 Disable
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed"]));
-      
-      // 2. 監聽正在競價的 (Pending Selection) -> 這些要計算最高出價，但依然可選
       const qBidding = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
@@ -460,7 +457,7 @@ const DOOHBiddingSystem = () => {
                 // 2. 遠期 (> 7天)：只能 Buyout，不能 Bid
                 else if (slotTime > sevenDaysLater) {
                     canBid = false;
-                    warning = "遠期預訂 (限買斷)";
+                    warning = "遠期 (限買斷)";
                     // 如果是 Prime Time，本身已經 isBuyoutDisabled=true
                     // 結果就是：canBid=false AND isBuyoutDisabled=true -> 完全鎖死
                     if (isBuyoutDisabled) {
@@ -526,7 +523,7 @@ const DOOHBiddingSystem = () => {
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) {
             hasRestrictedBid = true;
-            if (slot.warning === "遠期預訂 (限買斷)" || slot.warning === "急單 (限買斷)") {
+            if (slot.warning === "遠期 (限買斷)" || slot.warning === "急單 (限買斷)") {
                 hasDateRestrictedBid = true;
             }
         }
@@ -867,14 +864,6 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
                     
-                    {/* 🔥 遠期限制的黃色警告 Banner */}
-                    {pricing.hasDateRestrictedBid && (
-                        <div className="text-xs text-yellow-300 flex items-center gap-1 bg-yellow-900/30 px-2 py-1 rounded border border-yellow-800 animate-pulse">
-                            <AlertTriangle size={12}/> 
-                            <span>包含遠期時段 (>7天)：僅支援直接買斷 (Stripe 授權限制)</span>
-                        </div>
-                    )}
-
                     {pricing.hasPrimeFarFutureLock && (
                         <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
                             <Lock size={12}/> 
