@@ -21,7 +21,7 @@ const ADMIN_EMAILS = ["hauyeeee@gmail.com", "info@doohadv.com"];
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
-// 🔥 翻譯字典：將系統變數轉為中文顯示
+// 🔥 中文翻譯字典
 const CONFIG_LABELS = {
     baseImpressions: "👀 基礎曝光基準 (Base)",
     primeMultiplier: "🔥 黃金時段倍率 (18:00-23:00)",
@@ -47,7 +47,7 @@ const AdminPanel = () => {
   const [orders, setOrders] = useState([]);
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
-  const [dailyNotes, setDailyNotes] = useState({});
+  const [dailyNotes, setDailyNotes] = useState({}); // 🔥 Calendar Notes
   
   // --- Config State ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({
@@ -63,9 +63,9 @@ const AdminPanel = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [reviewNote, setReviewNote] = useState("");
   
-  // --- Calendar States ---
+  // --- Calendar States (NEW) ---
   const [calendarDate, setCalendarDate] = useState(new Date());
-  const [calendarViewMode, setCalendarViewMode] = useState('sales'); 
+  const [calendarViewMode, setCalendarViewMode] = useState('sales'); // 'sales' or 'ops'
   const [selectedDayDetail, setSelectedDayDetail] = useState(null);
   
   // --- Advanced Filter States ---
@@ -96,24 +96,30 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
+      // Orders
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
         setOrders(snap.docs.map(d => ({ id: d.id, ...d.data(), createdAtDate: d.data().createdAt?.toDate() || new Date() })));
         setLoading(false);
       });
+      // Screens
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
           setScreens(snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
       });
+      // Special Rules
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
+      // Daily Notes
       const unsubNotes = onSnapshot(collection(db, "daily_notes"), (snap) => {
           const notesMap = {};
           snap.docs.forEach(d => { notesMap[d.id] = d.data().content; });
           setDailyNotes(notesMap);
       });
+      // Config
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => { 
           if (docSnap.exists()) { const data = docSnap.data(); setGlobalPricingConfig(data); setActiveConfig(data); }
       });
+
       return () => { unsubOrders(); unsubScreens(); unsubRules(); unsubNotes(); };
   };
 
@@ -133,21 +139,23 @@ const AdminPanel = () => {
     return { totalRevenue: rev, totalOrders: orders.length, validOrders: valid, pendingReview: pending, dailyChartData: Object.keys(daily).sort().map(d=>({date:d.substring(5),amount:daily[d]})), statusChartData: Object.keys(status).map(k=>({name:k,value:status[k]})) };
   }, [orders]);
 
-  // --- 📅 Calendar Logic ---
+  // --- 📅 Calendar Logic (Events Mapping) ---
   const eventsByDate = useMemo(() => {
       const map = {};
       orders.forEach(order => {
+          // 只顯示有效訂單 (Paid/Won/Pending Selection)
           if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
                   const dateStr = slot.date; 
                   if (!map[dateStr]) map[dateStr] = [];
+                  
                   map[dateStr].push({
                       id: order.id,
                       screenName: slot.screenName,
                       hour: slot.hour,
-                      type: order.type, 
-                      amount: order.amount, 
-                      bidPrice: slot.bidPrice, 
+                      type: order.type, // 'bid' or 'buyout'
+                      amount: order.amount, // Total order amount
+                      bidPrice: slot.bidPrice, // Individual slot price
                       userEmail: order.userEmail,
                       videoName: order.videoName,
                       hasVideo: order.hasVideo,
@@ -166,6 +174,7 @@ const AdminPanel = () => {
       const month = calendarDate.getMonth();
       const firstDay = new Date(year, month, 1).getDay();
       const daysInMonth = new Date(year, month + 1, 0).getDate();
+      
       const days = [];
       for(let i=0; i<firstDay; i++) days.push(null);
       for(let d=1; d<=daysInMonth; d++) days.push(new Date(year, month, d));
@@ -176,6 +185,7 @@ const AdminPanel = () => {
   const realMarketStats = useMemo(() => {
       const statsMap = {}; 
       for(let d=0; d<7; d++) for(let h=0; h<24; h++) statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
+      
       orders.forEach(order => {
           if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
@@ -192,16 +202,32 @@ const AdminPanel = () => {
               });
           }
       });
-      let selectionTotalAmount = 0, selectionTotalBids = 0;
+
+      let selectionTotalAmount = 0;
+      let selectionTotalBids = 0;
+      
       const rows = Object.values(statsMap).map(item => {
           if (item.totalBids > 0) {
               const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour);
-              if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; }
+              if (isHourVisible) {
+                  selectionTotalAmount += item.totalAmount;
+                  selectionTotalBids += item.totalBids;
+              }
           }
           return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 };
       });
-      const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
-      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
+
+      const displayRows = selectedAnalyticsHours.size > 0 
+          ? rows.filter(r => selectedAnalyticsHours.has(r.hour))
+          : rows;
+
+      return {
+          rows: displayRows,
+          summary: {
+              avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0,
+              totalBids: selectionTotalBids
+          }
+      };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   // --- Actions ---
@@ -222,6 +248,7 @@ const AdminPanel = () => {
       if(!str||str==='all') hours=Array.from({length:24},(_,i)=>i);
       else { if(str.includes('-')){const [s,e]=str.split('-').map(n=>parseInt(n));for(let i=s;i<=e;i++)if(i>=0&&i<24)hours.push(i);} else hours=str.split(',').map(n=>parseInt(n)).filter(n=>!isNaN(n)); }
       if(hours.length===0) return alert("時段錯誤");
+      
       const safeDate = newRule.date; 
       await addDoc(collection(db,"special_rules"), { screenId:newRule.screenId, date:safeDate, hours, type:newRule.action, value:newRule.action==='price_override'?parseFloat(newRule.overridePrice):null, note:newRule.note, createdAt:new Date() });
       alert("規則已建立");
@@ -247,10 +274,12 @@ const AdminPanel = () => {
 
   const handleConfigChange = (k,v) => setActiveConfig(p=>({...p,[k]:v}));
   
+  // Ops Calendar Functions
   const toggleExternalUpload = async (orderId, currentState) => {
       if(!window.confirm(`確認標記為 ${!currentState ? '已上架' : '未上架'} ?`)) return;
       await updateDoc(doc(db, "orders", orderId), { isExternalUploaded: !currentState });
   };
+
   const handleSaveDailyNote = async (dateStr, note) => {
       await setDoc(doc(db, "daily_notes", dateStr), { content: note, updatedAt: new Date() });
   };
@@ -261,7 +290,7 @@ const AdminPanel = () => {
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH V6.1</h1>
+            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH V7.0 Ultimate</h1>
             <div className="flex gap-2">
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">返回首頁</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
@@ -271,7 +300,7 @@ const AdminPanel = () => {
         <div className="flex flex-wrap gap-2">
             {[
                 {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:'儀表板'},
-                {id:'calendar',icon:<Calendar size={16}/>,label:'排程日曆 (New)'},
+                {id:'calendar',icon:<Calendar size={16}/>,label:'排程日曆 (New)'}, // 🔥 Added
                 {id:'orders',icon:<List size={16}/>,label:'訂單管理'},
                 {id:'review',icon:<Video size={16}/>,label:`審核 (${stats.pendingReview})`, alert:stats.pendingReview>0},
                 {id:'rules',icon:<Calendar size={16}/>,label:'特別規則'},
@@ -309,16 +338,18 @@ const AdminPanel = () => {
                     <div className="grid grid-cols-7 gap-2">
                         {calendarDays.map((d, i) => {
                             if (!d) return <div key={i} className="h-24 bg-slate-50/50 rounded-lg"></div>;
-                            // ✅ 改用這一段 (強制使用本地時間 YYYY-MM-DD，確保同 Database 一致)
-const year = d.getFullYear();
-const month = String(d.getMonth() + 1).padStart(2, '0');
-const day = String(d.getDate()).padStart(2, '0');
-const dateStr = `${year}-${month}-${day}`;
+                            // 🔥 Fix Timezone issue for Calendar
+                            const year = d.getFullYear();
+                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            const dateStr = `${year}-${month}-${day}`;
+
                             const dayEvents = eventsByDate[dateStr] || [];
                             const isSelected = selectedDayDetail === dateStr;
                             
                             const totalRev = dayEvents.reduce((sum, e) => sum + (e.amount || 0), 0);
                             const hasPending = dayEvents.some(e => !e.isApproved);
+                            
                             const totalTasks = dayEvents.length;
                             const doneTasks = dayEvents.filter(e => e.isExternalUploaded).length;
                             
@@ -332,11 +363,27 @@ const dateStr = `${year}-${month}-${day}`;
                                         <span className={`text-sm font-bold ${d.toDateString()===new Date().toDateString()?'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center':''}`}>{d.getDate()}</span>
                                         {calendarViewMode === 'ops' && dailyNotes[dateStr] && <FileText size={12} className="text-orange-400"/>}
                                     </div>
+                                    
                                     <div className="space-y-1">
                                         {calendarViewMode === 'sales' ? (
-                                            <>{dayEvents.length > 0 && <div className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded text-center">${totalRev.toLocaleString()}</div>}{hasPending && <div className="text-[10px] text-orange-500 font-bold text-center">⚠ 待審</div>}</>
+                                            <>
+                                                {dayEvents.length > 0 && (
+                                                    <div className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded text-center">
+                                                        ${totalRev.toLocaleString()}
+                                                    </div>
+                                                )}
+                                                {hasPending && <div className="text-[10px] text-orange-500 font-bold text-center">⚠ 待審</div>}
+                                            </>
                                         ) : (
-                                            <>{totalTasks > 0 && <div className="flex justify-center gap-1"><span className="text-[10px] bg-green-100 text-green-700 px-1.5 rounded">{doneTasks}</span><span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 rounded">/ {totalTasks}</span></div>}{totalTasks > 0 && doneTasks === totalTasks && <CheckCircle size={14} className="mx-auto text-green-500"/>}</>
+                                            <>
+                                                {totalTasks > 0 && (
+                                                    <div className="flex justify-center gap-1">
+                                                        <span className="text-[10px] bg-green-100 text-green-700 px-1.5 rounded">{doneTasks}</span>
+                                                        <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 rounded">/ {totalTasks}</span>
+                                                    </div>
+                                                )}
+                                                {totalTasks > 0 && doneTasks === totalTasks && <CheckCircle size={14} className="mx-auto text-green-500"/>}
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -350,21 +397,42 @@ const dateStr = `${year}-${month}-${day}`;
                     {selectedDayDetail ? (
                         <>
                             <div className="border-b pb-4 mb-4">
-                                <h3 className="font-bold text-lg flex items-center gap-2">{selectedDayDetail} 明細 {calendarViewMode === 'sales' ? <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded">銷售</span> : <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded">營運</span>}</h3>
+                                <h3 className="font-bold text-lg flex items-center gap-2">
+                                    {selectedDayDetail} 明細
+                                    {calendarViewMode === 'sales' ? <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded">銷售</span> : <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded">營運</span>}
+                                </h3>
+                                {/* Daily Note Input */}
                                 <div className="mt-3">
-                                    <label className="text-xs font-bold text-slate-400">當日備註:</label>
-                                    <input type="text" placeholder="例如: 屏幕維修..." className="w-full border rounded px-2 py-1.5 text-sm mt-1 bg-yellow-50 focus:bg-white" value={dailyNotes[selectedDayDetail] || ''} onChange={(e) => {const v = e.target.value; setDailyNotes(p => ({...p, [selectedDayDetail]: v}));}} onBlur={(e) => handleSaveDailyNote(selectedDayDetail, e.target.value)} />
+                                    <label className="text-xs font-bold text-slate-400">當日備註 (Note):</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="例如: 14:00 屏幕維修..." 
+                                        className="w-full border rounded px-2 py-1.5 text-sm mt-1 bg-yellow-50 focus:bg-white transition-colors"
+                                        value={dailyNotes[selectedDayDetail] || ''}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            setDailyNotes(p => ({...p, [selectedDayDetail]: v}));
+                                        }}
+                                        onBlur={(e) => handleSaveDailyNote(selectedDayDetail, e.target.value)}
+                                    />
                                 </div>
                             </div>
+
                             <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                                {(eventsByDate[selectedDayDetail] || []).length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">今日無排程</div> : 
+                                {(eventsByDate[selectedDayDetail] || []).length === 0 ? (
+                                    <div className="text-center py-10 text-slate-400 text-sm">今日無排程</div>
+                                ) : (
                                     (eventsByDate[selectedDayDetail] || []).sort((a,b)=>a.hour-b.hour).map((evt, idx) => (
                                         <div key={idx} className={`p-3 rounded-lg border text-sm ${evt.type==='buyout'?'bg-emerald-50 border-emerald-100':'bg-blue-50 border-blue-100'}`}>
                                             <div className="flex justify-between items-start mb-2">
                                                 <span className="font-mono font-bold text-slate-700">{String(evt.hour).padStart(2,'0')}:00</span>
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${evt.type==='buyout'?'bg-white text-emerald-600 border-emerald-200':'bg-white text-blue-600 border-blue-200'}`}>{evt.type === 'buyout' ? '買斷' : '競價'}</span>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${evt.type==='buyout'?'bg-white text-emerald-600 border-emerald-200':'bg-white text-blue-600 border-blue-200'}`}>
+                                                    {evt.type === 'buyout' ? '買斷' : '競價'}
+                                                </span>
                                             </div>
+                                            
                                             {calendarViewMode === 'sales' ? (
+                                                // Sales View Details
                                                 <div className="space-y-1">
                                                     <div className="font-bold">HK$ {evt.bidPrice || evt.amount}</div>
                                                     <div className="text-xs text-slate-500 truncate">{evt.userEmail}</div>
@@ -374,20 +442,30 @@ const dateStr = `${year}-${month}-${day}`;
                                                     </div>
                                                 </div>
                                             ) : (
+                                                // Ops View Details
                                                 <div className="space-y-2">
                                                     <div className="text-xs text-slate-500">影片素材:</div>
                                                     <a href={evt.hasVideo ? '#' : undefined} className={`block font-bold truncate ${evt.hasVideo ? 'text-blue-600 underline' : 'text-slate-400'}`}>{evt.videoName || 'No Video'}</a>
-                                                    <button onClick={() => toggleExternalUpload(evt.id, evt.isExternalUploaded)} className={`w-full py-2 rounded flex items-center justify-center gap-2 text-xs font-bold transition-all ${evt.isExternalUploaded ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
-                                                        {evt.isExternalUploaded ? <><CheckCircle size={14}/> 已上架</> : <><UploadCloud size={14}/> 標記為已上架</>}
+                                                    
+                                                    <button 
+                                                        onClick={() => toggleExternalUpload(evt.id, evt.isExternalUploaded)}
+                                                        className={`w-full py-2 rounded flex items-center justify-center gap-2 text-xs font-bold transition-all ${evt.isExternalUploaded ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-500 hover:bg-slate-50'}`}
+                                                    >
+                                                        {evt.isExternalUploaded ? <><CheckCircle size={14}/> 已上架 (Done)</> : <><UploadCloud size={14}/> 標記為已上架</>}
                                                     </button>
                                                 </div>
                                             )}
                                         </div>
                                     ))
-                                }
+                                )}
                             </div>
                         </>
-                    ) : <div className="h-full flex flex-col items-center justify-center text-slate-400"><Calendar size={48} className="mb-4 opacity-20"/><p>請點擊左側日期查看詳情</p></div>}
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                            <Calendar size={48} className="mb-4 opacity-20"/>
+                            <p>請點擊左側日期查看詳情</p>
+                        </div>
+                    )}
                 </div>
             </div>
         )}
