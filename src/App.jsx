@@ -3,7 +3,7 @@ import {
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, Monitor, 
   DollarSign, Loader2, MapPin, 
   TrendingUp, Search, LogIn,
-  Zap, Layers, Sparkles, Ban, HelpCircle, Gavel, CalendarDays, Repeat, Map as MapIcon, Lock
+  Zap, Layers, Sparkles, Ban, HelpCircle, Gavel, CalendarDays, Repeat, Map as MapIcon, Lock, Info
 } from 'lucide-react';
 
 import { initializeApp } from "firebase/app";
@@ -36,7 +36,7 @@ const DOOHBiddingSystem = () => {
   const [screens, setScreens] = useState([]);
   const [isScreensLoading, setIsScreensLoading] = useState(true);
 
-  // 🔥 NEW: Pricing Config & Special Rules States (Fixes the crash)
+  // 🔥 Pricing Config & Special Rules States
   const [pricingConfig, setPricingConfig] = useState({}); 
   const [specialRules, setSpecialRules] = useState([]);
 
@@ -134,17 +134,12 @@ const DOOHBiddingSystem = () => {
       } catch (error) { console.error("Error fetching screens:", error); showToast("❌ 無法載入屏幕資料"); } finally { setIsScreensLoading(false); }
     };
 
-    // 2. 🔥 Fetch Pricing Config & Rules (Critical for Pricing Engine)
+    // 2. Fetch Config & Rules
     const fetchConfig = () => {
-        // Listen to Special Rules
         onSnapshot(collection(db, "special_rules"), (snap) => {
             const rules = snap.docs.map(d => d.data());
-            console.log("🔥 Loaded Rules from Firebase:", rules); // <--- Add this
             setSpecialRules(rules);
-            setSpecialRules(snap.docs.map(d => d.data()));
         });
-        
-        // Listen to Global Pricing Config
         onSnapshot(doc(db, "system_config", "pricing_rules"), (docSnap) => {
             if (docSnap.exists()) {
                 setPricingConfig(docSnap.data());
@@ -189,7 +184,6 @@ const DOOHBiddingSystem = () => {
     return () => unsubscribeAuth();
   }, []);
 
-  // 🔥 Occupied Slots Logic
   useEffect(() => {
       const q = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "paid_pending_selection"]));
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -212,14 +206,12 @@ const DOOHBiddingSystem = () => {
   const handleGoogleLogin = async () => { setIsLoginLoading(true); try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`); } catch (error) { showToast(`❌ 登入失敗: ${error.message}`); } finally { setIsLoginLoading(false); } };
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
 
- // src/App.jsx
-
+  // 🔥 這裡用來判斷 Bundle 邏輯，但按鈕已被隱藏
   const availableBundles = useMemo(() => {
       const groups = {};
       screens.forEach(s => {
-          // 🔥 修復：同時支援 'bundlegroup' (你的DB) 和 'bundleGroup' (代碼慣例)
-          const gName = s.bundlegroup || s.bundleGroup; 
-          
+          // 🔥 兼容大小寫 bundlegroup
+          const gName = s.bundlegroup || s.bundleGroup;
           if (gName) {
               if (!groups[gName]) groups[gName] = [];
               groups[gName].push(s);
@@ -228,22 +220,18 @@ const DOOHBiddingSystem = () => {
       return groups;
   }, [screens]);
 
+  // 🔥 自動檢測是否符合 Bundle 條件 (全選)
   const isBundleMode = useMemo(() => {
     if (selectedScreens.size < 2) return false;
     const selectedIdsStr = new Set(Array.from(selectedScreens).map(id => String(id)));
     for (const [groupName, groupScreens] of Object.entries(availableBundles)) {
         const groupTotal = groupScreens.length;
         const groupSelected = groupScreens.filter(s => selectedIdsStr.has(String(s.id))).length;
+        // 只要有一組是 "全選" 狀態，就啟動 Bundle Mode
         if (groupTotal > 1 && groupSelected === groupTotal) return true;
     }
     return false;
   }, [selectedScreens, availableBundles]);
-
-  const selectGroup = (groupScreens) => {
-      const groupIds = groupScreens.map(s => s.id);
-      setSelectedScreens(new Set(groupIds));
-      showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
-  };
 
   const callEmailService = async (id, data, isManual = false) => {
       if (emailSentRef.current && !isManual) return;
@@ -426,14 +414,13 @@ const DOOHBiddingSystem = () => {
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
                 
-                // 🔥 CRITICAL FIX: Pass pricingConfig and specialRules here!
                 const basePricing = calculateDynamicPrice(
                     new Date(d), 
                     h, 
                     isBundleMode, 
                     screen, 
-                    pricingConfig, // <--- Passed Config
-                    specialRules   // <--- Passed Rules
+                    pricingConfig, 
+                    specialRules
                 );
                 
                 const slotTime = new Date(d);
@@ -441,7 +428,6 @@ const DOOHBiddingSystem = () => {
                 const now = new Date();
                 const hoursUntil = (slotTime - now) / (1000 * 60 * 60);
                 
-                // Use the calculated pricing values
                 const finalMinBid = basePricing.minBid;
                 const finalBuyout = basePricing.buyoutPrice;
                 const isLocked = basePricing.isLocked || isSoldOut;
@@ -459,14 +445,12 @@ const DOOHBiddingSystem = () => {
                     buyoutPrice: finalBuyout,
                     marketAverage: historicalAvg, 
                     isPrime: basePricing.isPrime,
-// 🔥【必需加入這一行】接收 Engine 傳來的「禁止買斷」信號
-    isBuyoutDisabled: basePricing.isBuyoutDisabled,
-
-                    canBid: basePricing.canBid && !isLocked, // Lock check
+                    isBuyoutDisabled: basePricing.isBuyoutDisabled,
+                    canBid: basePricing.canBid && !isLocked, 
                     hoursUntil,
                     isUrgent, 
                     competitorBid: compBid,
-                    isSoldOut: isLocked, // Reflect lock status
+                    isSoldOut: isLocked, 
                     warning: basePricing.warning
                 });
             });
@@ -499,7 +483,6 @@ const DOOHBiddingSystem = () => {
         buyoutTotal += slot.buyoutPrice; 
         minBidTotal += slot.minBid; 
 
-       // ✅ 新代碼：檢查 Engine 傳回來的 isBuyoutDisabled (包含 Prime 和 特別規則)
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) hasRestrictedBid = true; 
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
@@ -623,7 +606,7 @@ const DOOHBiddingSystem = () => {
   };
 
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
+  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段僅限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
   const renderCalendar = () => { 
     const year = currentDate.getFullYear(); 
@@ -657,7 +640,6 @@ const DOOHBiddingSystem = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
-      {/* 🔥 改動：Logo 及 標語 */}
       <header className="bg-white border-b sticky top-8 z-30 px-4 py-3 shadow-sm flex items-center justify-between">
         <div className="flex items-center gap-2">
             <div className="bg-blue-600 text-white p-1.5 rounded-lg"><Monitor size={20} /></div>
@@ -673,8 +655,6 @@ const DOOHBiddingSystem = () => {
                     📧 沒收到 Email? 按此補發
                 </button>
             )}
-
-            {/* 🔥 改動：已移除測試 Email 按鈕 */}
 
             {user ? (<button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-2 hover:bg-slate-50 p-1 rounded-lg transition-colors"><img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-slate-200" /></button>) : (<button onClick={() => setIsLoginModalOpen(true)} className="flex items-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors"><LogIn size={16} /> 登入</button>)}
         </div>
@@ -702,27 +682,21 @@ const DOOHBiddingSystem = () => {
             </div>
         </div>
 
-      <section className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[350px]">
+        <section className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[350px]">
             <div className="p-4 border-b bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2"><Monitor size={16} /> 1. 選擇屏幕 ({selectedScreens.size})</h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                    {Object.entries(availableBundles).map(([groupName, groupScreens]) => (
-                        <button key={groupName} onClick={() => selectGroup(groupScreens)} className="text-xs px-3 py-1.5 rounded border border-purple-200 bg-purple-50 text-purple-700 font-bold hover:bg-purple-100 flex items-center gap-1 transition-colors"><Layers size={14} /> {groupName} ({groupScreens.length}屏)</button>
-                    ))}
                     <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block"></div>
                     <div className="relative flex-1 w-full sm:w-48"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/><input type="text" placeholder="搜尋地點..." value={screenSearchTerm} onChange={(e) => setScreenSearchTerm(e.target.value)} className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500 outline-none"/></div>
                 </div>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0">
                 {isScreensLoading ? <div className="text-center p-10"><Loader2 className="animate-spin inline"/></div> : (
-                    /* 🔥 修改重點：移除 min-w-[600px]，加入 table-fixed 以確保不爆版 */
                     <table className="w-full text-left text-sm border-collapse table-fixed">
                         <thead className="bg-slate-50 sticky top-0 z-10 text-xs text-slate-500 font-semibold">
                             <tr>
-                                {/* 🔥 調整寬度比例 */}
                                 <th className="p-3 w-[15%] text-center">選取</th>
                                 <th className="p-3 w-[60%] sm:w-[40%]">屏幕名稱</th>
-                                {/* 🔥 手機隱藏區域和規格 (hidden sm:table-cell) */}
                                 <th className="p-3 hidden sm:table-cell sm:w-[15%]">區域</th>
                                 <th className="p-3 hidden sm:table-cell sm:w-[15%]">規格</th>
                                 <th className="p-3 w-[25%] sm:w-[15%] text-right">詳情</th>
@@ -738,11 +712,9 @@ const DOOHBiddingSystem = () => {
                                         <div className="font-bold truncate text-slate-800">{s.name}</div>
                                         <div className="text-xs text-slate-500 flex items-center gap-1 truncate"><MapPin size={10} className="shrink-0"/> {s.location}</div>
                                     </td>
-                                    {/* 🔥 手機隱藏 */}
                                     <td className="p-3 hidden sm:table-cell">
                                         <span className="bg-slate-100 px-2 py-1 rounded-full text-xs text-slate-600">{s.district}</span>
                                     </td>
-                                    {/* 🔥 手機隱藏 */}
                                     <td className="p-3 hidden sm:table-cell text-slate-500 text-xs">{s.size}</td>
                                     <td className="p-3 text-right">
                                         <button onClick={() => setViewingScreen(s)} className="text-blue-600 text-xs flex items-center justify-end gap-1 ml-auto font-bold hover:underline bg-blue-50 sm:bg-transparent px-2 py-1 sm:p-0 rounded">
@@ -835,9 +807,16 @@ const DOOHBiddingSystem = () => {
                     <div className="w-px h-10 bg-slate-700"></div>
                     <div className="text-right"><p className="text-xs text-slate-400 mb-0.5">直接買斷總額</p>{pricing.hasRestrictedBuyout ? (<div className="text-red-400 text-sm font-bold flex items-center justify-end gap-1"><Lock size={14}/> 不適用</div>) : (<div className="flex items-baseline justify-end gap-1"><span className="text-sm text-emerald-600 font-bold">HK$</span><span className="text-2xl font-bold text-emerald-500 tracking-tight">{pricing.buyoutTotal.toLocaleString()}</span></div>)}</div>
                 </div>
+                {/* 🔥 新增提示：聯播網效應 */}
                 <div className="space-y-1 mt-3 min-h-[20px]">
+                    {isBundleMode && (
+                        <div className="text-xs text-purple-300 flex items-center gap-1 bg-purple-900/30 px-2 py-1 rounded border border-purple-800">
+                            <Sparkles size={12} className="text-purple-400"/> 
+                            <span>⚡ 已啟動聯播網模式 (Network Effect): 廣告將於同一區域同步播放，獲得最大曝光效益。 (溢價 +25%)</span>
+                        </div>
+                    )}
                     {pricing.urgentCount > 0 && (<div className="text-xs text-orange-400 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded"><Zap size={12}/> 已包含 {pricing.urgentCount} 個急單時段 (附加費 +20%)</div>)}
-                    {pricing.hasRestrictedBuyout && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段，無法直接買斷</div>}
+                    {pricing.hasRestrictedBuyout && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段或特別日子，無法直接買斷</div>}
                     {pricing.soldOutCount > 0 && <div className="text-xs text-slate-400 flex items-center gap-1 bg-slate-800 px-2 py-1 rounded"><Ban size={12}/> 已自動過濾 {pricing.soldOutCount} 個已售罄時段</div>}
                 </div>
             </div>
