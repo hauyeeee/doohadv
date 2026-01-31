@@ -319,22 +319,17 @@ export const useDoohSystem = () => {
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
                 let warning = basePricing.warning;
                 
-                // 🔥 1. 定義急單狀態
-                const isUrgent = hoursUntil > 0 && hoursUntil <= 24;
-
-                // --- 2. 急單邏輯 (< 24h) ---
-                if (isUrgent) {
+                if (hoursUntil < 24 && hoursUntil > 0) {
                     canBid = false; warning = "急單 (限買斷)"; 
                     if (basePricing.isPrime) isBuyoutDisabled = false; 
-                }
-                
-                // --- 3. 遠期邏輯 (> 7天) ---
-                else if (slotTime > sevenDaysLater) {
+                } else if (slotTime > sevenDaysLater) {
                     canBid = false; warning = "遠期 (限買斷)";
                     if (isBuyoutDisabled) warning = "Prime 遠期 (無法交易)";
                 }
 
                 let currentHighestBid = existingBids[key] || 0;
+                
+                // 🔥 安全變數定義
                 const finalMinBid = basePricing.minBid;
                 const finalBuyout = basePricing.buyoutPrice;
                 const isLocked = basePricing.isLocked || isSoldOut;
@@ -344,7 +339,7 @@ export const useDoohSystem = () => {
                     minBid: finalMinBid, buyoutPrice: finalBuyout,
                     marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(finalMinBid * 1.5), 
                     isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled,
-                    canBid, hoursUntil, isUrgent, 
+                    canBid, hoursUntil, isUrgent: hoursUntil > 0 && hoursUntil <= 24, 
                     competitorBid: currentHighestBid, isSoldOut: isLocked, warning
                 });
             });
@@ -355,7 +350,7 @@ export const useDoohSystem = () => {
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const totalSlots = availableSlots.length;
+    const totalSlots = availableSlots.length; 
     const soldOutCount = generateAllSlots.length - availableSlots.length;
     
     let buyoutTotal = 0, currentBidTotal = 0, minBidTotal = 0, urgentCount = 0; 
@@ -365,20 +360,18 @@ export const useDoohSystem = () => {
     let hasPrimeFarFutureLock = false; 
 
     availableSlots.forEach(slot => {
-        // 🔥🔥🔥 修正點：即使這裡判斷到鎖死，也不能 return，必須繼續執行讓 flag 生效！
         if (!slot.canBid && slot.isBuyoutDisabled) {
             hasPrimeFarFutureLock = true;
-            // 這裡不再 return，讓下面的 hasRestrictedBid 邏輯繼續執行
+            // 🔥 不要 return，讓 hasRestrictedBid 能被執行到！
         }
 
-        if (!hasPrimeFarFutureLock) { // 只計算未鎖死時段的價格
-            buyoutTotal += slot.buyoutPrice; 
-            minBidTotal += slot.minBid;
+        if (!hasPrimeFarFutureLock) {
+             buyoutTotal += slot.buyoutPrice; 
+             minBidTotal += slot.minBid; 
         }
 
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         
-        // 🔥🔥🔥 這裡確保 hasRestrictedBid 被正確設置
         if (!slot.canBid) {
             hasRestrictedBid = true;
             if (slot.warning === "遠期 (限買斷)" || slot.warning === "急單 (限買斷)") hasDateRestrictedBid = true;
@@ -386,7 +379,7 @@ export const useDoohSystem = () => {
         
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
         if (slot.isUrgent) urgentCount++; 
-        
+
         const userPrice = slotBids[slot.key]; 
         if (userPrice) { 
             currentBidTotal += parseInt(userPrice); 
@@ -399,7 +392,7 @@ export const useDoohSystem = () => {
         totalSlots, 
         buyoutTotal, currentBidTotal, minBidTotal,
         conflicts, missingBids, invalidBids, soldOutCount, urgentCount,
-        // 🔥 這裡的邏輯現在是安全的：只要 hasRestrictedBid 為 true，按鈕就會 disable
+        // 🔥 加入 !hasPrimeFarFutureLock 判斷
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock
@@ -466,6 +459,7 @@ export const useDoohSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
+    occupiedSlots, // 🔥 確保匯出這一個！
     
     // Setters / Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
