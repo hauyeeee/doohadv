@@ -90,7 +90,7 @@ const DOOHBiddingSystem = () => {
   const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   
-  // 🔥 改動 1: 預訂期由 90 天縮短為 60 天
+  // 預訂期由 90 天縮短為 60 天
   const isDateAllowed = (year, month, day) => { 
       const checkDate = new Date(year, month, day); 
       const today = new Date(); today.setHours(0,0,0,0); 
@@ -185,21 +185,43 @@ const DOOHBiddingSystem = () => {
   }, []);
 
   useEffect(() => {
-      const q = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "paid_pending_selection"]));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      // 1. 監聽真正已售出的 (Won, Paid, Completed) -> 這些要變灰色 Disable
+      const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed"]));
+      
+      // 2. 監聽正在競價的 (Pending Selection) -> 這些要計算最高出價，但依然可選
+      const qBidding = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+
+      const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
+          snapshot.docs.forEach(doc => {
+              if (doc.data().detailedSlots) {
+                  doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${s.screenId}`));
+              }
+          });
+          setOccupiedSlots(sold);
+      });
+
+      const unsubBidding = onSnapshot(qBidding, (snapshot) => {
+          const bids = {};
           snapshot.docs.forEach(doc => {
               const data = doc.data();
               if (data.detailedSlots) {
                   data.detailedSlots.forEach(s => {
                       const key = `${s.date}-${s.hour}-${s.screenId}`;
-                      sold.add(key);
+                      const thisBid = s.bidPrice || 0;
+                      if (!bids[key] || thisBid > bids[key]) {
+                          bids[key] = thisBid;
+                      }
                   });
               }
           });
-          setOccupiedSlots(sold);
-      }, (error) => { console.error("Error fetching occupied slots:", error); });
-      return () => unsubscribe();
+          setExistingBids(bids);
+      });
+
+      return () => {
+          unsubSold();
+          unsubBidding();
+      };
   }, []);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
@@ -358,6 +380,7 @@ const DOOHBiddingSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
+  // 🔥🔥🔥 核心生成邏輯 (已修正所有時間規則)
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0) return [];
     
@@ -382,7 +405,7 @@ const DOOHBiddingSystem = () => {
         }
     }
 
-    // 🔥 改動 2: 計算 7 天後的時間界線
+    // 🔥 7 天界線
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
     sevenDaysLater.setHours(23, 59, 59, 999);
@@ -397,6 +420,7 @@ const DOOHBiddingSystem = () => {
                 if (!screen) return;
                 
                 const key = `${dateStr}-${h}-${screenId}`; 
+                // 只檢查 "真正已售"
                 const isSoldOut = occupiedSlots.has(key);
                 
                 const basePricing = calculateDynamicPrice(
@@ -423,15 +447,28 @@ const DOOHBiddingSystem = () => {
 
                 let compBid = existingBids[key] || 0;
                 
-                // 🔥 改動 3: 7 天限制邏輯
+                // 🔥🔥🔥 規則判定邏輯 (重要！)
                 let canBid = basePricing.canBid && !isLocked;
+                let isBuyoutDisabled = basePricing.isBuyoutDisabled; // Prime Time 本身會 disable buyout
                 let warning = basePricing.warning;
                 
-                // 如果時段在 7 天之後，禁止競價，只能買斷
-                if (slotTime > sevenDaysLater) {
+                // 1. 急單 (< 24h)：只能 Buyout，不能 Bid
+                if (hoursUntil < 24 && hoursUntil > 0) {
+                    canBid = false;
+                    warning = "急單 (限買斷)"; 
+                }
+                // 2. 遠期 (> 7天)：只能 Buyout，不能 Bid
+                else if (slotTime > sevenDaysLater) {
                     canBid = false;
                     warning = "遠期預訂 (限買斷)";
+                    // 如果是 Prime Time，本身已經 isBuyoutDisabled=true
+                    // 結果就是：canBid=false AND isBuyoutDisabled=true -> 完全鎖死
+                    if (isBuyoutDisabled) {
+                        warning = "Prime 遠期 (無法交易)";
+                    }
                 }
+                // 3. 競價區 (24h - 7d)：可以 Bid
+                // Prime Time 邏輯：isBuyoutDisabled 已經在 pricingEngine 設為 true，所以這裡不用改，自然變成 "只能 Bid"
 
                 slots.push({ 
                     key, dateStr, hour: h, screenId, 
@@ -440,7 +477,7 @@ const DOOHBiddingSystem = () => {
                     buyoutPrice: finalBuyout,
                     marketAverage: historicalAvg, 
                     isPrime: basePricing.isPrime,
-                    isBuyoutDisabled: basePricing.isBuyoutDisabled,
+                    isBuyoutDisabled: isBuyoutDisabled,
                     canBid, 
                     hoursUntil,
                     isUrgent, 
@@ -473,17 +510,23 @@ const DOOHBiddingSystem = () => {
     let hasRestrictedBuyout = false;
     let hasRestrictedBid = false; 
     let hasUrgentRisk = false; 
-    let hasDateRestrictedBid = false; // 🔥 新增 flag
+    let hasDateRestrictedBid = false; 
+    let hasPrimeFarFutureLock = false; // 新增：Prime + 遠期鎖死
 
     availableSlots.forEach(slot => {
+        // 如果完全鎖死 (不能 Bid 也不能 Buyout)，不算入價格計算
+        if (!slot.canBid && slot.isBuyoutDisabled) {
+            hasPrimeFarFutureLock = true;
+            return;
+        }
+
         buyoutTotal += slot.buyoutPrice; 
         minBidTotal += slot.minBid; 
 
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) {
-            hasRestrictedBid = true; 
-            // 🔥 偵測是否因為遠期而限制
-            if (slot.warning === "遠期預訂 (限買斷)") {
+            hasRestrictedBid = true;
+            if (slot.warning === "遠期預訂 (限買斷)" || slot.warning === "急單 (限買斷)") {
                 hasDateRestrictedBid = true;
             }
         }
@@ -503,7 +546,7 @@ const DOOHBiddingSystem = () => {
         conflicts, missingBids, invalidBids, soldOutCount, urgentCount,
         canStartBidding: totalSlots > 0 && !hasRestrictedBid,
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
-        hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid
+        hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock
     };
   }, [generateAllSlots, slotBids]);
 
@@ -666,8 +709,7 @@ const DOOHBiddingSystem = () => {
                     <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold"><Gavel size={18}/> 競價投標 (Bidding)</div>
                     <ul className="space-y-2 text-xs text-slate-600">
                         <li className="flex items-start gap-2"><span className="text-blue-400">•</span> <span><strong>價高者得：</strong> 自由出價，適合預算有限或爭奪黃金時段。</span></li>
-                        {/* 🔥 改動 4: 規則說明 */}
-                        <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">•</span> <span className="text-orange-700 font-medium"><strong>限制：</strong> 僅開放予未來 7 天內的時段。</span></li>
+                        <li className="flex items-start gap-2"><span className="text-orange-500 font-bold">•</span> <span className="text-orange-700 font-medium"><strong>限制：</strong> 僅開放予 24小時 至 7天 內的時段。</span></li>
                         <li className="flex items-start gap-2"><span className="text-blue-400">•</span> <span><strong>預授權機制：</strong> 提交時只凍結額度 (Pre-auth)，不即時扣款。</span></li>
                     </ul>
                 </div>
@@ -675,7 +717,7 @@ const DOOHBiddingSystem = () => {
                     <div className="flex items-center gap-2 mb-2 text-emerald-700 font-bold"><Zap size={18}/> 直接買斷 (Buyout)</div>
                     <ul className="space-y-2 text-xs text-slate-600">
                         <li className="flex items-start gap-2"><span className="text-emerald-400">•</span> <span><strong>即時鎖定：</strong> 付出一口價，立即確保獲得該時段。</span></li>
-                        <li className="flex items-start gap-2"><span className="text-emerald-400">•</span> <span><strong>遠期預訂：</strong> 支援 7 至 60 天後的預訂。</span></li>
+                        <li className="flex items-start gap-2"><span className="text-emerald-400">•</span> <span><strong>遠期預訂：</strong> 支援 7 至 60 天後的預訂 (Prime Time 除外)。</span></li>
                         <li className="flex items-start gap-2"><span className="text-emerald-400">•</span> <span><strong>即時扣款：</strong> 交易確認後立即從信用卡扣除全數。</span></li>
                     </ul>
                 </div>
@@ -825,7 +867,6 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
                     
-                    {/* 🔥 改動 5: 7天限制的黃色警告 Banner */}
                     {pricing.hasDateRestrictedBid && (
                         <div className="text-xs text-yellow-300 flex items-center gap-1 bg-yellow-900/30 px-2 py-1 rounded border border-yellow-800 animate-pulse">
                             <AlertTriangle size={12}/> 
@@ -833,13 +874,19 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
 
+                    {pricing.hasPrimeFarFutureLock && (
+                        <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
+                            <Lock size={12}/> 
+                            <span>Prime 時段限制：僅限 7 天內競價，不可買斷。遠期 Prime 無法交易。</span>
+                        </div>
+                    )}
+
                     {pricing.urgentCount > 0 && (<div className="text-xs text-orange-400 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded"><Zap size={12}/> 已包含 {pricing.urgentCount} 個急單時段 (附加費 +20%)</div>)}
-                    {pricing.hasRestrictedBuyout && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段，無法直接買斷</div>}
+                    {pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段，無法直接買斷</div>}
                     {pricing.soldOutCount > 0 && <div className="text-xs text-slate-400 flex items-center gap-1 bg-slate-800 px-2 py-1 rounded"><Ban size={12}/> 已自動過濾 {pricing.soldOutCount} 個已售罄時段</div>}
                 </div>
             </div>
             <div className="flex gap-3">
-                {/* 🔥 改動 6: 按鈕文字會根據 7 天限制而改變 */}
                 <button onClick={handleBidClick} disabled={!pricing.canStartBidding} className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all shadow-lg flex flex-col items-center justify-center gap-0.5 ${!pricing.canStartBidding ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-blue-900/50'}`}>
                     <span>
                         {pricing.hasRestrictedBid 
