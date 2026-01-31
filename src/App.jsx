@@ -206,11 +206,10 @@ const DOOHBiddingSystem = () => {
   const handleGoogleLogin = async () => { setIsLoginLoading(true); try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`); } catch (error) { showToast(`❌ 登入失敗: ${error.message}`); } finally { setIsLoginLoading(false); } };
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
 
-  // 🔥 這裡用來判斷 Bundle 邏輯，但按鈕已被隱藏
+  // Bundle Logic (Hidden Buttons)
   const availableBundles = useMemo(() => {
       const groups = {};
       screens.forEach(s => {
-          // 🔥 兼容大小寫 bundlegroup
           const gName = s.bundlegroup || s.bundleGroup;
           if (gName) {
               if (!groups[gName]) groups[gName] = [];
@@ -220,18 +219,23 @@ const DOOHBiddingSystem = () => {
       return groups;
   }, [screens]);
 
-  // 🔥 自動檢測是否符合 Bundle 條件 (全選)
+  // Auto-Detect Bundle Mode
   const isBundleMode = useMemo(() => {
     if (selectedScreens.size < 2) return false;
     const selectedIdsStr = new Set(Array.from(selectedScreens).map(id => String(id)));
     for (const [groupName, groupScreens] of Object.entries(availableBundles)) {
         const groupTotal = groupScreens.length;
         const groupSelected = groupScreens.filter(s => selectedIdsStr.has(String(s.id))).length;
-        // 只要有一組是 "全選" 狀態，就啟動 Bundle Mode
         if (groupTotal > 1 && groupSelected === groupTotal) return true;
     }
     return false;
   }, [selectedScreens, availableBundles]);
+
+  const selectGroup = (groupScreens) => {
+      const groupIds = groupScreens.map(s => s.id);
+      setSelectedScreens(new Set(groupIds));
+      showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
+  };
 
   const callEmailService = async (id, data, isManual = false) => {
       if (emailSentRef.current && !isManual) return;
@@ -270,29 +274,9 @@ const DOOHBiddingSystem = () => {
       }
   };
 
-  const handleManualResend = async () => {
-    let targetId = currentOrderId;
-    if (!targetId) {
-        const params = new URLSearchParams(window.location.search);
-        targetId = params.get('order_id') || params.get('orderId');
-    }
-
-    if (!targetId) {
-        alert("❌ 錯誤：找不到訂單 ID");
-        return;
-    }
-
-    showToast("📧 正在重發...");
-    try {
-        const docSnap = await getDoc(doc(db, "orders", targetId));
-        if (docSnap.exists()) {
-            callEmailService(targetId, docSnap.data(), true); 
-        }
-    } catch (e) {
-        console.error(e);
-        showToast("❌ 系統錯誤");
-    }
-  };
+  /* const handleManualResend = async () => {
+    // ... 隱藏手動發信功能 ...
+  }; */
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
@@ -606,7 +590,7 @@ const DOOHBiddingSystem = () => {
   };
 
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段僅限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
+  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
   const renderCalendar = () => { 
     const year = currentDate.getFullYear(); 
@@ -640,6 +624,7 @@ const DOOHBiddingSystem = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
+      {/* 🔥 改動：Logo 及 標語 */}
       <header className="bg-white border-b sticky top-8 z-30 px-4 py-3 shadow-sm flex items-center justify-between">
         <div className="flex items-center gap-2">
             <div className="bg-blue-600 text-white p-1.5 rounded-lg"><Monitor size={20} /></div>
@@ -649,13 +634,8 @@ const DOOHBiddingSystem = () => {
             </div>
         </div>
         
-         {/* <div className="flex items-center gap-4">
-            {modalPaymentStatus === 'paid' && (
-                <button onClick={handleManualResend} className="bg-orange-50 text-orange-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-orange-100 border border-orange-200">
-                    📧 沒收到 Email? 按此補發
-                </button>
-            )}*/}
-
+        <div className="flex items-center gap-4">
+            {/* 隱藏補發按鈕 */}
             {user ? (<button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-2 hover:bg-slate-50 p-1 rounded-lg transition-colors"><img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-slate-200" /></button>) : (<button onClick={() => setIsLoginModalOpen(true)} className="flex items-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors"><LogIn size={16} /> 登入</button>)}
         </div>
       </header>
@@ -686,6 +666,7 @@ const DOOHBiddingSystem = () => {
             <div className="p-4 border-b bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2"><Monitor size={16} /> 1. 選擇屏幕 ({selectedScreens.size})</h2>
                 <div className="flex items-center gap-2 flex-wrap">
+                    {/* 🔥 隱藏了 Bundle Buttons */}
                     <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block"></div>
                     <div className="relative flex-1 w-full sm:w-48"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/><input type="text" placeholder="搜尋地點..." value={screenSearchTerm} onChange={(e) => setScreenSearchTerm(e.target.value)} className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500 outline-none"/></div>
                 </div>
@@ -738,13 +719,26 @@ const DOOHBiddingSystem = () => {
                     <button onClick={() => { setMode('recurring'); setSelectedSpecificDates(new Set()); }} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${mode === 'recurring' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>週期模式</button>
                 </div>
             </div>
+            {/* 🔥 新增：超明顯年份月份提示 */}
+            <div className="flex justify-between items-center mb-4">
+                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth()-1)))} className="p-1 hover:bg-slate-100 rounded-full"><ChevronLeft size={20}/></button>
+                <div className="text-center">
+                    <div className="text-sm text-slate-500 font-medium">年份</div>
+                    <div className="text-2xl font-extrabold text-blue-600 bg-blue-50 px-6 py-2 rounded-xl shadow-sm border border-blue-100">
+                        {currentDate.getFullYear()}年 {currentDate.getMonth()+1}月
+                    </div>
+                    <div className="text-[10px] text-red-400 mt-1 font-bold animate-pulse">⚠️ 請核對年份月份</div>
+                </div>
+                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth()+1)))} className="p-1 hover:bg-slate-100 rounded-full"><ChevronRight size={20}/></button>
+            </div>
+
             {mode === 'recurring' && (
                 <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
                     <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-blue-700 flex items-center gap-1"><Repeat size={12}/> 重複星期</span><div className="flex gap-1">{WEEKDAYS_LABEL.map((d, i) => (<button key={d} onClick={() => toggleWeekday(i)} className={`w-6 h-6 text-[10px] rounded-full font-bold transition-all ${selectedWeekdays.has(i) ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border hover:border-blue-300'}`}>{d}</button>))}</div></div>
                     <div className="flex justify-between items-center"><span className="text-xs font-bold text-blue-700 flex items-center gap-1"><CalendarDays size={12}/> 持續週數</span><select value={weekCount} onChange={(e) => setWeekCount(Number(e.target.value))} className="text-xs border border-blue-200 rounded px-2 py-1 bg-white outline-none">{Array.from({length: 8}, (_, i) => i + 1).map(w => <option key={w} value={w}>{w} 週</option>)}</select></div>
                 </div>
             )}
-            <div className="flex justify-between items-center mb-2 text-xs text-slate-500"><button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth()-1)))}><ChevronLeft size={16}/></button><span className="font-bold text-slate-700">{currentDate.getFullYear()}年 {currentDate.getMonth()+1}月</span><button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth()+1)))}><ChevronRight size={16}/></button></div>
+            
             <div className="grid grid-cols-7 text-center text-[10px] text-slate-400 mb-1">{WEEKDAYS_LABEL.map(d => <div key={d}>{d}</div>)}</div>
             <div className="grid grid-cols-7 gap-1 flex-1 content-start">{renderCalendar()}</div>
           </section>
@@ -807,7 +801,6 @@ const DOOHBiddingSystem = () => {
                     <div className="w-px h-10 bg-slate-700"></div>
                     <div className="text-right"><p className="text-xs text-slate-400 mb-0.5">直接買斷總額</p>{pricing.hasRestrictedBuyout ? (<div className="text-red-400 text-sm font-bold flex items-center justify-end gap-1"><Lock size={14}/> 不適用</div>) : (<div className="flex items-baseline justify-end gap-1"><span className="text-sm text-emerald-600 font-bold">HK$</span><span className="text-2xl font-bold text-emerald-500 tracking-tight">{pricing.buyoutTotal.toLocaleString()}</span></div>)}</div>
                 </div>
-                {/* 🔥 新增提示：聯播網效應 */}
                 <div className="space-y-1 mt-3 min-h-[20px]">
                     {isBundleMode && (
                         <div className="text-xs text-purple-300 flex items-center gap-1 bg-purple-900/30 px-2 py-1 rounded border border-purple-800">
@@ -816,7 +809,7 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
                     {pricing.urgentCount > 0 && (<div className="text-xs text-orange-400 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded"><Zap size={12}/> 已包含 {pricing.urgentCount} 個急單時段 (附加費 +20%)</div>)}
-                    {pricing.hasRestrictedBuyout && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段或特別日子，無法直接買斷</div>}
+                    {pricing.hasRestrictedBuyout && <div className="text-xs text-red-400 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded"><Lock size={12}/> 包含 Prime 時段，無法直接買斷</div>}
                     {pricing.soldOutCount > 0 && <div className="text-xs text-slate-400 flex items-center gap-1 bg-slate-800 px-2 py-1 rounded"><Ban size={12}/> 已自動過濾 {pricing.soldOutCount} 個已售罄時段</div>}
                 </div>
             </div>
