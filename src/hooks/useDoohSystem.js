@@ -13,6 +13,8 @@ import { initEmailService, sendBidConfirmation } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
+  console.log("🔄 useDoohSystem Hook Re-rendered"); // Check Re-render
+
   // --- States ---
   const [user, setUser] = useState(null); 
   const [isAuthReady, setIsAuthReady] = useState(false); 
@@ -185,7 +187,22 @@ export const useDoohSystem = () => {
 
   // --- Handlers ---
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
-  const handleGoogleLogin = async () => { setIsLoginLoading(true); try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`); } catch (error) { showToast(`❌ 登入失敗: ${error.message}`); } finally { setIsLoginLoading(false); } };
+  
+  const handleGoogleLogin = async () => { 
+    console.log("🔵 Attempting Google Login...");
+    setIsLoginLoading(true); 
+    try { 
+        await signInWithPopup(auth, googleProvider); 
+        setIsLoginModalOpen(false); 
+        showToast(`👋 歡迎回來`); 
+    } catch (error) { 
+        console.error("Login Error", error);
+        showToast(`❌ 登入失敗: ${error.message}`); 
+    } finally { 
+        setIsLoginLoading(false); 
+    } 
+  };
+  
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
   const callEmailService = async (id, data, isManual = false) => {
@@ -319,17 +336,22 @@ export const useDoohSystem = () => {
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
                 let warning = basePricing.warning;
                 
-                if (hoursUntil < 24 && hoursUntil > 0) {
+                // 🔥 1. 定義急單狀態
+                const isUrgent = hoursUntil > 0 && hoursUntil <= 24;
+
+                // --- 2. 急單邏輯 (< 24h) ---
+                if (isUrgent) {
                     canBid = false; warning = "急單 (限買斷)"; 
                     if (basePricing.isPrime) isBuyoutDisabled = false; 
-                } else if (slotTime > sevenDaysLater) {
+                } 
+                // --- 3. 遠期邏輯 (> 7天) ---
+                else if (slotTime > sevenDaysLater) {
                     canBid = false; warning = "遠期 (限買斷)";
                     if (isBuyoutDisabled) warning = "Prime 遠期 (無法交易)";
                 }
 
                 let currentHighestBid = existingBids[key] || 0;
                 
-                // 🔥 安全變數定義
                 const finalMinBid = basePricing.minBid;
                 const finalBuyout = basePricing.buyoutPrice;
                 const isLocked = basePricing.isLocked || isSoldOut;
@@ -339,7 +361,7 @@ export const useDoohSystem = () => {
                     minBid: finalMinBid, buyoutPrice: finalBuyout,
                     marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(finalMinBid * 1.5), 
                     isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled,
-                    canBid, hoursUntil, isUrgent: hoursUntil > 0 && hoursUntil <= 24, 
+                    canBid, hoursUntil, isUrgent, 
                     competitorBid: currentHighestBid, isSoldOut: isLocked, warning
                 });
             });
@@ -350,7 +372,7 @@ export const useDoohSystem = () => {
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const totalSlots = availableSlots.length; 
+    const totalSlots = availableSlots.length;
     const soldOutCount = generateAllSlots.length - availableSlots.length;
     
     let buyoutTotal = 0, currentBidTotal = 0, minBidTotal = 0, urgentCount = 0; 
@@ -362,7 +384,7 @@ export const useDoohSystem = () => {
     availableSlots.forEach(slot => {
         if (!slot.canBid && slot.isBuyoutDisabled) {
             hasPrimeFarFutureLock = true;
-            // 🔥 不要 return，讓 hasRestrictedBid 能被執行到！
+            // 🔥 Removed return to allow restrictedBid logic to run
         }
 
         if (!hasPrimeFarFutureLock) {
@@ -406,7 +428,47 @@ export const useDoohSystem = () => {
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
   const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; if (mode === 'recurring') { /* Optional */ } const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
   
+  const handleBidClick = () => { 
+    console.log("🖱️ Handle Bid Clicked"); // Debug
+    if (!user) { 
+        console.log("❌ No user, opening login");
+        setIsLoginModalOpen(true); 
+        return; 
+    } 
+    if (pricing.totalSlots === 0) { 
+        console.log("❌ No slots selected");
+        showToast('❌ 請先選擇'); 
+        return; 
+    } 
+    console.log("✅ Opening Bid Modal");
+    setTermsAccepted(false); 
+    setIsBidModalOpen(true); 
+  };
+
+  const handleBuyoutClick = () => { 
+    console.log("🖱️ Handle Buyout Clicked"); // Debug
+    if (!user) { 
+        console.log("❌ No user, opening login");
+        setIsLoginModalOpen(true); 
+        return; 
+    } 
+    if (pricing.totalSlots === 0) { 
+        console.log("❌ No slots selected");
+        showToast('❌ 請先選擇'); 
+        return; 
+    } 
+    if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { 
+        console.log("❌ Buyout restricted (Prime)");
+        showToast('❌ Prime 時段限競價'); 
+        return; 
+    } 
+    console.log("✅ Opening Buyout Modal");
+    setTermsAccepted(false); 
+    setIsBuyoutModalOpen(true); 
+  };
+
   const initiateTransaction = async (type = 'bid') => {
+    console.log(`🚀 Initiating Transaction: ${type}`); // Debug
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
@@ -425,13 +487,19 @@ export const useDoohSystem = () => {
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
     try {
         setTransactionStep('processing');
+        console.log("📡 Sending to Firestore...", txnData);
         const docRef = await addDoc(collection(db, "orders"), txnData);
+        console.log("✅ Firestore Doc ID:", docRef.id);
         localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
         setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary');
-    } catch (error) { console.error(error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
+    } catch (error) { 
+        console.error("❌ AddDoc Error:", error);
+        showToast("建立訂單失敗"); setTransactionStep('idle'); 
+    }
   };
 
   const processPayment = async () => {
+    console.log("💸 Processing Payment...");
     setTransactionStep('processing');
     const targetId = localStorage.getItem('temp_order_id') || currentOrderId;
     if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
@@ -443,12 +511,10 @@ export const useDoohSystem = () => {
             body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }),
         });
         const data = await response.json();
+        console.log("💳 Stripe Response:", data);
         if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); }
-    } catch (error) { console.error(error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
+    } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
-
-  const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
   // --- Return Objects for View ---
   return {
@@ -459,7 +525,7 @@ export const useDoohSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, // 🔥 確保匯出這一個！
+    occupiedSlots, 
     
     // Setters / Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
