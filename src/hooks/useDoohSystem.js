@@ -526,6 +526,15 @@ export const useDoohSystem = () => {
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
     occupiedSlots, 
+
+        // 🔥🔥🔥 補上這些缺失的 State 變數 🔥🔥🔥
+    isBuyoutModalOpen, 
+    isBidModalOpen, 
+    slotBids, 
+    batchBidInput, 
+    termsAccepted,
+    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+
     
     // Setters / Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
