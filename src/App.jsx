@@ -377,7 +377,7 @@ const DOOHBiddingSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
-  // 🔥🔥🔥 核心生成邏輯
+  // 🔥🔥🔥 核心生成邏輯 (已修正所有時間規則)
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0) return [];
     
@@ -417,6 +417,7 @@ const DOOHBiddingSystem = () => {
                 if (!screen) return;
                 
                 const key = `${dateStr}-${h}-${screenId}`; 
+                // 只檢查 "真正已售"
                 const isSoldOut = occupiedSlots.has(key);
                 
                 const basePricing = calculateDynamicPrice(
@@ -437,28 +438,38 @@ const DOOHBiddingSystem = () => {
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; // Prime Time 默認 disable buyout
                 let warning = basePricing.warning;
                 
-                // --- 1. 急單 (< 24h) ---
-                if (hoursUntil < 24 && hoursUntil > 0) {
+                // 🔥 1. 定義急單狀態
+                const isUrgent = hoursUntil > 0 && hoursUntil <= 24;
+
+                // --- 2. 急單邏輯 (< 24h) ---
+                if (isUrgent) {
+                    // 急單不允許競價，只能買斷
                     canBid = false;
                     warning = "急單 (限買斷)"; 
                     
-                    // 急單即使是 Prime Time，也可以 Buyout
+                    // 修正：急單即使是 Prime Time，也可以 Buyout
                     if (basePricing.isPrime) {
                         isBuyoutDisabled = false; // 允許 Buyout
                     }
                 }
                 
-                // --- 2. 遠期 (> 7天) ---
+                // --- 3. 遠期邏輯 (> 7天) ---
                 else if (slotTime > sevenDaysLater) {
+                    // 遠期不允許競價，只能買斷
                     canBid = false; 
                     warning = "遠期 (限買斷)";
                     
-                    // 如果是 Prime Time，既不能 Bid (因遠期)，又不能 Buyout (因 Prime)，無法交易
+                    // 如果是 Prime Time，本身被 pricingEngine 設為 isBuyoutDisabled=true
+                    // 結果：既不能 Bid，又不能 Buyout -> 無法交易
                     if (basePricing.isPrime) {
                         warning = "遠期 Prime (暫未開放，請於7天內競價)";
+                        // 此時 canBid=false 且 isBuyoutDisabled=true，按鈕會全灰
                     }
                 }
                 
+                // --- 4. 競價區 (24h - 7d) ---
+                // 這裡保持 pricingEngine 的設定
+
                 let currentHighestBid = existingBids[key] || 0;
 
                 // 🔥 確保所有變數都有定義
@@ -476,7 +487,7 @@ const DOOHBiddingSystem = () => {
                     isBuyoutDisabled: isBuyoutDisabled,
                     canBid, 
                     hoursUntil,
-                    isUrgent, 
+                    isUrgent, // ✅ 使用上面定義的 isUrgent
                     competitorBid: currentHighestBid, 
                     isSoldOut: isLocked, 
                     warning
@@ -493,7 +504,6 @@ const DOOHBiddingSystem = () => {
   }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, isBundleMode, screens, occupiedSlots, marketStats, pricingConfig, specialRules]);
 
   const pricing = useMemo(() => {
-    // 🔥 [FIX] 定義變數以解決 ReferenceError
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const totalSlots = availableSlots.length; // ✅ 定義在這裡
     const soldOutCount = generateAllSlots.length - availableSlots.length;
@@ -532,10 +542,10 @@ const DOOHBiddingSystem = () => {
     });
     
     return { 
-        totalSlots, // ✅ 現在這裡引用的是正確的變數
+        totalSlots, // ✅ 使用正確定義的變數
         buyoutTotal, currentBidTotal, minBidTotal,
         conflicts, missingBids, invalidBids, soldOutCount, urgentCount,
-        canStartBidding: totalSlots > 0 && !hasRestrictedBid, // ✅ 現在這裡也不會報錯了
+        canStartBidding: totalSlots > 0 && !hasRestrictedBid, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock
     };
