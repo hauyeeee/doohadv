@@ -1,5 +1,5 @@
 // netlify/functions/stripe-webhook.cjs
-console.log("🚀 [DEBUG] Stripe Webhook v3.0 - Buyout Logic Added");
+console.log("🚀 [DEBUG] Stripe Webhook v3.1 - Fix PaymentIntent ID");
 
 // 1. 引入依賴
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
@@ -53,11 +53,13 @@ exports.handler = async (event) => {
 
         if (orderId) {
             try {
-                // 🔥 核心修改：根據類型決定狀態 🔥
-                let newStatus = 'paid_pending_selection'; // 預設是競價中
+                // 🔥 核心修改：根據類型決定狀態
+                // 預設是競價中 (paid_pending_selection)
+                let newStatus = 'paid_pending_selection';
                 
                 if (orderType === 'buyout') {
-                    newStatus = 'paid'; // 如果是買斷，直接變成「已付款/成功」
+                    // 如果是買斷，直接變成「已付款/成功」
+                    newStatus = 'paid';
                 }
 
                 // 使用 Admin SDK 寫入
@@ -65,9 +67,11 @@ exports.handler = async (event) => {
                     status: newStatus, 
                     paymentStatus: 'paid_verified_webhook',
                     stripeSessionId: session.id,
+                    // 🔥 [CRITICAL FIX] 儲存 PaymentIntent ID 以便日後 Capture/Cancel
+                    paymentIntentId: session.payment_intent,
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
-                
+
                 console.log(`✅ 訂單 ${orderId} 狀態已更新為: ${newStatus}`);
                 return { statusCode: 200, body: JSON.stringify({ received: true }) };
 
