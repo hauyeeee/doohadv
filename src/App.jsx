@@ -499,9 +499,18 @@ const DOOHBiddingSystem = () => {
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    let buyoutTotal = 0, currentBidTotal = 0, minBidTotal = 0, urgentCount = 0; 
-    let conflicts = [], missingBids = 0, invalidBids = 0; 
-    let hasRestrictedBuyout = false, hasRestrictedBid = false, hasUrgentRisk = false;
+    const soldOutCount = generateAllSlots.length - availableSlots.length;
+    
+    const totalSlots = availableSlots.length;
+    let buyoutTotal = 0; 
+    let currentBidTotal = 0; 
+    let minBidTotal = 0; 
+    let urgentCount = 0; 
+    
+    let conflicts = []; let missingBids = 0; let invalidBids = 0; 
+    let hasRestrictedBuyout = false;
+    let hasRestrictedBid = false; 
+    let hasUrgentRisk = false; 
     let hasDateRestrictedBid = false; 
     let hasPrimeFarFutureLock = false; // 新增：Prime + 遠期鎖死
 
