@@ -434,56 +434,52 @@ const DOOHBiddingSystem = () => {
                 const now = new Date();
                 const hoursUntil = (slotTime - now) / (1000 * 60 * 60);
                 
-                let canBid = basePricing.canBid && !basePricing.isLocked && !isSoldOut;
-                let isBuyoutDisabled = basePricing.isBuyoutDisabled; // Prime Time 默認 disable buyout
+                const finalMinBid = basePricing.minBid;
+                const finalBuyout = basePricing.buyoutPrice;
+                const isLocked = basePricing.isLocked || isSoldOut;
+
+                const isUrgent = hoursUntil > 0 && hoursUntil <= 24; 
+                const statsKey = `${screenId}_${dayOfWeek}_${h}`;
+                const historicalAvg = marketStats[statsKey] || Math.ceil(finalMinBid * 1.5); 
+
+                let compBid = existingBids[key] || 0;
+                
+                // 🔥🔥🔥 規則判定邏輯 (重要！)
+                let canBid = basePricing.canBid && !isLocked;
+                let isBuyoutDisabled = basePricing.isBuyoutDisabled; // Prime Time 本身會 disable buyout
                 let warning = basePricing.warning;
                 
-                // --- 1. 急單 (< 24h) ---
+                // 1. 急單 (< 24h)：只能 Buyout，不能 Bid
                 if (hoursUntil < 24 && hoursUntil > 0) {
-                    // 急單不允許競價，只能買斷
                     canBid = false;
                     warning = "急單 (限買斷)"; 
-                    
-                    // 🔥 修正：急單即使是 Prime Time，也可以 Buyout
-                    if (basePricing.isPrime) {
-                        isBuyoutDisabled = false; // 允許 Buyout
-                    }
                 }
-                
-                // --- 2. 遠期 (> 7天) ---
+                // 2. 遠期 (> 7天)：只能 Buyout，不能 Bid
                 else if (slotTime > sevenDaysLater) {
-                    // 遠期不允許競價，只能買斷
-                    canBid = false; 
+                    canBid = false;
                     warning = "遠期 (限買斷)";
-                    
-                    // 如果是 Prime Time，本身被 pricingEngine 設為 isBuyoutDisabled=true
-                    // 結果：既不能 Bid，又不能 Buyout -> 無法交易
-                    if (basePricing.isPrime) {
-                        warning = "遠期 Prime (暫未開放，請於7天內競價)";
-                        // 此時 canBid=false 且 isBuyoutDisabled=true，按鈕會全灰
+                    // 如果是 Prime Time，本身已經 isBuyoutDisabled=true
+                    // 結果就是：canBid=false AND isBuyoutDisabled=true -> 完全鎖死
+                    if (isBuyoutDisabled) {
+                        warning = "Prime 遠期 (無法交易)";
                     }
                 }
-                
-                // --- 3. 競價區 (24h - 7d) ---
-                // 這裡保持 pricingEngine 的設定：
-                // - Normal/Gold: canBid=true, isBuyoutDisabled=false (可Bid可Buy)
-                // - Prime: canBid=true, isBuyoutDisabled=true (只可Bid)
-
-                let currentHighestBid = existingBids[key] || 0;
+                // 3. 競價區 (24h - 7d)：可以 Bid
+                // Prime Time 邏輯：isBuyoutDisabled 已經在 pricingEngine 設為 true，所以這裡不用改，自然變成 "只能 Bid"
 
                 slots.push({ 
                     key, dateStr, hour: h, screenId, 
                     screenName: screen.name, location: screen.location, 
-                    minBid: basePricing.minBid,       
+                    minBid: finalMinBid,       
                     buyoutPrice: finalBuyout,
-                    marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
+                    marketAverage: historicalAvg, 
                     isPrime: basePricing.isPrime,
                     isBuyoutDisabled: isBuyoutDisabled,
                     canBid, 
                     hoursUntil,
                     isUrgent, 
-                    competitorBid: currentHighestBid, 
-                    isSoldOut: basePricing.isLocked || isSoldOut, 
+                    competitorBid: compBid,
+                    isSoldOut: isLocked, 
                     warning
                 });
             });
@@ -868,11 +864,10 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
                     
-                    {/* 🔥 遠期 Prime 鎖定警告 */}
                     {pricing.hasPrimeFarFutureLock && (
                         <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
                             <Lock size={12}/> 
-                            <span>遠期 Prime (暫未開放，請於7天內競價)</span>
+                            <span>Prime 時段限制：僅限 7 天內競價，不可買斷。遠期 Prime 無法交易。</span>
                         </div>
                     )}
 
