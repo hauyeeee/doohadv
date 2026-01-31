@@ -867,10 +867,11 @@ const DOOHBiddingSystem = () => {
                         </div>
                     )}
                     
+                    {/* 🔥 遠期限制的黃色警告 Banner */}
                     {pricing.hasDateRestrictedBid && (
                         <div className="text-xs text-yellow-300 flex items-center gap-1 bg-yellow-900/30 px-2 py-1 rounded border border-yellow-800 animate-pulse">
                             <AlertTriangle size={12}/> 
-                            <span>包含超過 7 天後的時段：僅支援直接買斷 (Stripe 授權限制)</span>
+                            <span>包含遠期時段 (>7天)：僅支援直接買斷 (Stripe 授權限制)</span>
                         </div>
                     )}
 
@@ -890,7 +891,7 @@ const DOOHBiddingSystem = () => {
                 <button onClick={handleBidClick} disabled={!pricing.canStartBidding} className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all shadow-lg flex flex-col items-center justify-center gap-0.5 ${!pricing.canStartBidding ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-blue-900/50'}`}>
                     <span>
                         {pricing.hasRestrictedBid 
-                            ? (pricing.hasDateRestrictedBid ? '🚫 超過7天限買斷' : '🚫 急單限買斷') 
+                            ? '🚫 限買斷' 
                             : '出價競投'}
                     </span>
                     {!pricing.hasRestrictedBid && pricing.totalSlots > 0 && <span className="text-[10px] font-normal opacity-80">自由出價</span>}
