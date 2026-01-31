@@ -681,7 +681,33 @@ const AdminPanel = () => {
 
 // --- Sub-Components ---
 const ConfigSection = ({title, children}) => (<div className="space-y-3"><h4 className="text-sm font-bold text-slate-700 border-b pb-1">{title}</h4><div className="space-y-2">{children}</div></div>);
-const ConfigInput = ({ label, val, onChange, desc }) => (<div className="flex justify-between items-center"><div className="text-xs font-bold text-slate-500">{label} <span className="text-[10px] font-normal text-slate-400 block">{desc}</span></div><input type="number" step="0.1" value={val||0} onChange={e=>onChange(e.target.value)} className="w-16 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:border-blue-500"/></div>);
+const ConfigInput = ({ label, val, onChange, desc }) => {
+    // 自動計算百分比： (1.25 - 1) * 100 = 25%
+    const percentage = val ? Math.round((parseFloat(val) - 1) * 100) : 0;
+    const sign = percentage > 0 ? '+' : '';
+    
+    return (
+        <div className="flex justify-between items-center bg-slate-50 p-2 rounded mb-1">
+            <div className="text-xs font-bold text-slate-600">
+                {label} 
+                <span className="text-[10px] font-normal text-slate-400 block">{desc}</span>
+            </div>
+            <div className="flex items-center gap-2">
+                {/* 顯示換算後的百分比，更加直觀 */}
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${percentage > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
+                    {sign}{percentage}%
+                </span>
+                <input 
+                    type="number" 
+                    step="0.05" 
+                    value={val||0} 
+                    onChange={e=>onChange(e.target.value)} 
+                    className="w-16 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
+                />
+            </div>
+        </div>
+    );
+};
 const StatCard = ({ title, value, icon, bg, border }) => (<div className={`p-4 rounded-xl border ${bg} ${border} flex items-center justify-between shadow-sm`}><div><p className="text-xs font-bold text-slate-500 mb-1 uppercase">{title}</p><p className="text-xl font-bold text-slate-800">{value}</p></div><div className="bg-white p-2 rounded-full shadow-sm">{icon}</div></div>);
 const StatusBadge = ({ status }) => { 
     const map = { 

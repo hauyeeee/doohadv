@@ -649,12 +649,12 @@ const DOOHBiddingSystem = () => {
             </div>
         </div>
         
-        <div className="flex items-center gap-4">
+         {/* <div className="flex items-center gap-4">
             {modalPaymentStatus === 'paid' && (
                 <button onClick={handleManualResend} className="bg-orange-50 text-orange-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-orange-100 border border-orange-200">
                     📧 沒收到 Email? 按此補發
                 </button>
-            )}
+            )}*/}
 
             {user ? (<button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-2 hover:bg-slate-50 p-1 rounded-lg transition-colors"><img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-slate-200" /></button>) : (<button onClick={() => setIsLoginModalOpen(true)} className="flex items-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors"><LogIn size={16} /> 登入</button>)}
         </div>
