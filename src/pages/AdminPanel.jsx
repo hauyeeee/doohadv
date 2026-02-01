@@ -5,7 +5,8 @@ import {
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
-  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle
+  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
+  Mail, MessageCircle // 🔥 新增了 Mail 和 MessageCircle Icon
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -395,7 +396,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 2. Orders Management - 🔥 ENHANCED with Detailed Slots */}
+        {/* 2. Orders Management - 🔥 ENHANCED with Detailed Slots, Video Status & Contact Info */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
@@ -412,7 +413,7 @@ const AdminPanel = () => {
                             <tr>
                                 <th className="p-4 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.size === filteredOrders.length}/></th>
                                 <th className="p-4">時間</th>
-                                <th className="p-4">訂單詳情 (含購買時段)</th>
+                                <th className="p-4 w-1/3">訂單詳情 / 聯絡客戶</th>
                                 <th className="p-4 text-right">金額</th>
                                 <th className="p-4 text-center">狀態</th>
                                 <th className="p-4 text-right">操作</th>
@@ -427,16 +428,48 @@ const AdminPanel = () => {
                                         <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate.toLocaleString('zh-HK')}</td>
                                         <td className="p-4 align-top">
                                             <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
-                                            <div className="text-xs text-slate-500 flex items-center gap-2 mb-2">
-                                                {order.userEmail}
-                                                {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP</span>}
+                                            
+                                            {/* 🔥 Contact Info Section */}
+                                            <div className="my-2 p-2 bg-slate-50 border border-slate-200 rounded">
+                                                <div className="text-xs text-slate-700 font-bold flex items-center gap-2 mb-1">
+                                                    {order.userEmail}
+                                                    {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP</span>}
+                                                </div>
+                                                
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    {/* Email Button */}
+                                                    <a href={`mailto:${order.userEmail}?subject=DOOH廣告訂單 #${order.id} 跟進`} className="text-[10px] px-2 py-1 bg-white border border-slate-300 rounded hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition-colors">
+                                                        <Mail size={12}/> Email 客戶
+                                                    </a>
+                                                    {/* WhatsApp Button (Only shows if mobile/phone exists in order data) */}
+                                                    {(order.mobile || order.phone) && (
+                                                        <a href={`https://wa.me/${(order.mobile || order.phone).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 bg-green-50 border border-green-200 rounded hover:bg-green-100 text-green-700 flex items-center gap-1 transition-colors">
+                                                            <MessageCircle size={12}/> WhatsApp
+                                                        </a>
+                                                    )}
+                                                </div>
                                             </div>
-                                            {/* 🔥 Detailed Slots List */}
-                                            <div className="bg-slate-50 border border-slate-200 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
+
+                                            {/* 🔥 Video Status Indicator */}
+                                            <div className="mb-2">
+                                                {order.hasVideo ? (
+                                                    <span className="inline-flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-100">
+                                                        <CheckCircle size={12}/> 影片已上傳 ({order.videoName?.slice(0, 15)}...)
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded text-xs font-bold border border-red-100 animate-pulse">
+                                                        <AlertTriangle size={12}/> ⚠️ 尚未上傳影片 (請追片)
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Detailed Slots List */}
+                                            <div className="text-xs text-slate-500 font-bold mb-1">購買時段:</div>
+                                            <div className="bg-white border border-slate-200 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
                                                 {order.detailedSlots && order.detailedSlots.map((slot, idx) => (
                                                     <div key={idx} className="flex gap-2 text-slate-600">
-                                                        <span className="font-mono bg-white px-1 rounded border">{slot.date}</span>
-                                                        <span className="font-bold">{String(slot.hour).padStart(2,'0')}:00</span>
+                                                        <span className="font-mono bg-slate-100 px-1 rounded">{slot.date}</span>
+                                                        <span className="font-bold text-slate-800">{String(slot.hour).padStart(2,'0')}:00</span>
                                                         <span className="text-slate-400">@ Screen {slot.screenId}</span>
                                                     </div>
                                                 ))}
