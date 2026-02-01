@@ -5,7 +5,7 @@ import {
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
-  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter
+  LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -35,8 +35,8 @@ const AdminPanel = () => {
       baseImpressions: 10000, primeMultiplier: 3.5, goldMultiplier: 1.8,
       weekendMultiplier: 1.5, bundleMultiplier: 1.25, urgentFee24h: 1.5, urgentFee1h: 2.0
   });
-  const [activeConfig, setActiveConfig] = useState({}); // Current editing config
-  const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); // 'global' or 'screenId'
+  const [activeConfig, setActiveConfig] = useState({}); 
+  const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
   
   // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -45,11 +45,11 @@ const AdminPanel = () => {
   const [reviewNote, setReviewNote] = useState("");
   
   // --- Advanced Filter States ---
-  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); // Analytics Multi-select (Screens)
-  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); // Analytics Multi-select (Hours)
+  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); 
+  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); 
   
-  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       // Bulk Action Multi-select
-  const [editingScreens, setEditingScreens] = useState({});                  // Inline Screen Editing
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
+  const [editingScreens, setEditingScreens] = useState({});                  
 
   // --- Forms ---
   const [newRule, setNewRule] = useState({
@@ -72,35 +72,30 @@ const AdminPanel = () => {
   const fetchAllData = () => {
       setLoading(true);
       
-      // 1. Orders (Realtime)
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
         setOrders(snap.docs.map(d => ({ id: d.id, ...d.data(), createdAtDate: d.data().createdAt?.toDate() || new Date() })));
         setLoading(false);
       });
 
-      // 2. Screens (Realtime)
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
           setScreens(snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
       });
 
-      // 3. Special Rules (Realtime)
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
 
-      // 4. Config (One-time)
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
           if (docSnap.exists()) {
               const data = docSnap.data();
               setGlobalPricingConfig(data);
-              setActiveConfig(data); // Initial view is global
+              setActiveConfig(data);
           }
       });
 
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // --- 🧠 Logic: VIP Customer Identification ---
   const customerHistory = useMemo(() => {
       const history = {};
       orders.forEach(order => {
@@ -111,7 +106,6 @@ const AdminPanel = () => {
       return history;
   }, [orders]);
 
-  // --- 📊 Logic: Dashboard Stats ---
   const stats = useMemo(() => {
     let totalRevenue = 0;
     let validOrders = 0;
@@ -121,7 +115,9 @@ const AdminPanel = () => {
 
     orders.forEach(order => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
+        // Determine pending review: Won + Has Video + Not Approved + Not Rejected
         if (order.status === 'won' && order.hasVideo && !order.isApproved && !order.isRejected) pendingReview++;
+        
         if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status)) {
             totalRevenue += Number(order.amount) || 0;
             validOrders++;
@@ -137,17 +133,14 @@ const AdminPanel = () => {
     };
   }, [orders]);
 
-  // --- 📈 Logic: Real-time Market Stats (Multi-Screen + Multi-Hour Filter) ---
   const realMarketStats = useMemo(() => {
       const statsMap = {}; 
-      // Init Grid 7x24
       for(let d=0; d<7; d++) {
           for(let h=0; h<24; h++) {
               statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
           }
       }
       
-      // Populate Data
       orders.forEach(order => {
           if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
               order.detailedSlots.forEach(slot => {
@@ -166,7 +159,6 @@ const AdminPanel = () => {
           }
       });
 
-      // Calculate Summary
       let selectionTotalAmount = 0;
       let selectionTotalBids = 0;
       
@@ -194,16 +186,15 @@ const AdminPanel = () => {
       };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
-  // --- ⚙️ Logic: Pricing Configuration (Global vs Screen) ---
   useEffect(() => {
       if (selectedConfigTarget === 'global') {
           setActiveConfig(globalPricingConfig);
       } else {
           const screen = screens.find(s => String(s.id) === selectedConfigTarget);
           if (screen && screen.customPricing) {
-              setActiveConfig(screen.customPricing); // Load custom config
+              setActiveConfig(screen.customPricing);
           } else {
-              setActiveConfig(globalPricingConfig); // Fallback to global for editing
+              setActiveConfig(globalPricingConfig);
           }
       }
   }, [selectedConfigTarget, globalPricingConfig, screens]);
@@ -225,7 +216,6 @@ const AdminPanel = () => {
       }
   };
 
-  // --- 🛠 Logic: Bulk Actions ---
   const filteredOrders = useMemo(() => {
       return orders.filter(o => {
           if (activeTab === 'review') return o.status === 'won' && o.hasVideo && !o.isApproved && !o.isRejected;
@@ -267,7 +257,6 @@ const AdminPanel = () => {
       } catch (e) { console.error(e); alert("❌ 操作失敗"); }
   };
 
-  // --- 📅 Logic: Special Rules (Robust Version) ---
   const handleAddRule = async () => {
       if (!newRule.date) return alert("❌ 請選擇日期");
       
@@ -277,7 +266,6 @@ const AdminPanel = () => {
       if (!inputStr || inputStr.toLowerCase() === 'all') {
           hours = Array.from({length: 24}, (_, i) => i);
       } else {
-          // Support "0-23" or "18,19,20"
           if (inputStr.includes('-')) {
               const [start, end] = inputStr.split('-').map(n => parseInt(n));
               if (!isNaN(start) && !isNaN(end) && start <= end) {
@@ -288,32 +276,28 @@ const AdminPanel = () => {
           }
       }
 
-      if (hours.length === 0) return alert("❌ 時段格式錯誤 (e.g., 0-23 or 18,19)");
-
-      // 🔥 強制將日期格式化為 YYYY-MM-DD，避免時區問題
-      // 這裡直接使用 Admin Panel Input 的值 (YYYY-MM-DD)，這是最安全的
+      if (hours.length === 0) return alert("❌ 時段格式錯誤");
       const safeDate = newRule.date; 
 
       try {
           await addDoc(collection(db, "special_rules"), {
-              screenId: newRule.screenId, // 'all' or specific ID
+              screenId: newRule.screenId, 
               date: safeDate, 
               hours: hours,
-              type: newRule.action, // 'lock', 'price_override', 'disable_buyout'
+              type: newRule.action, 
               value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null,
               note: newRule.note, 
               createdAt: new Date()
           });
           alert("✅ 規則已建立");
           setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' });
-      } catch (e) { console.error(e); alert("❌ 建立失敗 (請檢查 Firebase Rules)"); }
+      } catch (e) { console.error(e); alert("❌ 建立失敗"); }
   };
 
   const handleDeleteRule = async (id) => {
       if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id));
   };
 
-  // --- 🎬 Logic: Review ---
   const handleReview = async (orderId, action) => {
     const targetOrder = orders.find(o => o.id === orderId);
     if (!targetOrder || !window.confirm(`確定要 ${action === 'approve' ? '通過' : '拒絕'}?`)) return;
@@ -332,7 +316,6 @@ const AdminPanel = () => {
     } catch (e) { alert("操作失敗"); }
   };
 
-  // --- 📺 Logic: Screen Management ---
   const handleScreenChange = (fid, field, val) => {
       setEditingScreens(prev => ({ ...prev, [fid]: { ...prev[fid], [field]: val } }));
   };
@@ -364,8 +347,6 @@ const AdminPanel = () => {
       if (n.has(h)) n.delete(h); else n.add(h);
       setSelectedAnalyticsHours(n);
   };
-
-  // ---------------- Render ----------------
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
@@ -414,7 +395,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 2. Orders Management (Restored Bulk Actions & VIP) */}
+        {/* 2. Orders Management - 🔥 ENHANCED with Detailed Slots */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
@@ -423,7 +404,6 @@ const AdminPanel = () => {
                         <input type="text" placeholder="搜尋 ID / Email..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="pl-2 border rounded px-2 py-1 text-sm outline-none w-64"/>
                         <select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm"><option value="all">所有狀態</option><option value="paid_pending_selection">競價中</option><option value="won">成功 (Won)</option><option value="paid">已完成 (Paid)</option><option value="cancelled">已取消</option></select>
                     </div>
-                    {/* 🔥 Bulk Action Bar */}
                     {selectedOrderIds.size > 0 && <button onClick={() => handleBulkAction('cancel')} className="text-red-600 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 flex items-center gap-1 animate-pulse"><Trash2 size={14}/> 批量取消 ({selectedOrderIds.size})</button>}
                 </div>
                 <div className="overflow-x-auto">
@@ -432,7 +412,7 @@ const AdminPanel = () => {
                             <tr>
                                 <th className="p-4 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.size === filteredOrders.length}/></th>
                                 <th className="p-4">時間</th>
-                                <th className="p-4">訂單詳情</th>
+                                <th className="p-4">訂單詳情 (含購買時段)</th>
                                 <th className="p-4 text-right">金額</th>
                                 <th className="p-4 text-center">狀態</th>
                                 <th className="p-4 text-right">操作</th>
@@ -444,18 +424,28 @@ const AdminPanel = () => {
                                 return (
                                     <tr key={order.id} className={`hover:bg-slate-50 ${selectedOrderIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
                                         <td className="p-4 text-center"><input type="checkbox" checked={selectedOrderIds.has(order.id)} onChange={() => handleSelectOrder(order.id)} /></td>
-                                        <td className="p-4 text-slate-500 whitespace-nowrap">{order.createdAtDate.toLocaleString('zh-HK')}</td>
-                                        <td className="p-4">
-                                            <div className="font-mono text-xs font-bold text-slate-700">{order.id.slice(0,8)}...</div>
-                                            <div className="text-xs text-slate-500 flex items-center gap-2">
+                                        <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate.toLocaleString('zh-HK')}</td>
+                                        <td className="p-4 align-top">
+                                            <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
+                                            <div className="text-xs text-slate-500 flex items-center gap-2 mb-2">
                                                 {order.userEmail}
-                                                {/* 🔥 VIP Tag */}
-                                                {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP ({customerHistory[order.userEmail]})</span>}
+                                                {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP</span>}
+                                            </div>
+                                            {/* 🔥 Detailed Slots List */}
+                                            <div className="bg-slate-50 border border-slate-200 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
+                                                {order.detailedSlots && order.detailedSlots.map((slot, idx) => (
+                                                    <div key={idx} className="flex gap-2 text-slate-600">
+                                                        <span className="font-mono bg-white px-1 rounded border">{slot.date}</span>
+                                                        <span className="font-bold">{String(slot.hour).padStart(2,'0')}:00</span>
+                                                        <span className="text-slate-400">@ Screen {slot.screenId}</span>
+                                                    </div>
+                                                ))}
+                                                {!order.detailedSlots && <span className="text-slate-400 italic">No detailed slot data</span>}
                                             </div>
                                         </td>
-                                        <td className="p-4 text-right font-bold">HK$ {order.amount?.toLocaleString()}</td>
-                                        <td className="p-4 text-center"><StatusBadge status={order.status} /></td>
-                                        <td className="p-4 text-right">
+                                        <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
+                                        <td className="p-4 text-center align-top"><StatusBadge status={order.status} /></td>
+                                        <td className="p-4 text-right align-top">
                                             {order.status !== 'cancelled' && <button onClick={async () => { if(window.confirm("取消此訂單？")) await updateDoc(doc(db, "orders", order.id), { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }) }} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>}
                                         </td>
                                     </tr>
@@ -467,28 +457,44 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 3. Review (Restored Detailed View) */}
+        {/* 3. Review - 🔥 ENHANCED with Video Player */}
         {activeTab === 'review' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in">
                 {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
                 filteredOrders.map(order => (
-                    <div key={order.id} className="bg-white rounded-xl shadow-sm border border-orange-200 overflow-hidden">
+                    <div key={order.id} className="bg-white rounded-xl shadow-md border border-orange-200 overflow-hidden flex flex-col">
                         <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center">
                             <span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span>
                             <span className="text-[10px] text-slate-500">{order.createdAtDate.toLocaleDateString()}</span>
                         </div>
-                        <div className="p-4 space-y-3">
-                            <div><p className="text-xs text-slate-400">客戶</p><p className="font-bold text-sm">{order.userEmail}</p></div>
+                        
+                        {/* 🔥 Video Player Area */}
+                        <div className="relative bg-black aspect-video w-full">
+                            {order.videoUrl ? (
+                                <video controls src={order.videoUrl} className="w-full h-full object-contain" />
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-white/50 text-xs">No Video File</div>
+                            )}
+                        </div>
+
+                        <div className="p-4 space-y-3 flex-1 flex flex-col">
                             <div>
-                                <p className="text-xs text-slate-400">影片素材</p>
-                                {/* 🔥 Video Link */}
-                                <a href={order.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 text-sm font-bold underline truncate block">{order.videoName || 'Download Video'}</a>
+                                <p className="text-xs text-slate-400">客戶</p>
+                                <p className="font-bold text-sm">{order.userEmail}</p>
                             </div>
-                            <div className="pt-2 border-t flex flex-col gap-2">
-                                <button onClick={() => handleReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2 rounded font-bold text-xs hover:bg-green-700 shadow-sm">✅ 通過並發送 Email</button>
+                            <div className="text-xs text-slate-500">
+                                檔案: {order.videoName || 'Unknown'}
+                            </div>
+                            
+                            <div className="mt-auto pt-3 border-t border-slate-100 flex flex-col gap-2">
+                                <button onClick={() => handleReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-green-700 shadow-sm flex items-center justify-center gap-2">
+                                    <CheckCircle size={16}/> 通過並發送 Email
+                                </button>
                                 <div className="flex gap-2">
-                                    <input type="text" placeholder="拒絕原因..." className="flex-1 border rounded px-2 text-xs" onChange={e => setReviewNote(e.target.value)} />
-                                    <button onClick={() => handleReview(order.id, 'reject')} className="bg-red-50 text-red-600 border border-red-200 px-3 rounded text-xs font-bold hover:bg-red-100">拒絕</button>
+                                    <input type="text" placeholder="拒絕原因..." className="flex-1 border rounded px-3 py-1.5 text-xs bg-slate-50" onChange={e => setReviewNote(e.target.value)} />
+                                    <button onClick={() => handleReview(order.id, 'reject')} className="bg-white text-red-600 border border-red-200 px-3 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center gap-1">
+                                        <XCircle size={14}/> 拒絕
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -568,7 +574,7 @@ const AdminPanel = () => {
              </div>
         )}
 
-        {/* 6. Analytics (Real-time & Multi-select) */}
+        {/* 6. Analytics */}
         {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
@@ -582,7 +588,6 @@ const AdminPanel = () => {
                         ))}
                     </div>
                 </div>
-                {/* 🔥 NEW: Hour Filters */}
                 <div className="flex flex-wrap gap-1 items-center mb-4">
                     <span className="text-xs font-bold text-slate-500 uppercase w-12">Hours:</span>
                     <button onClick={() => setSelectedAnalyticsHours(new Set())} className={`w-8 h-8 rounded text-xs font-bold border ${selectedAnalyticsHours.size===0?'bg-slate-800 text-white':'bg-white text-slate-600'}`}>All</button>
@@ -593,7 +598,6 @@ const AdminPanel = () => {
                     ))}
                 </div>
 
-                {/* 🔥 NEW: Summary Card */}
                 <div className="mb-4 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white flex justify-between items-center shadow-lg">
                     <div>
                         <h3 className="font-bold text-lg mb-1">所選組合平均成交價 (Average Price)</h3>
@@ -626,7 +630,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* 7. Config (Updated: Global vs Screen) */}
+        {/* 7. Config */}
         {activeTab === 'config' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
@@ -682,7 +686,6 @@ const AdminPanel = () => {
 // --- Sub-Components ---
 const ConfigSection = ({title, children}) => (<div className="space-y-3"><h4 className="text-sm font-bold text-slate-700 border-b pb-1">{title}</h4><div className="space-y-2">{children}</div></div>);
 const ConfigInput = ({ label, val, onChange, desc }) => {
-    // 自動計算百分比： (1.25 - 1) * 100 = 25%
     const percentage = val ? Math.round((parseFloat(val) - 1) * 100) : 0;
     const sign = percentage > 0 ? '+' : '';
     
@@ -693,7 +696,6 @@ const ConfigInput = ({ label, val, onChange, desc }) => {
                 <span className="text-[10px] font-normal text-slate-400 block">{desc}</span>
             </div>
             <div className="flex items-center gap-2">
-                {/* 顯示換算後的百分比，更加直觀 */}
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${percentage > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
                     {sign}{percentage}%
                 </span>
