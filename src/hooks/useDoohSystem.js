@@ -244,21 +244,51 @@ export const useDoohSystem = () => {
     if (urlId) { setCurrentOrderId(urlId); setIsUrgentUploadModalOpen(true); fetchAndFinalizeOrder(urlId, isSuccess); }
   }, []); 
 
-  const handleRealUpload = async (e) => {
+const handleRealUpload = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       let targetId = currentOrderId || localStorage.getItem('temp_order_id') || new URLSearchParams(window.location.search).get('order_id');
       if (!targetId) { showToast("❌ 錯誤：找不到訂單 ID"); return; }
-      setIsUploadingReal(true); setCreativeStatus('uploading');
+      
+      setIsUploadingReal(true); 
+      setCreativeStatus('uploading');
+      
       try {
           const storageRef = ref(storage, `uploads/${targetId}/${file.name}`);
           const uploadTask = uploadBytesResumable(storageRef, file);
-          uploadTask.on('state_changed', (snapshot) => { setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100); }, 
-            (error) => { showToast("❌ 上傳失敗"); setIsUploadingReal(false); setCreativeStatus('empty'); }, 
-            async () => { const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); await updateDoc(doc(db, "orders", targetId), { hasVideo: true, videoUrl: downloadURL, videoName: file.name, uploadedAt: serverTimestamp() }); setCreativeName(file.name); setCreativeStatus('approved'); setIsUploadingReal(false); showToast("✅ 上傳成功！"); localStorage.removeItem('temp_order_id'); localStorage.removeItem('temp_txn_time'); }
-          );
-      } catch (error) { console.error(error); showToast("上傳錯誤"); setIsUploadingReal(false); }
+          
+          uploadTask.on('state_changed', (snapshot) => { 
+              setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100); 
+          }, 
+          (error) => { 
+              showToast("❌ 上傳失敗"); 
+              setIsUploadingReal(false); 
+              setCreativeStatus('empty'); 
+          }, 
+          async () => { 
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
+              
+              // 🔥 核心修正：加入 creativeStatus: 'pending_review'
+              await updateDoc(doc(db, "orders", targetId), { 
+                  hasVideo: true, 
+                  videoUrl: downloadURL, 
+                  videoName: file.name, 
+                  uploadedAt: serverTimestamp(),
+                  creativeStatus: 'pending_review' // <--- 加呢一行！讓 Admin 知道這單要審核
+              }); 
+              
+              setCreativeName(file.name); 
+              setCreativeStatus('approved'); // 前端顯示已完成，後台顯示待審核
+              setIsUploadingReal(false); 
+              showToast("✅ 上傳成功！等待審核"); 
+              localStorage.removeItem('temp_order_id'); 
+              localStorage.removeItem('temp_txn_time'); 
+          });
+      } catch (error) { 
+          console.error(error); 
+          showToast("上傳錯誤"); 
+          setIsUploadingReal(false); 
+      }
   };
-
   const closeTransaction = () => { setTransactionStep('idle'); setPendingTransaction(null); setCurrentOrderId(null); };
 
   const filteredScreens = useMemo(() => {
