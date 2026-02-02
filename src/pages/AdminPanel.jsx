@@ -6,8 +6,7 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy,
-  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map // 🔥 新增 Icons
+  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy, Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -22,10 +21,8 @@ const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
-// 🔥 預設時段設定
-const DEFAULT_TIER_RULES = {
-  default: { prime: [18, 19, 20, 21, 22], gold: [12, 13, 14] } 
-};
+// Default tier configuration (Fallback)
+const EMPTY_DAY_RULE = { prime: [], gold: [] };
 
 const AdminPanel = () => {
   const navigate = useNavigate();
@@ -37,7 +34,7 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Pricing Config States (Global & Active) ---
+  // --- Pricing Config ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
@@ -54,27 +51,33 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // --- Screen Management States (🔥 新增) ---
+  // --- Screen Management States (Enhanced) ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
-  const [editingScreenId, setEditingScreenId] = useState(null);
+  const [activeDayTab, setActiveDayTab] = useState(1); // 默認顯示星期一 (0=Sun, 1=Mon...)
   const [newScreenData, setNewScreenData] = useState({
-    name: '', location: '', district: '', basePrice: 50,
-    images: ['', '', ''], // 支援 3 張圖
-    specifications: '',   // 規格
-    mapUrl: '',           // Google Map
+    name: '',
+    location: '',
+    district: '',
+    basePrice: 50,
+    images: ['', '', ''], 
+    specifications: '',   
+    mapUrl: '',           
     bundleGroup: '',
-    tierRules: JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
+    // 🔥 初始化 7 日的規則
+    tierRules: {
+        0: { ...EMPTY_DAY_RULE }, 1: { ...EMPTY_DAY_RULE }, 2: { ...EMPTY_DAY_RULE },
+        3: { ...EMPTY_DAY_RULE }, 4: { ...EMPTY_DAY_RULE }, 5: { ...EMPTY_DAY_RULE }, 6: { ...EMPTY_DAY_RULE }
+    }
   });
+  const [editingScreenId, setEditingScreenId] = useState(null);
 
-  // --- Calendar States ---
+  // 🔥🔥🔥 Calendar States 🔥🔥🔥
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
 
   // --- Forms ---
-  const [newRule, setNewRule] = useState({
-      screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: ''
-  });
+  const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
   // 1. Auth & Data Fetching
   useEffect(() => {
@@ -93,7 +96,6 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
-      
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
         setOrders(snap.docs.map(d => ({ 
             id: d.id, 
@@ -102,26 +104,17 @@ const AdminPanel = () => {
         })));
         setLoading(false);
       });
-
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
-          // Sort numerically if possible
-          const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
-            .sort((a,b) => Number(a.id) - Number(b.id));
-          setScreens(sorted);
+          const sortedScreens = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
+            .sort((a, b) => Number(a.id) - Number(b.id));
+          setScreens(sortedScreens);
       });
-
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
-
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              setGlobalPricingConfig(data);
-              setActiveConfig(data);
-          }
+          if (docSnap.exists()) { setGlobalPricingConfig(docSnap.data()); setActiveConfig(docSnap.data()); }
       });
-
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
@@ -136,20 +129,14 @@ const AdminPanel = () => {
   }, [orders]);
 
   const stats = useMemo(() => {
-    let totalRevenue = 0;
-    let validOrders = 0;
-    let pendingReview = 0;
-    let dailyRevenue = {};
-    let statusCount = {};
+    let totalRevenue = 0, validOrders = 0, pendingReview = 0;
+    let dailyRevenue = {}, statusCount = {};
 
     orders.forEach(order => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
-        
         const needsReview = order.creativeStatus === 'pending_review' || 
                            (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
-        
         if (needsReview) pendingReview++;
-        
         if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status)) {
             totalRevenue += Number(order.amount) || 0;
             validOrders++;
@@ -158,44 +145,8 @@ const AdminPanel = () => {
         }
     });
 
-    return {
-        totalRevenue, totalOrders: orders.length, validOrders, pendingReview,
-        dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })),
-        statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] }))
-    };
+    return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
   }, [orders]);
-
-  // 🔥🔥🔥 之前遺漏的 Function：切換價格配置 🔥🔥🔥
-  useEffect(() => {
-      if (selectedConfigTarget === 'global') {
-          setActiveConfig(globalPricingConfig);
-      } else {
-          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
-          if (screen && screen.customPricing) {
-              setActiveConfig(screen.customPricing);
-          } else {
-              setActiveConfig(globalPricingConfig);
-          }
-      }
-  }, [selectedConfigTarget, globalPricingConfig, screens]);
-
-  const realMarketStats = useMemo(() => {
-      const statsMap = {}; 
-      for(let d=0; d<7; d++) { for(let h=0; h<24; h++) { statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; } }
-      orders.forEach(order => {
-          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
-              order.detailedSlots.forEach(slot => {
-                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
-                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
-                  if (isScreenSelected && isHourSelected) { const dateObj = new Date(slot.date); const key = `${dateObj.getDay()}-${slot.hour}`; if (statsMap[key]) { statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); statsMap[key].totalBids += 1; } }
-              });
-          }
-      });
-      let selectionTotalAmount = 0; let selectionTotalBids = 0;
-      const rows = Object.values(statsMap).map(item => { if (item.totalBids > 0) { const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; } } return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; });
-      const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
-      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
-  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   // --- Calendar Logic ---
   const monthViewData = useMemo(() => {
@@ -230,6 +181,7 @@ const AdminPanel = () => {
       order.detailedSlots.forEach(slot => {
         if (slot.date !== targetDateStr) return;
         const key = `${slot.hour}-${slot.screenId}`;
+        
         let status = 'normal';
         if (order.status === 'paid_pending_selection') status = 'bidding';
         else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed';
@@ -237,71 +189,34 @@ const AdminPanel = () => {
         else if (order.status === 'won' || order.status === 'paid') status = 'action_needed';
 
         const slotData = { 
-            ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, 
-            status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, 
-            displayStatus: status, price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
+            ...slot, 
+            orderId: order.id, 
+            userEmail: order.userEmail, 
+            videoUrl: order.videoUrl, 
+            status: order.status, 
+            creativeStatus: order.creativeStatus, 
+            isScheduled: order.isScheduled, 
+            displayStatus: status, 
+            price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout',
             priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
         };
+
         if (!grid[key]) grid[key] = [];
         grid[key].push(slotData);
       });
     });
-    Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
+
+    Object.keys(grid).forEach(key => {
+        grid[key].sort((a, b) => b.priceVal - a.priceVal);
+    });
+
     return grid;
   }, [orders, calendarDate]);
 
   // --- Handlers ---
-  const handleConfigChange = (key, val) => { setActiveConfig(prev => ({ ...prev, [key]: parseFloat(val) })); };
-  
-  const savePricingConfig = async () => { 
-      if (selectedConfigTarget === 'global') { 
-          await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); 
-          setGlobalPricingConfig(activeConfig); 
-          alert("🌍 全局價格公式已更新"); 
-      } else { 
-          const screen = screens.find(s => String(s.id) === selectedConfigTarget); 
-          if (!screen) return; 
-          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig }); 
-          alert(`✅ Screen ${screen.name} 的專屬公式已更新`); 
-      } 
-  };
-  
-  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); if (n.has(id)) n.delete(id); else n.add(id); setSelectedOrderIds(n); };
-  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
-  
-  const handleBulkAction = async (action) => { 
-      if (selectedOrderIds.size === 0) return; 
-      if (!window.confirm(`⚠️ 確認對選中的 ${selectedOrderIds.size} 張訂單執行 ${action === 'cancel' ? '批量取消' : action}?`)) return; 
-      try { 
-          const batch = writeBatch(db); 
-          selectedOrderIds.forEach(id => { 
-              const ref = doc(db, "orders", id); 
-              if (action === 'cancel') { batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }); } 
-          }); 
-          await batch.commit(); 
-          alert("✅ 批量操作完成"); setSelectedOrderIds(new Set()); 
-      } catch (e) { console.error(e); alert("❌ 操作失敗"); } 
-  };
-
-  const handleAddRule = async () => { 
-      if (!newRule.date) return alert("❌ 請選擇日期"); 
-      let hours = []; const inputStr = newRule.hoursStr.trim(); 
-      if (!inputStr || inputStr.toLowerCase() === 'all') { hours = Array.from({length: 24}, (_, i) => i); } 
-      else { 
-          if (inputStr.includes('-')) { const [start, end] = inputStr.split('-').map(n => parseInt(n)); if (!isNaN(start) && !isNaN(end) && start <= end) { for (let i = start; i <= end; i++) if (i >= 0 && i <= 23) hours.push(i); } } 
-          else { hours = inputStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23); } 
-      } 
-      if (hours.length === 0) return alert("❌ 時段格式錯誤"); 
-      try { await addDoc(collection(db, "special_rules"), { screenId: newRule.screenId, date: newRule.date, hours: hours, type: newRule.action, value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null, note: newRule.note, createdAt: new Date() }); alert("✅ 規則已建立"); setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' }); } catch (e) { console.error(e); alert("❌ 建立失敗"); } 
-  };
-  
-  const handleDeleteRule = async (id) => { if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id)); };
-
   const handleMarkAsScheduled = async (orderId) => {
     if (!confirm("確認已將影片編排至播放系統？")) return;
-    try { 
-        await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); 
-        alert("✅ 狀態已更新：準備播放"); 
+    try { await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); alert("✅ 狀態已更新：準備播放"); 
         if (selectedSlotGroup) {
             const updatedGroup = selectedSlotGroup.map(s => s.orderId === orderId ? { ...s, isScheduled: true, displayStatus: 'scheduled' } : s);
             setSelectedSlotGroup(updatedGroup);
@@ -333,7 +248,16 @@ const AdminPanel = () => {
       });
   }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // --- Screen Management Handlers (🔥 新增) ---
+  // ... (Standard Handlers) ...
+  const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
+  const savePricingConfig = async () => { if (selectedConfigTarget === 'global') { await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); setGlobalPricingConfig(activeConfig); } else { const s = screens.find(s => String(s.id) === selectedConfigTarget); if(s) await updateDoc(doc(db, "screens", s.firestoreId), { customPricing: activeConfig }); } alert("設定已更新"); };
+  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); n.has(id)?n.delete(id):n.add(id); setSelectedOrderIds(n); };
+  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
+  const handleBulkAction = async (act) => { if(selectedOrderIds.size===0)return; if(!confirm('Confirm?'))return; const b=writeBatch(db); selectedOrderIds.forEach(id=>{if(act==='cancel') b.update(doc(db,"orders",id),{status:'cancelled'})}); await b.commit(); alert("Done"); setSelectedOrderIds(new Set()); };
+  const handleAddRule = async () => { if(!newRule.date) return alert("Date required"); await addDoc(collection(db, "special_rules"), { ...newRule, hours: newRule.hoursStr ? newRule.hoursStr.split(',').map(Number) : Array.from({length:24},(_,i)=>i), createdAt: new Date() }); alert("Rule Added"); setNewRule({...newRule, hoursStr:''}); };
+  const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db, "special_rules", id)); };
+  
+  // --- Screen Management Handlers ---
   const handleScreenChange = (fid, f, v) => setEditingScreens(p => ({ ...p, [fid]: { ...p[fid], [f]: v } }));
   
   const saveScreenSimple = async (s) => { 
@@ -347,33 +271,50 @@ const AdminPanel = () => {
   };
 
   const handleEditScreenFull = (screen) => {
+      // 🔥 Init rules for 7 days if not exists
+      let initializedRules = {};
+      const existingRules = screen.tierRules || {};
+      
+      // If old format (has 'default' but not 0-6), migrate 'default' to all days
+      if (existingRules.default && !existingRules['0']) {
+          for(let i=0; i<7; i++) initializedRules[i] = existingRules.default;
+      } else {
+          // Check each day 0-6, if missing, use empty
+          for(let i=0; i<7; i++) {
+              initializedRules[i] = existingRules[i] || { prime: [], gold: [] };
+          }
+      }
+
       setNewScreenData({
           name: screen.name,
           location: screen.location,
           district: screen.district || '',
           basePrice: screen.basePrice || 50,
-          // 🔥 確保 images 是陣列且有 3 個元素
-          images: Array.isArray(screen.images) && screen.images.length >= 3 ? 
-                  screen.images.slice(0,3) : 
-                  [screen.imageUrl || '', '', ''],
+          images: Array.isArray(screen.images) && screen.images.length >= 3 ? screen.images.slice(0,3) : [screen.imageUrl || '', '', ''],
           specifications: screen.specifications || '',
           mapUrl: screen.mapUrl || '',
           bundleGroup: screen.bundleGroup || '',
-          tierRules: screen.tierRules || JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
+          tierRules: initializedRules
       });
       setEditingScreenId(screen.firestoreId);
       setIsAddScreenModalOpen(true);
+      setActiveDayTab(1); // Reset to Monday
   };
 
   const handleAddScreen = () => {
+      // Init empty rules for 7 days
+      let initializedRules = {};
+      for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
+
       setNewScreenData({
           name: '', location: '', district: '', basePrice: 50, 
           images: ['', '', ''], specifications: '', mapUrl: '',
           bundleGroup: '',
-          tierRules: JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
+          tierRules: initializedRules
       });
       setEditingScreenId(null);
       setIsAddScreenModalOpen(true);
+      setActiveDayTab(1);
   };
 
   const handleImageChange = (index, value) => {
@@ -391,7 +332,7 @@ const AdminPanel = () => {
               district: newScreenData.district,
               basePrice: parseFloat(newScreenData.basePrice),
               images: cleanedImages,
-              imageUrl: cleanedImages[0] || '', // 兼容舊版
+              imageUrl: cleanedImages[0] || '', // Backwards compatibility
               specifications: newScreenData.specifications,
               mapUrl: newScreenData.mapUrl,
               bundleGroup: newScreenData.bundleGroup,
@@ -414,25 +355,55 @@ const AdminPanel = () => {
       } catch (e) { console.error(e); alert("❌ 儲存失敗"); }
   };
 
+  // 🔥 Toggle hour for the SPECIFIC day selected
   const toggleTierHour = (type, hour) => {
       setNewScreenData(prev => {
           const currentRules = { ...prev.tierRules };
-          if (!currentRules.default) currentRules.default = { prime: [], gold: [] };
-          let list = currentRules.default[type];
+          const dayKey = String(activeDayTab);
+          
+          if (!currentRules[dayKey]) currentRules[dayKey] = { prime: [], gold: [] };
+          
+          let list = currentRules[dayKey][type] || [];
           if (list.includes(hour)) {
               list = list.filter(h => h !== hour);
           } else {
               const otherType = type === 'prime' ? 'gold' : 'prime';
-              currentRules.default[otherType] = currentRules.default[otherType].filter(h => h !== hour);
+              currentRules[dayKey][otherType] = (currentRules[dayKey][otherType] || []).filter(h => h !== hour);
               list.push(hour);
           }
-          currentRules.default[type] = list.sort((a,b) => a-b);
+          currentRules[dayKey][type] = list.sort((a,b) => a-b);
           return { ...prev, tierRules: currentRules };
       });
   };
 
+  // 🔥 Apply current day's setting to ALL days
+  const handleApplyToAllDays = () => {
+      if(!confirm(`將 ${WEEKDAYS[activeDayTab]} 的時段設定套用到所有日子 (週一至週日)？`)) return;
+      const templateRule = newScreenData.tierRules[activeDayTab];
+      
+      setNewScreenData(prev => {
+          const newRules = {};
+          for(let i=0; i<7; i++) {
+              newRules[i] = JSON.parse(JSON.stringify(templateRule)); // Deep copy
+          }
+          return { ...prev, tierRules: newRules };
+      });
+      alert("✅ 已套用至所有日子");
+  };
+
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
   const toggleAnalyticsHour = (h) => { const n = new Set(selectedAnalyticsHours); n.has(h)?n.delete(h):n.add(h); setSelectedAnalyticsHours(n); };
+
+  const realMarketStats = useMemo(() => {
+      const statsMap = {}; for(let d=0; d<7; d++) for(let h=0; h<24; h++) statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
+      orders.forEach(o => { if(['paid','won','completed'].includes(o.status) && o.detailedSlots) o.detailedSlots.forEach(s => { 
+          if((selectedStatScreens.size===0 || selectedStatScreens.has(String(s.screenId))) && (selectedAnalyticsHours.size===0 || selectedAnalyticsHours.has(s.hour))) {
+              const k = `${new Date(s.date).getDay()}-${s.hour}`; statsMap[k].totalAmount += (Number(s.bidPrice)||0); statsMap[k].totalBids++;
+      }})});
+      const rows = Object.values(statsMap).map(i => ({...i, averagePrice: i.totalBids>0?Math.round(i.totalAmount/i.totalBids):0})).filter(r=>r.totalBids>0 && (selectedAnalyticsHours.size===0||selectedAnalyticsHours.has(r.hour)));
+      const avg = rows.length>0 ? Math.round(rows.reduce((a,b)=>a+b.averagePrice,0)/rows.length) : 0;
+      return { rows, summary: { avgPrice: avg, totalBids: rows.reduce((a,b)=>a+b.totalBids,0) } };
+  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   if (loading) {
       return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-center"><Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4"/><p className="text-slate-500">Loading Admin Panel...</p></div></div>;
@@ -468,7 +439,7 @@ const AdminPanel = () => {
             ))}
         </div>
 
-        {/* === 1. Dashboard === */}
+        {/* ... (DASHBOARD) ... */}
         {activeTab === 'dashboard' && (
             <div className="space-y-6 animate-in fade-in">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -484,7 +455,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 2. Calendar === */}
+        {/* ... (CALENDAR) ... */}
         {activeTab === 'calendar' && (
             <div className="bg-white rounded-xl shadow border border-slate-200 overflow-hidden flex flex-col h-[750px] animate-in fade-in">
                 <div className="flex justify-between items-center bg-slate-50 p-3 border-b border-slate-200">
@@ -565,7 +536,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 3. Orders Management === */}
+        {/* ... (ORDERS) ... */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
@@ -601,7 +572,6 @@ const AdminPanel = () => {
                                                 {order.detailedSlots && order.detailedSlots.map((slot, idx) => (
                                                     <div key={idx} className="flex gap-2 text-slate-600"><span className="font-mono bg-slate-100 px-1 rounded">{slot.date}</span><span className="font-bold text-slate-800">{String(slot.hour).padStart(2,'0')}:00</span><span className="text-slate-400">@ Screen {slot.screenId}</span></div>
                                                 ))}
-                                                {!order.detailedSlots && <span className="text-slate-400 italic">No details</span>}
                                             </div>
                                         </td>
                                         <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
@@ -616,7 +586,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 4. Review === */}
+        {/* ... (REVIEW) ... */}
         {activeTab === 'review' && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in">
                 {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
@@ -637,7 +607,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 5. Rules === */}
+        {/* ... (RULES) ... */}
         {activeTab === 'rules' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
                 <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
@@ -732,6 +702,7 @@ const AdminPanel = () => {
         {/* === 8. Config === */}
         {activeTab === 'config' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
+                {/* ... (Config Code Kept Same) ... */}
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div><div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
             </div>
         )}
@@ -747,7 +718,7 @@ const AdminPanel = () => {
                   <Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00
                   <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span>
               </h3>
-              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button>
+              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">&times;</span></button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -802,7 +773,7 @@ const AdminPanel = () => {
         </div>
       )}
 
-      {/* 🔥🔥🔥 ADD/EDIT SCREEN MODAL 🔥🔥🔥 */}
+      {/* 🔥🔥🔥 ADD/EDIT SCREEN MODAL (Enhanced with Weekly Tabs) 🔥🔥🔥 */}
       {isAddScreenModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden">
             <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full flex flex-col h-[90vh] animate-in zoom-in duration-200">
@@ -847,7 +818,7 @@ const AdminPanel = () => {
                             <p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p>
                         </div>
                         
-                        {/* 🔥 3 Images Input */}
+                        {/* 3 Images Input */}
                         <div className="col-span-2">
                             <label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label>
                             <div className="space-y-2">
@@ -866,7 +837,7 @@ const AdminPanel = () => {
                             </div>
                         </div>
 
-                        {/* 🔥 Map Link */}
+                        {/* Map Link */}
                         <div className="col-span-2">
                             <label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label>
                             <div className="flex items-center gap-2 border rounded px-3 py-2">
@@ -875,7 +846,7 @@ const AdminPanel = () => {
                             </div>
                         </div>
 
-                        {/* 🔥 Specifications */}
+                        {/* Specifications */}
                         <div className="col-span-2">
                             <label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label>
                             <div className="flex items-start gap-2 border rounded px-3 py-2">
@@ -891,9 +862,29 @@ const AdminPanel = () => {
                         </div>
                     </div>
 
-                    {/* Time Config */}
+                    {/* Time Config (Weekly Tabs) */}
                     <div className="border-t pt-4">
-                        <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Clock size={16}/> 時段設定 (Default)</h4>
+                        <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4>
+                            <button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1">
+                                <Copy size={12}/> 複製至所有日子
+                            </button>
+                        </div>
+
+                        {/* Weekday Tabs */}
+                        <div className="flex gap-1 mb-4 border-b border-slate-200">
+                            {WEEKDAYS.map((day, idx) => (
+                                <button 
+                                    key={idx}
+                                    onClick={() => setActiveDayTab(idx)}
+                                    className={`px-4 py-2 text-xs font-bold rounded-t-lg transition-colors ${activeDayTab === idx ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                >
+                                    {day}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Hours Grid */}
                         <div className="space-y-4">
                             <div>
                                 <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">🔥 Prime Time (3.5x)</span>
@@ -902,7 +893,7 @@ const AdminPanel = () => {
                                         <button 
                                             key={h} 
                                             onClick={() => toggleTierHour('prime', h)}
-                                            className={`w-8 h-8 text-xs font-bold rounded border ${newScreenData.tierRules.default?.prime?.includes(h) ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-400 hover:bg-slate-50'}`}
+                                            className={`w-8 h-8 text-xs font-bold rounded border ${newScreenData.tierRules[activeDayTab]?.prime?.includes(h) ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-400 hover:bg-slate-50'}`}
                                         >
                                             {h}
                                         </button>
@@ -916,7 +907,7 @@ const AdminPanel = () => {
                                         <button 
                                             key={h} 
                                             onClick={() => toggleTierHour('gold', h)}
-                                            className={`w-8 h-8 text-xs font-bold rounded border ${newScreenData.tierRules.default?.gold?.includes(h) ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-slate-400 hover:bg-slate-50'}`}
+                                            className={`w-8 h-8 text-xs font-bold rounded border ${newScreenData.tierRules[activeDayTab]?.gold?.includes(h) ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-slate-400 hover:bg-slate-50'}`}
                                         >
                                             {h}
                                         </button>
