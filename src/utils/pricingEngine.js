@@ -1,16 +1,13 @@
-// src/utils/pricingEngine.js
-
 const DEFAULT_CONFIG = {
     baseImpressions: 10000,
     primeMultiplier: 3.5,     
     goldMultiplier: 1.8,
     weekendMultiplier: 1.5,
-    bundleMultiplier: 1.25, // 這是舊的預設值，會被覆蓋
+    bundleMultiplier: 1.25,
     urgentFee24h: 1.5,
     urgentFee1h: 2.0
 };
 
-// 🔥 新增 activeBundleMultiplier 參數 (預設 1.0)
 export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.0, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
     const now = new Date();
     
@@ -72,7 +69,6 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         isGold = true;
     } 
 
-    // 🔥 重點：直接使用傳入的 Bundle 倍率
     const fSync = activeBundleMultiplier; 
 
     // --- 4. Calculate Base Dynamic Price ---
@@ -102,8 +98,12 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel = `🚀 加急 (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
+        // 🔥🔥🔥 FIX 2: 顯示具體開放日期 (7日前) 🔥🔥🔥
         canBid = false; 
-        warning = "遠期預訂 (限 Buyout)";
+        const openDate = new Date(slotTime);
+        openDate.setDate(openDate.getDate() - 7);
+        const openDateStr = openDate.toLocaleDateString('zh-HK', { month: 'numeric', day: 'numeric' });
+        warning = `🔒 遠期 (競價將於 ${openDateStr} 開放)`;
     }
 
     const finalMinBid = Math.ceil(dynamicBase * (1 + expeditedFeeRate));

@@ -354,7 +354,7 @@ export const useDoohSystem = () => {
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, currentBundleMultiplier, screens, occupiedSlots, marketStats, pricingConfig, specialRules]); // 🔥 Added currentBundleMultiplier to dependency
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, currentBundleMultiplier, screens, occupiedSlots, marketStats, pricingConfig, specialRules]); 
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
