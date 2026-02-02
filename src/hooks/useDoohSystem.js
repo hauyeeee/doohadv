@@ -322,9 +322,9 @@ export const useDoohSystem = () => {
       showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
   };
 
-  // 🔥🔥🔥 核心生成邏輯 (Crash Protection Added) 🔥🔥🔥
+// 🔥🔥🔥 核心生成邏輯 (Updated with Dynamic Buyout) 🔥🔥🔥
   const generateAllSlots = useMemo(() => {
-    // ⚠️ 防崩潰：如果數據未準備好，直接回傳空，防止計算錯誤
+    // ⚠️ 防崩潰
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
     
     let slots = [];
@@ -345,10 +345,6 @@ export const useDoohSystem = () => {
         }
     }
 
-    const sevenDaysLater = new Date();
-    sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
-    sevenDaysLater.setHours(23, 59, 59, 999);
-
     datesToProcess.forEach(d => {
         const dateStr = formatDateKey(d.getFullYear(), d.getMonth(), d.getDate());
         const dayOfWeek = new Date(d).getDay(); 
@@ -361,37 +357,41 @@ export const useDoohSystem = () => {
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
                 
+                // 1. Calculate Base Prices
                 const basePricing = calculateDynamicPrice(new Date(d), h, isBundleMode, screen, pricingConfig, specialRules);
                 
-                const slotTime = new Date(d); slotTime.setHours(h, 0, 0, 0);
-                const now = new Date();
-                const hoursUntil = (slotTime - now) / (1000 * 60 * 60);
-                
+                // 2. Get Current Competitor Bid
+                let currentHighestBid = existingBids[key] || 0;
+
+                // 3. 🔥 Dynamic Buyout Adjustment 🔥
+                // Logic: Buyout = max(Original Buyout, Highest Bid * 1.5)
+                let finalBuyout = basePricing.buyoutPrice;
+                if (currentHighestBid > 0) {
+                    const dynamicFloor = Math.ceil(currentHighestBid * 1.5);
+                    if (dynamicFloor > finalBuyout) {
+                        finalBuyout = dynamicFloor;
+                    }
+                }
+
+                // 4. Update Lock Logic
                 let canBid = basePricing.canBid && !basePricing.isLocked && !isSoldOut;
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
                 let warning = basePricing.warning;
-                
-                if (hoursUntil < 24 && hoursUntil > 0) {
-                    canBid = false; warning = "急單 (限買斷)"; 
-                    if (basePricing.isPrime) isBuyoutDisabled = false; 
-                } else if (slotTime > sevenDaysLater) {
-                    canBid = false; warning = "遠期 (限買斷)";
-                    if (isBuyoutDisabled) warning = "Prime 遠期 (無法交易)";
-                }
-
-                let currentHighestBid = existingBids[key] || 0;
-                
-                const finalMinBid = basePricing.minBid;
-                const finalBuyout = basePricing.buyoutPrice;
                 const isLocked = basePricing.isLocked || isSoldOut;
 
                 slots.push({ 
                     key, dateStr, hour: h, screenId, screenName: screen.name, location: screen.location, 
-                    minBid: finalMinBid, buyoutPrice: finalBuyout,
-                    marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(finalMinBid * 1.5), 
-                    isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled,
-                    canBid, hoursUntil, isUrgent: hoursUntil > 0 && hoursUntil <= 24, 
-                    competitorBid: currentHighestBid, isSoldOut: isLocked, warning
+                    minBid: basePricing.minBid, 
+                    buyoutPrice: finalBuyout, // Use dynamic price
+                    marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
+                    isPrime: basePricing.isPrime, 
+                    isBuyoutDisabled: isBuyoutDisabled,
+                    canBid, 
+                    hoursUntil: basePricing.hoursUntil, 
+                    isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, 
+                    competitorBid: currentHighestBid, 
+                    isSoldOut: isLocked, 
+                    warning
                 });
             });
         });
@@ -399,6 +399,7 @@ export const useDoohSystem = () => {
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
   }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, isBundleMode, screens, occupiedSlots, marketStats, pricingConfig, specialRules]);
 
+  
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const totalSlots = availableSlots.length; 

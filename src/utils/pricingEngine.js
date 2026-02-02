@@ -2,7 +2,7 @@
 
 const DEFAULT_CONFIG = {
     baseImpressions: 10000,
-    primeMultiplier: 3.5,     // 預設 Prime 倍率
+    primeMultiplier: 3.5,     
     goldMultiplier: 1.8,
     weekendMultiplier: 1.5,
     bundleMultiplier: 1.25,
@@ -13,12 +13,11 @@ const DEFAULT_CONFIG = {
 export const calculateDynamicPrice = (dateObj, hour, isBundle, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
     const now = new Date();
     
-    // --- 0. 優先檢查：特別日子規則 (Special Rules) ---
-   const year = dateObj.getFullYear();
+    // --- 0. Check Special Rules ---
+    const year = dateObj.getFullYear();
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
     const dayDate = String(dateObj.getDate()).padStart(2, '0');
-    const dateStr = `${year}-${month}-${dayDate}`; // "2026-02-01"
-   console.log(`Matching Rule for: [${dateStr}] Hour: ${hour} Screen: ${screenData.id}`);
+    const dateStr = `${year}-${month}-${dayDate}`; 
     const screenIdStr = String(screenData.id);
 
     const activeRule = specialRules.find(r => {
@@ -28,7 +27,6 @@ export const calculateDynamicPrice = (dateObj, hour, isBundle, screenData, globa
         return isDateMatch && isScreenMatch && isHourMatch;
     });
 
-    // 如果是鎖定規則，直接回傳
     if (activeRule && activeRule.type === 'lock') {
         return {
             minBid: 0, buyoutPrice: 0, isBuyoutDisabled: true, canBid: false,
@@ -36,55 +34,57 @@ export const calculateDynamicPrice = (dateObj, hour, isBundle, screenData, globa
         };
     }
 
-    // --- 1. 決定配置 (Config Merge Logic) 🔥 核心修改 ---
-    // 邏輯：使用 Global Config 作為基底，如果 Screen 有個別設定 (customPricing)，則覆蓋之
+    // --- 1. Config Merge ---
     const effectiveConfig = { 
         ...DEFAULT_CONFIG, 
         ...globalConfig, 
-        ...(screenData.customPricing || {}) // 👈 這裡就是「每部機唔同」的關鍵
+        ...(screenData.customPricing || {}) 
     };
     
     const day = dateObj.getDay(); 
     const dayKey = String(day);
     
-    // 讀取屏幕時段規則
     const rules = screenData.tierRules || {};
     const todayRules = rules[dayKey] || rules["default"] || { prime: [], gold: [] };
     const primeHours = todayRules.prime || [];
     const goldHours = todayRules.gold || [];
 
-    // --- 2. 決定 Base Price ---
+    // --- 2. Base Price ---
     let basePrice = screenData.basePrice || 50;
-    // 如果有特別日子覆蓋價錢
     if (activeRule && activeRule.type === 'price_override' && activeRule.value) {
         basePrice = activeRule.value;
     }
 
-    // --- 3. 計算倍率 (使用 effectiveConfig) ---
+    // --- 3. Multipliers ---
     let mDay = 1.0;
     if (day === 5 || day === 6) mDay = effectiveConfig.weekendMultiplier;
     
     let mTime = 1.0; 
     let isPrime = false;
+    let isGold = false; // Added isGold flag
     
     if (primeHours.includes(hour)) {
         mTime = effectiveConfig.primeMultiplier; 
         isPrime = true;
     } else if (goldHours.includes(hour)) {
         mTime = effectiveConfig.goldMultiplier;
+        isGold = true;
     } 
 
     const fSync = isBundle ? effectiveConfig.bundleMultiplier : 1.0;
 
-    // --- 4. 計算基礎價格 ---
+    // --- 4. Calculate Base Dynamic Price ---
     let dynamicBase = Math.ceil(basePrice * mDay * mTime * fSync);
     
-    // --- 5. 急單加乘 ---
+    // --- 5. Time Constraints & Fees ---
     const slotTime = new Date(dateObj);
     slotTime.setHours(hour, 0, 0, 0);
+    
+    // 🔥 Fix: Time diff calculation
     const timeDiffMs = slotTime.getTime() - now.getTime();
     const hoursUntil = timeDiffMs / (1000 * 60 * 60);
-    
+    const daysUntil = hoursUntil / 24;
+
     let expeditedFeeRate = 0;
     let expeditedLabel = null;
     let canBid = true;
@@ -100,19 +100,41 @@ export const calculateDynamicPrice = (dateObj, hour, isBundle, screenData, globa
         expeditedFeeRate = effectiveConfig.urgentFee24h - 1; 
         expeditedLabel = `🚀 加急 (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
+    } else if (daysUntil > 7) {
+        // 🔥 New Rule: > 7 Days -> Show price but disable bidding
+        canBid = false; 
+        warning = "遠期預訂 (限 Buyout)";
     }
 
     const finalMinBid = Math.ceil(dynamicBase * (1 + expeditedFeeRate));
-    let buyoutPrice = Math.ceil(finalMinBid * 3); 
-    
-    // --- 6. Buyout 限制 ---
-    let isBuyoutDisabled = isPrime || (activeRule && activeRule.type === 'disable_buyout');
+
+    // --- 6. Buyout Logic (New Rules) ---
+    // Rule 1: Multiplier based on Time Tier
+    let buyoutMultiplier = 3.0; // Default (Normal)
+    if (isPrime) buyoutMultiplier = 5.0;
+    else if (isGold) buyoutMultiplier = 4.0;
+
+    let originalBuyout = Math.ceil(finalMinBid * buyoutMultiplier);
+
+    // Rule 2: Special Rule Override
+    if (activeRule && activeRule.type === 'buyout_override' && activeRule.value) {
+        originalBuyout = activeRule.value;
+    }
+
+    // Rule 3: Dynamic Adjustment (1.5x Highest Bid)
+    // Note: We need 'currentHighestBid' passed in, but this function is pure calculation.
+    // The dynamic adjustment logic is better handled in the UI/Hook layer (useDoohSystem) 
+    // where we have access to 'existingBids'. 
+    // HOWEVER, we return the base calculation here.
+
+    let isBuyoutDisabled = (activeRule && activeRule.type === 'disable_buyout');
 
     return {
         minBid: finalMinBid,
-        buyoutPrice,
+        buyoutPrice: originalBuyout,
         isBuyoutDisabled,
         isPrime,
+        isGold, // Return this so UI knows
         expeditedLabel,
         canBid,
         warning,
