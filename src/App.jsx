@@ -1,5 +1,5 @@
-import React from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { useState } from 'react'; // 🔥 Add useState for local override if needed
+import { Loader2, UploadCloud } from 'lucide-react';
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // Components
@@ -19,7 +19,6 @@ import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
 const DOOHBiddingSystem = () => {
-  // 1. 調用 Hook 獲取所有邏輯與狀態
   const {
     // State
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
@@ -34,6 +33,7 @@ const DOOHBiddingSystem = () => {
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted,
+    setCurrentOrderId, // 🔥 Ensure this is exported from hook
     
     // Handlers
     handleGoogleLogin, handleLogout,
@@ -45,12 +45,30 @@ const DOOHBiddingSystem = () => {
     
     // UI Helpers & Constants
     HOURS, getHourTier,
-    getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, // 🔥 這些要傳給 DateSelector
+    getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
     
     // Modal Specific
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    occupiedSlots // TimeSlotSelector 需要這個
+    occupiedSlots
   } = useDoohSystem();
+
+  // 🔥 關鍵修正：處理「立即上傳」點擊
+  const handleUploadClick = (orderId) => {
+    // 1. 設定 Hook 狀態
+    if (setCurrentOrderId) setCurrentOrderId(orderId);
+    
+    // 2. 設定 LocalStorage 作為備份 (Hook reload 時用)
+    localStorage.setItem('temp_order_id', orderId);
+    
+    // 3. 觸發隱藏的 File Input
+    const fileInput = document.getElementById('hidden-file-input');
+    if (fileInput) {
+        fileInput.value = ''; // Reset
+        fileInput.click();
+    } else {
+        console.error("File input not found!");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
@@ -74,7 +92,6 @@ const DOOHBiddingSystem = () => {
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-          {/* 🔥 這裡簡化了，不需要 renderCalendar prop */}
           <DateSelector 
             mode={mode} 
             setMode={setMode} 
@@ -85,7 +102,6 @@ const DOOHBiddingSystem = () => {
             toggleWeekday={toggleWeekday}
             weekCount={weekCount} 
             setWeekCount={setWeekCount}
-            // 傳遞 Helpers 給 CalendarGrid 使用
             toggleDate={toggleDate}
             getDaysInMonth={getDaysInMonth}
             getFirstDayOfMonth={getFirstDayOfMonth}
@@ -113,6 +129,15 @@ const DOOHBiddingSystem = () => {
         />
       </main>
 
+      {/* 🔥 隱藏的 File Input (必須存在於 DOM) */}
+      <input 
+        type="file" 
+        id="hidden-file-input" 
+        style={{ display: 'none' }} 
+        accept="video/*" 
+        onChange={handleRealUpload} 
+      />
+
       {/* --- Modals Section --- */}
       <LoginModal 
         isOpen={isLoginModalOpen} 
@@ -124,14 +149,18 @@ const DOOHBiddingSystem = () => {
         screen={viewingScreen} 
         onClose={() => setViewingScreen(null)} 
       />
+      
+      {/* 🔥 修復後的 MyOrdersModal */}
       <MyOrdersModal 
         isOpen={isProfileModalOpen} 
         user={user} 
         myOrders={myOrders} 
         onClose={() => setIsProfileModalOpen(false)} 
         onLogout={handleLogout} 
-        onUploadClick={(id) => { setCurrentOrderId(id); setIsUrgentUploadModalOpen(true); setIsProfileModalOpen(false); }} 
+        // 這裡傳入我們新定義的 handleUploadClick
+        onUploadClick={handleUploadClick} 
       />
+
       <BuyoutModal 
         isOpen={isBuyoutModalOpen} 
         onClose={() => setIsBuyoutModalOpen(false)} 
