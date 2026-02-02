@@ -26,7 +26,7 @@ export const useDoohSystem = () => {
   const [pricingConfig, setPricingConfig] = useState(null);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // 🔥 新增：儲存從 Admin 設定的 Bundle Rules
+  // 🔥 Bundle Rules from Admin
   const [bundleRules, setBundleRules] = useState([]);
 
   const [currentDate, setCurrentDate] = useState(new Date()); 
@@ -118,7 +118,6 @@ export const useDoohSystem = () => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setPricingConfig(data);
-                // 🔥 讀取你設定的 Bundle Rules
                 setBundleRules(data.bundleRules || []);
             }
             else setPricingConfig({});
@@ -183,7 +182,6 @@ export const useDoohSystem = () => {
       return () => { unsubSold(); unsubBidding(); };
   }, []);
 
-  // --- Handlers ---
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
   
   const handleGoogleLogin = async () => { 
@@ -264,37 +262,60 @@ export const useDoohSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
-  const availableBundles = useMemo(() => {
-      const groups = {};
-      screens.forEach(s => { const gName = s.bundlegroup || s.bundleGroup; if (gName) { if (!groups[gName]) groups[gName] = []; groups[gName].push(s); } });
-      return groups;
-  }, [screens]);
-
-  // 🔥 核心：計算目前的 Bundle 倍率
-  const getBundleMultiplier = () => {
-      const selectedIds = Array.from(selectedScreens).map(String).sort(); 
-      // 1. 檢查 Admin 設定的自定義規則
-      const matchedRule = bundleRules.find(rule => {
-          const ruleIds = rule.screens.map(String).sort();
-          return ruleIds.length === selectedIds.length && ruleIds.every((val, index) => val === selectedIds[index]);
-      });
-
-      if (matchedRule) return parseFloat(matchedRule.multiplier);
-
-      // 2. 如果沒中規則，但選了多部機，是否要給一點點優惠或溢價? 
-      // 這裡簡單處理：只要多過 1 部，就當 1.0 (原價)，除非 Admin 有預設值
-      return selectedScreens.size > 1 ? (pricingConfig?.defaultBundleMultiplier || 1.0) : 1.0;
-  };
-
-  // 判斷是否為 Bundle 模式 (用於 UI 顯示)
-  const currentBundleMultiplier = useMemo(() => getBundleMultiplier(), [selectedScreens, bundleRules]);
-  const isBundleMode = currentBundleMultiplier > 1.0;
-
   const selectGroup = (groupScreens) => {
       const groupIds = groupScreens.map(s => s.id);
       setSelectedScreens(new Set(groupIds));
       showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
   };
+
+  // 🔥🔥🔥 NEW: Smart Bundle Multiplier Logic 🔥🔥🔥
+  // 核心改動：不再回傳單一 Multiplier，而是內部處理 "哪些 Screen 有 Bundle 效果"
+  const getMultiplierForScreen = (screenId) => {
+      const selectedIds = Array.from(selectedScreens).map(String).sort();
+
+      // 1. 檢查 Strict Rules (Admin 定義的 ID 組合)
+      // 如果目前選取的組合，包含了某個 Rule 的所有 ID，那麼該 Rule 裡面的 ID 都有加成
+      const matchedRule = bundleRules.find(rule => {
+          const ruleIds = rule.screens.map(String);
+          // 邏輯：如果你選的屏幕包含了 Rule 的所有屏幕，那些屏幕就生效
+          return ruleIds.every(rid => selectedIds.includes(rid));
+      });
+
+      if (matchedRule && matchedRule.screens.map(String).includes(String(screenId))) {
+          return parseFloat(matchedRule.multiplier);
+      }
+
+      // 2. 檢查 Implicit Grouping (同名 BundleGroup)
+      const currentScreen = screens.find(s => String(s.id) === String(screenId));
+      if (!currentScreen) return 1.0;
+      
+      const myGroup = currentScreen.bundleGroup || currentScreen.bundlegroup;
+      if (myGroup) {
+          // 算出目前已選取的屏幕中，有多少個是屬於同一個 Group
+          const countInGroup = Array.from(selectedScreens).filter(id => {
+              const s = screens.find(sc => String(sc.id) === String(id));
+              const g = s?.bundleGroup || s?.bundlegroup;
+              return g === myGroup;
+          }).length;
+
+          // 🔥 重點：只要同 Group 的選了 > 1 個，這些屏幕就獲得溢價
+          if (countInGroup > 1) {
+              return pricingConfig?.defaultBundleMultiplier || 1.25; // 默認 1.25x
+          }
+      }
+
+      // 3. 沒有 Bundle，原價
+      return 1.0;
+  };
+
+  // 用來給 UI 判斷是否顯示 "Bundle Active" Badge (只要有任何一個 > 1.0 就算)
+  const isBundleMode = useMemo(() => {
+      for (const id of selectedScreens) {
+          if (getMultiplierForScreen(id) > 1.0) return true;
+      }
+      return false;
+  }, [selectedScreens, screens, bundleRules, pricingConfig]);
+
 
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
@@ -321,8 +342,10 @@ export const useDoohSystem = () => {
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
                 
-                // 🔥 傳入計算好的 Multiplier
-                const basePricing = calculateDynamicPrice(new Date(d), h, currentBundleMultiplier, screen, pricingConfig, specialRules);
+                // 🔥 NEW: Calculate Multiplier specifically for THIS screen in THIS selection context
+                const screenMultiplier = getMultiplierForScreen(screenId);
+
+                const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
                 
                 let currentHighestBid = existingBids[key] || 0;
                 let finalBuyout = basePricing.buyoutPrice;
@@ -348,13 +371,15 @@ export const useDoohSystem = () => {
                     isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, 
                     competitorBid: currentHighestBid, 
                     isSoldOut: isLocked, 
-                    warning
+                    warning,
+                    // 🔥 Pass the multiplier down so UI can show it if needed
+                    activeMultiplier: screenMultiplier 
                 });
             });
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, currentBundleMultiplier, screens, occupiedSlots, marketStats, pricingConfig, specialRules]); 
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]); // 🔥 Added dependencies
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -364,14 +389,19 @@ export const useDoohSystem = () => {
     let hasRestrictedBuyout = false, hasRestrictedBid = false, hasUrgentRisk = false;
     let hasDateRestrictedBid = false; 
     let hasPrimeFarFutureLock = false; 
+    
+    // Find max multiplier to show in UI
+    let maxAppliedMultiplier = 1.0;
 
     availableSlots.forEach(slot => {
+        if (slot.activeMultiplier > maxAppliedMultiplier) maxAppliedMultiplier = slot.activeMultiplier;
+
         if (!slot.canBid && slot.isBuyoutDisabled) hasPrimeFarFutureLock = true;
         if (!(!slot.canBid && slot.isBuyoutDisabled)) { buyoutTotal += slot.buyoutPrice; minBidTotal += slot.minBid; }
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) {
             hasRestrictedBid = true;
-            if (slot.warning === "遠期預訂 (限 Buyout)" || slot.warning === "急單 (限買斷)") hasDateRestrictedBid = true;
+            if (slot.warning && (slot.warning.includes("遠期") || slot.warning.includes("急單"))) hasDateRestrictedBid = true;
         }
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
         if (slot.isUrgent) urgentCount++; 
@@ -384,16 +414,15 @@ export const useDoohSystem = () => {
         } else { missingBids++; }
     });
     
-    // 🔥 將 Multiplier 傳出去給 UI 顯示
     return { 
         totalSlots, buyoutTotal, currentBidTotal, minBidTotal,
         conflicts, missingBids, invalidBids, urgentCount,
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
-        currentBundleMultiplier // <--- Exported here
+        currentBundleMultiplier: maxAppliedMultiplier // Export max multiplier for UI
     };
-  }, [generateAllSlots, slotBids, currentBundleMultiplier]);
+  }, [generateAllSlots, slotBids]);
 
   const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
   const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
