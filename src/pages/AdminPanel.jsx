@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize
+  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -31,7 +31,7 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Pricing Config ---
+  // --- Pricing Config States ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
@@ -45,22 +45,27 @@ const AdminPanel = () => {
   // --- Advanced Filter States ---
   const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); 
   const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); 
+  
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // 🔥🔥🔥 Calendar States (升級版) 🔥🔥🔥
-  const [calendarDate, setCalendarDate] = useState(new Date()); // 控制當前月份/日期
+  // 🔥🔥🔥 Calendar States (新功能) 🔥🔥🔥
+  const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); // 'month' or 'day'
   const [selectedSlot, setSelectedSlot] = useState(null);
 
   // --- Forms ---
-  const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+  const [newRule, setNewRule] = useState({
+      screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: ''
+  });
 
   // 1. Auth & Data Fetching
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
-        setLoading(false); 
+        // 在開發階段暫時允許 render，但在生產環境應 redirect
+        // navigate('/'); 
+        setLoading(false);
       } else {
         setUser(currentUser);
         fetchAllData();
@@ -71,34 +76,63 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
+      
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
-        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data(), createdAtDate: d.data().createdAt?.toDate() || new Date() })));
+        setOrders(snap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(), 
+            // 🔥 安全轉換日期，防止白畫面
+            createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() 
+        })));
         setLoading(false);
       });
+
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
           setScreens(snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })));
       });
+
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
+
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) { setGlobalPricingConfig(docSnap.data()); setActiveConfig(docSnap.data()); }
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              setGlobalPricingConfig(data);
+              setActiveConfig(data);
+          }
       });
+
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
+  const customerHistory = useMemo(() => {
+      const history = {};
+      orders.forEach(order => {
+          const email = order.userEmail;
+          if (!history[email]) history[email] = 0;
+          history[email]++;
+      });
+      return history;
+  }, [orders]);
+
   const stats = useMemo(() => {
-    let totalRevenue = 0, validOrders = 0, pendingReview = 0;
-    let dailyRevenue = {}, statusCount = {};
+    let totalRevenue = 0;
+    let validOrders = 0;
+    let pendingReview = 0;
+    let dailyRevenue = {};
+    let statusCount = {};
 
     orders.forEach(order => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
         
-        // 🔥 增強版審核邏輯：如果訂單已付款且有影片，但狀態不明，也視為待審核
+        // 🔥 修正後的審核判斷邏輯：確保抓到 pending_review
         const needsReview = order.creativeStatus === 'pending_review' || 
                            (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
         
-        if (needsReview) pendingReview++;
+        if (needsReview) {
+            pendingReview++;
+        }
         
         if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status)) {
             totalRevenue += Number(order.amount) || 0;
@@ -108,16 +142,19 @@ const AdminPanel = () => {
         }
     });
 
-    return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
+    return {
+        totalRevenue, totalOrders: orders.length, validOrders, pendingReview,
+        dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })),
+        statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] }))
+    };
   }, [orders]);
 
-  // --- Calendar Logic: Month View Data ---
+  // 🔥🔥🔥 Calendar Logic: Month View Data 🔥🔥🔥
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
       const days = {};
 
-      // Initialize days
       for(let d = 1; d <= endOfMonth.getDate(); d++) {
           const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
           days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 };
@@ -137,7 +174,7 @@ const AdminPanel = () => {
       return days;
   }, [orders, calendarDate]);
 
-  // --- Calendar Logic: Day View Grid ---
+  // 🔥🔥🔥 Calendar Logic: Day View Grid 🔥🔥🔥
   const dayViewGrid = useMemo(() => {
     const grid = {}; 
     const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
@@ -146,7 +183,8 @@ const AdminPanel = () => {
       if (!['paid', 'won', 'paid_pending_selection'].includes(order.status) || !order.detailedSlots) return;
       
       order.detailedSlots.forEach(slot => {
-        if (slot.date !== targetDateStr) return;
+        if (slot.date !== targetDateStr) return; // Only today
+
         const key = `${slot.hour}-${slot.screenId}`;
         
         let status = 'normal';
@@ -156,7 +194,17 @@ const AdminPanel = () => {
         else if (order.status === 'won' || order.status === 'paid') status = 'action_needed';
 
         if (!grid[key] || (status === 'review_needed' || status === 'action_needed')) {
-            grid[key] = { ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, displayStatus: status, price: order.type === 'bid' ? slot.bidPrice : 'Buyout' };
+            grid[key] = {
+              ...slot,
+              orderId: order.id,
+              userEmail: order.userEmail,
+              videoUrl: order.videoUrl,
+              status: order.status,
+              creativeStatus: order.creativeStatus,
+              isScheduled: order.isScheduled,
+              displayStatus: status,
+              price: order.type === 'bid' ? slot.bidPrice : 'Buyout'
+            };
         }
       });
     });
@@ -166,23 +214,47 @@ const AdminPanel = () => {
   // --- Handlers ---
   const handleMarkAsScheduled = async (orderId) => {
     if (!confirm("確認已將影片編排至播放系統？")) return;
-    try { await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); alert("✅ 狀態已更新：準備播放"); if (selectedSlot && selectedSlot.orderId === orderId) setSelectedSlot(prev => ({ ...prev, isScheduled: true, displayStatus: 'scheduled' })); } catch (e) { alert("更新失敗"); }
+    try {
+      await updateDoc(doc(db, "orders", orderId), {
+        isScheduled: true,
+        scheduledAt: new Date(),
+        scheduledBy: user.email
+      });
+      alert("✅ 狀態已更新：準備播放");
+      if (selectedSlot && selectedSlot.orderId === orderId) {
+          setSelectedSlot(prev => ({ ...prev, isScheduled: true, displayStatus: 'scheduled' }));
+      }
+    } catch (e) { alert("更新失敗"); }
   };
 
   const handleReview = async (orderId, action) => {
     const targetOrder = orders.find(o => o.id === orderId);
     if (!targetOrder || !window.confirm(`確定要 ${action === 'approve' ? '通過' : '拒絕'}?`)) return;
     try {
-        const updateData = { creativeStatus: action === 'approve' ? 'approved' : 'rejected', reviewedAt: new Date(), reviewedBy: user.email, reviewNote: action === 'reject' ? reviewNote : '', isApproved: action === 'approve', isRejected: action === 'reject' };
+        const updateData = { 
+            creativeStatus: action === 'approve' ? 'approved' : 'rejected',
+            reviewedAt: new Date(),
+            reviewedBy: user.email,
+            reviewNote: action === 'reject' ? reviewNote : '',
+            // 兼容舊邏輯
+            isApproved: action === 'approve',
+            isRejected: action === 'reject'
+        };
+
         await updateDoc(doc(db, "orders", orderId), updateData);
-        if (action === 'approve') sendBidConfirmation({ email: targetOrder.userEmail, displayName: targetOrder.userName }, targetOrder, 'video_approved');
-        alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕"); setReviewNote(""); if (selectedSlot) setSelectedSlot(null);
+        
+        if (action === 'approve') {
+            sendBidConfirmation({ email: targetOrder.userEmail, displayName: targetOrder.userName || 'Client' }, targetOrder, 'video_approved');
+        }
+        alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕");
+        setReviewNote("");
+        if (selectedSlot) setSelectedSlot(null); 
     } catch (e) { alert("操作失敗"); }
   };
 
-  // 🔥 修正 Filter 邏輯，確保審核 Tab 顯示所有該審核的單
   const filteredOrders = useMemo(() => {
       return orders.filter(o => {
+          // 🔥 審核 Tab 專用過濾
           if (activeTab === 'review') {
               return o.creativeStatus === 'pending_review' || 
                      (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled');
@@ -193,30 +265,40 @@ const AdminPanel = () => {
       });
   }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // ... (Other standard handlers) ...
-  const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
-  const savePricingConfig = async () => { if (selectedConfigTarget === 'global') { await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); setGlobalPricingConfig(activeConfig); } else { const s = screens.find(s => String(s.id) === selectedConfigTarget); if(s) await updateDoc(doc(db, "screens", s.firestoreId), { customPricing: activeConfig }); } alert("設定已更新"); };
-  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); n.has(id)?n.delete(id):n.add(id); setSelectedOrderIds(n); };
-  const handleSelectAll = (e) => setSelectedOrderIds(e.target.checked ? new Set(filteredOrders.map(o => o.id)) : new Set());
-  const handleBulkAction = async (act) => { if(selectedOrderIds.size===0)return; if(!confirm('Confirm?'))return; const b=writeBatch(db); selectedOrderIds.forEach(id=>{if(act==='cancel') b.update(doc(db,"orders",id),{status:'cancelled'})}); await b.commit(); alert("Done"); setSelectedOrderIds(new Set()); };
-  const handleAddRule = async () => { if(!newRule.date) return alert("Date required"); await addDoc(collection(db, "special_rules"), { ...newRule, hours: newRule.hoursStr ? newRule.hoursStr.split(',').map(Number) : Array.from({length:24},(_,i)=>i), createdAt: new Date() }); alert("Rule Added"); setNewRule({...newRule, hoursStr:''}); };
-  const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db, "special_rules", id)); };
-  const handleScreenChange = (fid, f, v) => setEditingScreens(p => ({ ...p, [fid]: { ...p[fid], [f]: v } }));
-  const saveScreen = async (s) => { const d = editingScreens[s.firestoreId]; if(d) { await updateDoc(doc(db, "screens", s.firestoreId), d); alert("Saved"); setEditingScreens(p=>{const n={...p};delete n[s.firestoreId];return n;}); } };
-  const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
-  const toggleAnalyticsHour = (h) => { const n = new Set(selectedAnalyticsHours); n.has(h)?n.delete(h):n.add(h); setSelectedAnalyticsHours(n); };
+  // ... (Other Handlers unchanged) ...
+  const handleConfigChange = (key, val) => { setActiveConfig(prev => ({ ...prev, [key]: parseFloat(val) })); };
+  const savePricingConfig = async () => { if (selectedConfigTarget === 'global') { await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); setGlobalPricingConfig(activeConfig); alert("🌍 全局價格公式已更新"); } else { const screen = screens.find(s => String(s.id) === selectedConfigTarget); if (!screen) return; await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig }); alert(`✅ Screen ${screen.name} 的專屬公式已更新`); } };
+  const handleSelectOrder = (id) => { const newSet = new Set(selectedOrderIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedOrderIds(newSet); };
+  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
+  const handleBulkAction = async (action) => { if (selectedOrderIds.size === 0) return; if (!window.confirm(`⚠️ 確認對選中的 ${selectedOrderIds.size} 張訂單執行 ${action === 'cancel' ? '批量取消' : action}?`)) return; try { const batch = writeBatch(db); selectedOrderIds.forEach(id => { const ref = doc(db, "orders", id); if (action === 'cancel') { batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }); } }); await batch.commit(); alert("✅ 批量操作完成"); setSelectedOrderIds(new Set()); } catch (e) { console.error(e); alert("❌ 操作失敗"); } };
+  const handleAddRule = async () => { if (!newRule.date) return alert("❌ 請選擇日期"); let hours = []; const inputStr = newRule.hoursStr.trim(); if (!inputStr || inputStr.toLowerCase() === 'all') { hours = Array.from({length: 24}, (_, i) => i); } else { if (inputStr.includes('-')) { const [start, end] = inputStr.split('-').map(n => parseInt(n)); if (!isNaN(start) && !isNaN(end) && start <= end) { for (let i = start; i <= end; i++) if (i >= 0 && i <= 23) hours.push(i); } } else { hours = inputStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23); } } if (hours.length === 0) return alert("❌ 時段格式錯誤"); const safeDate = newRule.date; try { await addDoc(collection(db, "special_rules"), { screenId: newRule.screenId, date: safeDate, hours: hours, type: newRule.action, value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null, note: newRule.note, createdAt: new Date() }); alert("✅ 規則已建立"); setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' }); } catch (e) { console.error(e); alert("❌ 建立失敗"); } };
+  const handleDeleteRule = async (id) => { if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id)); };
+  const handleScreenChange = (fid, field, val) => { setEditingScreens(prev => ({ ...prev, [fid]: { ...prev[fid], [field]: val } })); };
+  const saveScreen = async (screen) => { const changes = editingScreens[screen.firestoreId]; if (!changes) return; try { const finalData = { ...changes }; if (finalData.basePrice) finalData.basePrice = parseInt(finalData.basePrice); if (finalData.lockedHoursStr !== undefined) { const hoursArray = finalData.lockedHoursStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h)); finalData.lockedHours = hoursArray; delete finalData.lockedHoursStr; } await updateDoc(doc(db, "screens", screen.firestoreId), finalData); alert("✅ 屏幕設定已更新"); setEditingScreens(prev => { const n={...prev}; delete n[screen.firestoreId]; return n; }); } catch (e) { alert("❌ 更新失敗"); } };
+  const toggleScreenActive = async (screen) => { if(!window.confirm(`確定要 ${!screen.isActive ? '解鎖 (Unlock)' : '鎖定 (Lock)'} 整部 ${screen.name} 嗎？`)) return; try { await updateDoc(doc(db, "screens", screen.firestoreId), { isActive: !screen.isActive }); } catch(e) { alert("❌ 操作失敗"); } };
+  const toggleAnalyticsHour = (h) => { const n = new Set(selectedAnalyticsHours); if (n.has(h)) n.delete(h); else n.add(h); setSelectedAnalyticsHours(n); };
 
-  // --- Real Market Stats ---
   const realMarketStats = useMemo(() => {
-      const statsMap = {}; for(let d=0; d<7; d++) for(let h=0; h<24; h++) statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
-      orders.forEach(o => { if(['paid','won','completed'].includes(o.status) && o.detailedSlots) o.detailedSlots.forEach(s => { 
-          if((selectedStatScreens.size===0 || selectedStatScreens.has(String(s.screenId))) && (selectedAnalyticsHours.size===0 || selectedAnalyticsHours.has(s.hour))) {
-              const k = `${new Date(s.date).getDay()}-${s.hour}`; statsMap[k].totalAmount += (Number(s.bidPrice)||0); statsMap[k].totalBids++;
-      }})});
-      const rows = Object.values(statsMap).map(i => ({...i, averagePrice: i.totalBids>0?Math.round(i.totalAmount/i.totalBids):0})).filter(r=>r.totalBids>0 && (selectedAnalyticsHours.size===0||selectedAnalyticsHours.has(r.hour)));
-      const avg = rows.length>0 ? Math.round(rows.reduce((a,b)=>a+b.averagePrice,0)/rows.length) : 0;
-      return { rows, summary: { avgPrice: avg, totalBids: rows.reduce((a,b)=>a+b.totalBids,0) } };
+      const statsMap = {}; 
+      for(let d=0; d<7; d++) { for(let h=0; h<24; h++) { statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; } }
+      orders.forEach(order => {
+          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
+              order.detailedSlots.forEach(slot => {
+                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
+                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
+                  if (isScreenSelected && isHourSelected) { const dateObj = new Date(slot.date); const key = `${dateObj.getDay()}-${slot.hour}`; if (statsMap[key]) { statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); statsMap[key].totalBids += 1; } }
+              });
+          }
+      });
+      let selectionTotalAmount = 0; let selectionTotalBids = 0;
+      const rows = Object.values(statsMap).map(item => { if (item.totalBids > 0) { const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; } } return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; });
+      const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
+      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
+
+  if (loading) {
+      return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-center"><Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4"/><p className="text-slate-500">Loading Admin Panel...</p></div></div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
@@ -230,17 +312,17 @@ const AdminPanel = () => {
             </div>
         </div>
 
-        {/* Tabs */}
+        {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2">
             {[
                 {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:'儀表板'},
-                {id:'calendar',icon:<Calendar size={16}/>,label:'排程總表'}, 
+                {id:'calendar',icon:<Calendar size={16}/>,label:'全能日曆 (Calendar)'}, 
                 {id:'orders',icon:<List size={16}/>,label:'訂單管理'},
                 {id:'review',icon:<Video size={16}/>,label:`審核 (${stats.pendingReview})`, alert:stats.pendingReview>0},
                 {id:'rules',icon:<Settings size={16}/>,label:'特別規則'},
-                {id:'screens',icon:<Monitor size={16}/>,label:'屏幕'},
-                {id:'analytics',icon:<TrendingUp size={16}/>,label:'數據'},
-                {id:'config',icon:<Settings size={16}/>,label:'公式'},
+                {id:'screens',icon:<Monitor size={16}/>,label:'屏幕管理'},
+                {id:'analytics',icon:<TrendingUp size={16}/>,label:'市場數據'},
+                {id:'config',icon:<Settings size={16}/>,label:'價格公式'},
             ].map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
                     {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
@@ -264,7 +346,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 2. Calendar (Upgrade: Month + Day View) === */}
+        {/* === 2. Calendar (Integrated & Upgraded) === */}
         {activeTab === 'calendar' && (
             <div className="bg-white rounded-xl shadow border border-slate-200 overflow-hidden flex flex-col h-[750px] animate-in fade-in">
                 {/* Header Controls */}
@@ -369,7 +451,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 3. Orders Management === */}
+        {/* === 3. Orders Management (Fix applied here) === */}
         {activeTab === 'orders' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
@@ -394,11 +476,13 @@ const AdminPanel = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredOrders.map(order => {
-                                const isRepeat = customerHistory[order.userEmail] > 1;
+                                // Safety check for customerHistory
+                                const isRepeat = customerHistory && customerHistory[order.userEmail] > 1;
                                 return (
                                     <tr key={order.id} className={`hover:bg-slate-50 ${selectedOrderIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
                                         <td className="p-4 text-center"><input type="checkbox" checked={selectedOrderIds.has(order.id)} onChange={() => handleSelectOrder(order.id)} /></td>
-                                        <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate.toLocaleString('zh-HK')}</td>
+                                        {/* 🔥 Safety: Check if createdAtDate exists before calling toLocaleString */}
+                                        <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate ? order.createdAtDate.toLocaleString('zh-HK') : 'N/A'}</td>
                                         <td className="p-4 align-top">
                                             <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
                                             
@@ -424,7 +508,7 @@ const AdminPanel = () => {
                                                 ))}
                                             </div>
                                         </td>
-                                        <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
+                                        <td className="p-4 text-right font-bold align-top">HK$ {order.amount ? Number(order.amount).toLocaleString() : '0'}</td>
                                         <td className="p-4 text-center align-top"><StatusBadge status={order.status} /></td>
                                         <td className="p-4 text-right align-top">
                                             {order.status !== 'cancelled' && <button onClick={async () => { if(window.confirm("取消此訂單？")) await updateDoc(doc(db, "orders", order.id), { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }) }} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>}
@@ -446,7 +530,7 @@ const AdminPanel = () => {
                     <div key={order.id} className="bg-white rounded-xl shadow-md border border-orange-200 overflow-hidden flex flex-col">
                         <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center">
                             <span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span>
-                            <span className="text-[10px] text-slate-500">{order.createdAtDate.toLocaleDateString()}</span>
+                            <span className="text-[10px] text-slate-500">{order.createdAtDate ? order.createdAtDate.toLocaleDateString() : 'N/A'}</span>
                         </div>
                         
                         <div className="relative bg-black aspect-video w-full">
@@ -617,30 +701,15 @@ const AdminPanel = () => {
   );
 };
 
-// --- Sub-Components ---
+// --- Sub-Components (Move these outside) ---
 const ConfigSection = ({title, children}) => (<div className="space-y-3"><h4 className="text-sm font-bold text-slate-700 border-b pb-1">{title}</h4><div className="space-y-2">{children}</div></div>);
 const ConfigInput = ({ label, val, onChange, desc }) => {
     const percentage = val ? Math.round((parseFloat(val) - 1) * 100) : 0;
     const sign = percentage > 0 ? '+' : '';
-    
     return (
         <div className="flex justify-between items-center bg-slate-50 p-2 rounded mb-1">
-            <div className="text-xs font-bold text-slate-600">
-                {label} 
-                <span className="text-[10px] font-normal text-slate-400 block">{desc}</span>
-            </div>
-            <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${percentage > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
-                    {sign}{percentage}%
-                </span>
-                <input 
-                    type="number" 
-                    step="0.05" 
-                    value={val||0} 
-                    onChange={e=>onChange(e.target.value)} 
-                    className="w-16 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
-                />
-            </div>
+            <div className="text-xs font-bold text-slate-600">{label} <span className="text-[10px] font-normal text-slate-400 block">{desc}</span></div>
+            <div className="flex items-center gap-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${percentage > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{sign}{percentage}%</span><input type="number" step="0.05" value={val||0} onChange={e=>onChange(e.target.value)} className="w-16 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"/></div>
         </div>
     );
 };
