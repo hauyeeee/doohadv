@@ -71,6 +71,7 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         isGold = true;
     } 
 
+    // 🔥 使用從 Hook 傳入的 Bundle 倍率
     const fSync = activeBundleMultiplier; 
 
     // --- 4. Calculate Base Dynamic Price ---
@@ -100,7 +101,7 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel = `🚀 加急 (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
-        // 🔥🔥🔥 NEW: 計算具體開放日期 (Slot 時間 - 7天) 🔥🔥🔥
+        // 🔥🔥🔥 核心：計算具體開放日期 (Slot 時間 - 7天) 🔥🔥🔥
         canBid = false; 
         
         const openDate = new Date(slotTime);
