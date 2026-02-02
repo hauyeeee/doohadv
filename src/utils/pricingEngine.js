@@ -1,3 +1,5 @@
+// src/utils/pricingEngine.js
+
 const DEFAULT_CONFIG = {
     baseImpressions: 10000,
     primeMultiplier: 3.5,     
@@ -11,7 +13,7 @@ const DEFAULT_CONFIG = {
 export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.0, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
     const now = new Date();
     
-    // --- 0. Check Special Rules ---
+    // --- 0. Check Special Rules (優先檢查特別規則) ---
     const year = dateObj.getFullYear();
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
     const dayDate = String(dateObj.getDate()).padStart(2, '0');
@@ -98,11 +100,15 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel = `🚀 加急 (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
-        // 🔥🔥🔥 FIX 2: 顯示具體開放日期 (7日前) 🔥🔥🔥
+        // 🔥🔥🔥 NEW: 計算具體開放日期 (Slot 時間 - 7天) 🔥🔥🔥
         canBid = false; 
+        
         const openDate = new Date(slotTime);
-        openDate.setDate(openDate.getDate() - 7);
+        openDate.setDate(openDate.getDate() - 7); // 減去 7 天
+        
+        // 格式化日期 (例如: 2月10日)
         const openDateStr = openDate.toLocaleDateString('zh-HK', { month: 'numeric', day: 'numeric' });
+        
         warning = `🔒 遠期 (競價將於 ${openDateStr} 開放)`;
     }
 
