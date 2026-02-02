@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy // 🔥 新增 Trophy Icon
+  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -48,10 +48,10 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // 🔥🔥🔥 Calendar States (升級版：支援 Slot Group) 🔥🔥🔥
+  // 🔥🔥🔥 Calendar States 🔥🔥🔥
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
-  const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); // 改用 Group 來支援多個出價
+  const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
 
   // --- Forms ---
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
@@ -61,8 +61,7 @@ const AdminPanel = () => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
         // setLoading(false); 
-        // navigate('/'); 
-        setUser(currentUser); // Dev mode
+        setUser(currentUser); // Dev Mode fallback
         fetchAllData();
       } else {
         setUser(currentUser);
@@ -78,6 +77,7 @@ const AdminPanel = () => {
         setOrders(snap.docs.map(d => ({ 
             id: d.id, 
             ...d.data(), 
+            // 🔥 Safety check for dates
             createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() 
         })));
         setLoading(false);
@@ -93,6 +93,17 @@ const AdminPanel = () => {
       });
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
+
+  // 🔥🔥🔥 FIX: Define customerHistory BEFORE using it in JSX 🔥🔥🔥
+  const customerHistory = useMemo(() => {
+      const history = {};
+      orders.forEach(order => {
+          const email = order.userEmail;
+          if (!history[email]) history[email] = 0;
+          history[email]++;
+      });
+      return history;
+  }, [orders]);
 
   const stats = useMemo(() => {
     let totalRevenue = 0, validOrders = 0, pendingReview = 0;
@@ -117,17 +128,15 @@ const AdminPanel = () => {
     return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
   }, [orders]);
 
-  // --- Calendar Logic: Month View Data ---
+  // --- Calendar Logic: Month View ---
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
       const days = {};
-
       for(let d = 1; d <= endOfMonth.getDate(); d++) {
           const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
           days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 };
       }
-
       orders.forEach(order => {
           if (!['paid', 'won', 'paid_pending_selection'].includes(order.status) || !order.detailedSlots) return;
           order.detailedSlots.forEach(slot => {
@@ -142,7 +151,7 @@ const AdminPanel = () => {
       return days;
   }, [orders, calendarDate]);
 
-  // 🔥🔥🔥 Calendar Logic: Day View Grid (支援多重競價分組) 🔥🔥🔥
+  // --- Calendar Logic: Day View Grid ---
   const dayViewGrid = useMemo(() => {
     const grid = {}; 
     const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
@@ -160,7 +169,6 @@ const AdminPanel = () => {
         else if (order.isScheduled) status = 'scheduled';
         else if (order.status === 'won' || order.status === 'paid') status = 'action_needed';
 
-        // 建立完整 Slot 資料物件
         const slotData = { 
             ...slot, 
             orderId: order.id, 
@@ -171,16 +179,14 @@ const AdminPanel = () => {
             isScheduled: order.isScheduled, 
             displayStatus: status, 
             price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout',
-            priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 // Buyout 當作無限大，排第一
+            priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
         };
 
-        // 將該 Slot 加入到陣列中 (分組)
         if (!grid[key]) grid[key] = [];
         grid[key].push(slotData);
       });
     });
 
-    // 每個時段內的出價按金額排序 (高 -> 低)
     Object.keys(grid).forEach(key => {
         grid[key].sort((a, b) => b.priceVal - a.priceVal);
     });
@@ -191,11 +197,7 @@ const AdminPanel = () => {
   // --- Handlers ---
   const handleMarkAsScheduled = async (orderId) => {
     if (!confirm("確認已將影片編排至播放系統？")) return;
-    try { 
-        await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); 
-        alert("✅ 狀態已更新：準備播放"); 
-        
-        // 更新 Modal 本地狀態
+    try { await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); alert("✅ 狀態已更新：準備播放"); 
         if (selectedSlotGroup) {
             const updatedGroup = selectedSlotGroup.map(s => s.orderId === orderId ? { ...s, isScheduled: true, displayStatus: 'scheduled' } : s);
             setSelectedSlotGroup(updatedGroup);
@@ -211,8 +213,6 @@ const AdminPanel = () => {
         await updateDoc(doc(db, "orders", orderId), updateData);
         if (action === 'approve') sendBidConfirmation({ email: targetOrder.userEmail, displayName: targetOrder.userName }, targetOrder, 'video_approved');
         alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕"); setReviewNote(""); 
-        
-        // 關閉 Modal
         if (selectedSlotGroup) setSelectedSlotGroup(null);
     } catch (e) { alert("操作失敗"); }
   };
@@ -297,8 +297,35 @@ const AdminPanel = () => {
                     <StatCard title="總記錄" value={stats.totalOrders} icon={<List className="text-slate-500"/>} bg="bg-slate-50" border="border-slate-100" />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px]"><h3 className="font-bold mb-4">每日生意額</h3><ResponsiveContainer width="100%" height="100%"><LineChart data={stats.dailyChartData}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/><Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/></LineChart></ResponsiveContainer></div>
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px]"><h3 className="font-bold mb-4">訂單狀態</h3><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip/><Legend/></PieChart></ResponsiveContainer></div>
+                    {/* 🔥 FIX: Added w-full and h-full to containers to fix Recharts width(-1) error */}
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full">
+                        <h3 className="font-bold mb-4">每日生意額</h3>
+                        <div className="w-full h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={stats.dailyChartData}>
+                                    <CartesianGrid strokeDasharray="3 3"/>
+                                    <XAxis dataKey="date"/>
+                                    <YAxis/>
+                                    <Tooltip/>
+                                    <Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/>
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full">
+                        <h3 className="font-bold mb-4">訂單狀態</h3>
+                        <div className="w-full h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                        {stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
+                                    </Pie>
+                                    <Tooltip/>
+                                    <Legend/>
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
                 </div>
             </div>
         )}
@@ -341,7 +368,6 @@ const AdminPanel = () => {
                                         {data.pending > 0 && <div className="text-[10px] bg-red-100 text-red-700 px-1 rounded font-bold flex justify-between"><span>待審核</span><span>{data.pending}</span></div>}
                                         {data.scheduled > 0 && <div className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded font-bold flex justify-between"><span>Ready</span><span>{data.scheduled}</span></div>}
                                         {data.bidding > 0 && <div className="text-[10px] bg-yellow-50 text-yellow-600 px-1 rounded font-bold flex justify-between"><span>競價</span><span>{data.bidding}</span></div>}
-                                        {data.count === 0 && <div className="text-[10px] text-slate-300 text-center mt-4">No Ads</div>}
                                     </div>
                                 </div>
                             ))}
@@ -349,7 +375,7 @@ const AdminPanel = () => {
                     </div>
                 )}
 
-                {/* --- B. Day View (Detailed with Multi-Bid) --- */}
+                {/* --- B. Day View (Detailed) --- */}
                 {calendarViewMode === 'day' && (
                     <div className="flex-1 overflow-auto flex flex-col min-h-0">
                         <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
@@ -363,9 +389,7 @@ const AdminPanel = () => {
                                 <div className="w-12 shrink-0 border-r border-slate-200 flex items-center justify-center text-[10px] font-mono text-slate-400 bg-slate-50 sticky left-0 z-10">{String(h).padStart(2,'0')}:00</div>
                                 {screens.map(s => {
                                     const key = `${h}-${s.id}`;
-                                    const slotGroup = dayViewGrid[key]; // 🔥 取出這個時段的所有出價 (Array)
-                                    
-                                    // 計算數量並取出最高價者
+                                    const slotGroup = dayViewGrid[key]; 
                                     const bidCount = slotGroup?.length || 0;
                                     const topSlot = slotGroup ? slotGroup[0] : null; 
                                     
@@ -381,7 +405,6 @@ const AdminPanel = () => {
                                         <div key={key} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${colorClass}`} onClick={()=>slotGroup && setSelectedSlotGroup(slotGroup)}>
                                             {topSlot && (
                                                 <div className="w-full h-full flex flex-col justify-center px-1 text-[10px] leading-tight relative">
-                                                    {/* 🔥 如果有多個出價，顯示 Badge */}
                                                     {bidCount > 1 && (
                                                         <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold shadow-sm z-10">
                                                             {bidCount}
@@ -431,13 +454,15 @@ const AdminPanel = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredOrders.map(order => {
+                                // 🔥 FIX: customerHistory is now correctly defined above
                                 const isRepeat = customerHistory[order.userEmail] > 1;
                                 return (
                                     <tr key={order.id} className={`hover:bg-slate-50 ${selectedOrderIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
                                         <td className="p-4 text-center"><input type="checkbox" checked={selectedOrderIds.has(order.id)} onChange={() => handleSelectOrder(order.id)} /></td>
-                                        <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate.toLocaleString('zh-HK')}</td>
+                                        <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate ? order.createdAtDate.toLocaleString('zh-HK') : 'N/A'}</td>
                                         <td className="p-4 align-top">
                                             <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
+                                            
                                             <div className="my-2 p-2 bg-slate-50 border border-slate-200 rounded">
                                                 <div className="text-xs text-slate-700 font-bold flex items-center gap-2 mb-1">
                                                     {order.userEmail}
@@ -448,9 +473,11 @@ const AdminPanel = () => {
                                                     {(order.mobile || order.phone) && <a href={`https://wa.me/${(order.mobile || order.phone).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 bg-green-50 border border-green-200 rounded hover:bg-green-100 text-green-700 flex items-center gap-1 transition-colors"><MessageCircle size={12}/> WhatsApp</a>}
                                                 </div>
                                             </div>
+
                                             <div className="mb-2">
                                                 {order.hasVideo ? <span className="inline-flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-100"><CheckCircle size={12}/> 影片已上傳 ({order.videoName?.slice(0, 15)}...)</span> : <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded text-xs font-bold border border-red-100 animate-pulse"><AlertTriangle size={12}/> ⚠️ 尚未上傳影片 (請追片)</span>}
                                             </div>
+
                                             <div className="text-xs text-slate-500 font-bold mb-1">購買時段:</div>
                                             <div className="bg-white border border-slate-200 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
                                                 {order.detailedSlots && order.detailedSlots.map((slot, idx) => (
@@ -472,7 +499,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* === 4. Review (Fixed) === */}
+        {/* === 4. Review === */}
         {activeTab === 'review' && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in">
                 {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
@@ -504,7 +531,7 @@ const AdminPanel = () => {
             </div>
         )}
 
-        {/* ... (Rules, Screens, Analytics, Config tabs remain same) ... */}
+        {/* === 5. Rules === */}
         {activeTab === 'rules' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
                 <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
@@ -578,7 +605,6 @@ const AdminPanel = () => {
         {/* === 7. Analytics === */}
         {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
-                {/* ... (Analytics Code Kept Same) ... */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4"><div><h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 真實成交數據</h3><p className="text-xs text-slate-500">已選: {selectedStatScreens.size === 0 ? "全部 (All)" : `${selectedStatScreens.size} 部`}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => setSelectedStatScreens(new Set())} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.size === 0 ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>全部</button>{screens.map(s => (<button key={s.id} onClick={() => {const n=new Set(selectedStatScreens); n.has(String(s.id))?n.delete(String(s.id)):n.add(String(s.id)); setSelectedStatScreens(n);}} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.has(String(s.id)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600'}`}>{s.name}</button>))}</div></div><div className="flex flex-wrap gap-1 items-center mb-4"><span className="text-xs font-bold text-slate-500 uppercase w-12">Hours:</span><button onClick={() => setSelectedAnalyticsHours(new Set())} className={`w-8 h-8 rounded text-xs font-bold border ${selectedAnalyticsHours.size===0?'bg-slate-800 text-white':'bg-white text-slate-600'}`}>All</button>{Array.from({length:24},(_,i)=>i).map(h => (<button key={h} onClick={() => toggleAnalyticsHour(h)} className={`w-8 h-8 rounded text-xs border font-bold transition-all ${selectedAnalyticsHours.has(h)?'bg-orange-500 text-white border-orange-500':'bg-white text-slate-600 hover:bg-slate-100'}`}>{h}</button>))}</div><div className="mb-4 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white flex justify-between items-center shadow-lg"><div><h3 className="font-bold text-lg mb-1">所選組合平均成交價 (Average Price)</h3><p className="text-blue-100 text-sm">範圍: {selectedStatScreens.size===0?'全部屏幕':selectedStatScreens.size+' 個屏幕'} × {selectedAnalyticsHours.size===0?'24小時':selectedAnalyticsHours.size+' 個時段'}</p></div><div className="text-right"><div className="text-3xl font-bold">HK$ {realMarketStats.summary.avgPrice.toLocaleString()}</div><div className="text-xs text-blue-200">基於 {realMarketStats.summary.totalBids} 次出價</div></div></div><div className="overflow-x-auto h-[400px] border rounded-lg"><table className="w-full text-sm"><thead className="bg-slate-50 sticky top-0 z-10"><tr><th className="p-3 text-left">星期</th><th className="p-3 text-left">時段</th><th className="p-3 text-right">平均成交價</th><th className="p-3 text-right">出價次數</th><th className="p-3 text-left pl-6">建議</th></tr></thead><tbody className="divide-y divide-slate-100">{realMarketStats.rows.sort((a,b)=>(a.dayOfWeek-b.dayOfWeek)||(a.hour-b.hour)).map((m,i)=>(<tr key={i} className="hover:bg-slate-50"><td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td><td className="p-3">{String(m.hour).padStart(2,'0')}:00</td><td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td><td className="p-3 text-right"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids>0?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-400'}`}>{m.totalBids}</span></td><td className="p-3 pl-6">{m.totalBids>3?<span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 加價</span>:m.totalBids===0?<span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 減價</span>:<span className="text-slate-300">-</span>}</td></tr>))}</tbody></table></div>
             </div>
         )}
@@ -586,7 +612,6 @@ const AdminPanel = () => {
         {/* === 8. Config === */}
         {activeTab === 'config' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
-                {/* ... (Config Code Kept Same) ... */}
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div><div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
             </div>
         )}
