@@ -13,8 +13,6 @@ import { initEmailService, sendBidConfirmation } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
-  console.log("🔄 useDoohSystem Hook Re-rendered"); // Check Re-render
-
   // --- States ---
   const [user, setUser] = useState(null); 
   const [isAuthReady, setIsAuthReady] = useState(false); 
@@ -58,6 +56,8 @@ export const useDoohSystem = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploadingReal, setIsUploadingReal] = useState(false);
   const [modalPaymentStatus, setModalPaymentStatus] = useState('pending'); 
+  
+  // Modal Flags
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isBuyoutModalOpen, setIsBuyoutModalOpen] = useState(false);
   const [isBidModalOpen, setIsBidModalOpen] = useState(false); 
@@ -189,7 +189,6 @@ export const useDoohSystem = () => {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
   
   const handleGoogleLogin = async () => { 
-    console.log("🔵 Attempting Google Login...");
     setIsLoginLoading(true); 
     try { 
         await signInWithPopup(auth, googleProvider); 
@@ -206,21 +205,56 @@ export const useDoohSystem = () => {
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
   const callEmailService = async (id, data, isManual = false) => {
-      if (emailSentRef.current && !isManual) return;
-      if (data.emailSent && !isManual) return;
-      setEmailStatus('sending'); emailSentRef.current = true;
-      let targetUser = { email: data.userEmail || user?.email, displayName: data.userName || user?.displayName || 'Customer' };
-      const success = await sendBidConfirmation(targetUser, { id, ...data }, data.type === 'bid' ? 'bid_submission' : 'buyout');
+      setEmailStatus('sending'); 
+      console.log(`📧 callEmailService triggered for ID: ${id}, Type: ${data.type}`);
+
+      let targetUser = { 
+          email: data.userEmail || user?.email, 
+          displayName: data.userName || user?.displayName || 'Customer' 
+      };
+
+      if (!targetUser.email) {
+          console.error("❌ Email service failed: No target email found.");
+          setEmailStatus('error');
+          return;
+      }
+
+      let templateType = 'buyout';
+      if (data.type === 'bid') {
+          templateType = 'bid_submission';
+      }
+
+      const success = await sendBidConfirmation(targetUser, { id, ...data }, templateType);
+      
       if (success) { 
-          setEmailStatus('sent'); showToast("✅ 確認信已發送"); 
-          try { await updateDoc(doc(db, "orders", id), { emailSent: true }); } catch (e) { console.error("Failed to update emailSent flag:", e); }
-      } else { setEmailStatus('error'); emailSentRef.current = false; }
+          setEmailStatus('sent'); 
+          try { 
+              await updateDoc(doc(db, "orders", id), { emailSent: true }); 
+          } catch (e) { console.error(e); }
+      } else { 
+          setEmailStatus('error'); 
+      }
   };
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
-    if (isUrlSuccess) { setModalPaymentStatus('paid'); setTimeout(async () => { try { const docSnap = await getDoc(orderRef); if (docSnap.exists()) callEmailService(docSnap.id, docSnap.data(), false); } catch(e) {} }, 1500); }
+    
+    if (isUrlSuccess) { 
+        setModalPaymentStatus('paid'); 
+        setTimeout(async () => { 
+            try { 
+                const docSnap = await getDoc(orderRef); 
+                if (docSnap.exists()) {
+                     const data = docSnap.data();
+                     if (!data.emailSent) {
+                         callEmailService(docSnap.id, data, false); 
+                     }
+                }
+            } catch(e) { console.error("Error fetching order for email:", e); } 
+        }, 1500); 
+    }
+
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
@@ -244,7 +278,7 @@ export const useDoohSystem = () => {
     if (urlId) { setCurrentOrderId(urlId); setIsUrgentUploadModalOpen(true); fetchAndFinalizeOrder(urlId, isSuccess); }
   }, []); 
 
-const handleRealUpload = async (e) => {
+  const handleRealUpload = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       let targetId = currentOrderId || localStorage.getItem('temp_order_id') || new URLSearchParams(window.location.search).get('order_id');
       if (!targetId) { showToast("❌ 錯誤：找不到訂單 ID"); return; }
@@ -273,11 +307,11 @@ const handleRealUpload = async (e) => {
                   videoUrl: downloadURL, 
                   videoName: file.name, 
                   uploadedAt: serverTimestamp(),
-                  creativeStatus: 'pending_review' // <--- 加呢一行！讓 Admin 知道這單要審核
+                  creativeStatus: 'pending_review'
               }); 
               
               setCreativeName(file.name); 
-              setCreativeStatus('approved'); // 前端顯示已完成，後台顯示待審核
+              setCreativeStatus('approved'); 
               setIsUploadingReal(false); 
               showToast("✅ 上傳成功！等待審核"); 
               localStorage.removeItem('temp_order_id'); 
@@ -289,6 +323,7 @@ const handleRealUpload = async (e) => {
           setIsUploadingReal(false); 
       }
   };
+
   const closeTransaction = () => { setTransactionStep('idle'); setPendingTransaction(null); setCurrentOrderId(null); };
 
   const filteredScreens = useMemo(() => {
@@ -366,16 +401,10 @@ const handleRealUpload = async (e) => {
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
                 let warning = basePricing.warning;
                 
-                // 🔥 1. 定義急單狀態
-                const isUrgent = hoursUntil > 0 && hoursUntil <= 24;
-
-                // --- 2. 急單邏輯 (< 24h) ---
-                if (isUrgent) {
+                if (hoursUntil < 24 && hoursUntil > 0) {
                     canBid = false; warning = "急單 (限買斷)"; 
                     if (basePricing.isPrime) isBuyoutDisabled = false; 
-                } 
-                // --- 3. 遠期邏輯 (> 7天) ---
-                else if (slotTime > sevenDaysLater) {
+                } else if (slotTime > sevenDaysLater) {
                     canBid = false; warning = "遠期 (限買斷)";
                     if (isBuyoutDisabled) warning = "Prime 遠期 (無法交易)";
                 }
@@ -402,7 +431,7 @@ const handleRealUpload = async (e) => {
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const totalSlots = availableSlots.length;
+    const totalSlots = availableSlots.length; 
     const soldOutCount = generateAllSlots.length - availableSlots.length;
     
     let buyoutTotal = 0, currentBidTotal = 0, minBidTotal = 0, urgentCount = 0; 
@@ -414,7 +443,6 @@ const handleRealUpload = async (e) => {
     availableSlots.forEach(slot => {
         if (!slot.canBid && slot.isBuyoutDisabled) {
             hasPrimeFarFutureLock = true;
-            // 🔥 Removed return to allow restrictedBid logic to run
         }
 
         if (!hasPrimeFarFutureLock) {
@@ -444,7 +472,6 @@ const handleRealUpload = async (e) => {
         totalSlots, 
         buyoutTotal, currentBidTotal, minBidTotal,
         conflicts, missingBids, invalidBids, soldOutCount, urgentCount,
-        // 🔥 加入 !hasPrimeFarFutureLock 判斷
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock
@@ -458,48 +485,12 @@ const handleRealUpload = async (e) => {
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
   const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; if (mode === 'recurring') { /* Optional */ } const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
   
-  const handleBidClick = () => { 
-    console.log("🖱️ Handle Bid Clicked"); // Debug
-    if (!user) { 
-        console.log("❌ No user, opening login");
-        setIsLoginModalOpen(true); 
-        return; 
-    } 
-    if (pricing.totalSlots === 0) { 
-        console.log("❌ No slots selected");
-        showToast('❌ 請先選擇'); 
-        return; 
-    } 
-    console.log("✅ Opening Bid Modal");
-    setTermsAccepted(false); 
-    setIsBidModalOpen(true); 
-  };
-
-  const handleBuyoutClick = () => { 
-    console.log("🖱️ Handle Buyout Clicked"); // Debug
-    if (!user) { 
-        console.log("❌ No user, opening login");
-        setIsLoginModalOpen(true); 
-        return; 
-    } 
-    if (pricing.totalSlots === 0) { 
-        console.log("❌ No slots selected");
-        showToast('❌ 請先選擇'); 
-        return; 
-    } 
-    if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { 
-        console.log("❌ Buyout restricted (Prime)");
-        showToast('❌ Prime 時段限競價'); 
-        return; 
-    } 
-    console.log("✅ Opening Buyout Modal");
-    setTermsAccepted(false); 
-    setIsBuyoutModalOpen(true); 
-  };
-
   const initiateTransaction = async (type = 'bid') => {
-    console.log(`🚀 Initiating Transaction: ${type}`); // Debug
+    console.log(`🚀 Initiating Transaction: ${type}`);
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
+    
+    // Safety check
+    if (!user) { showToast("請先登入"); return; }
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
@@ -510,21 +501,59 @@ const handleRealUpload = async (e) => {
     }));
 
     let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
+    
+    // 🔥 Sanitize Data: Ensure no undefined values
     const txnData = {
-      amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date, isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus, conflicts: pricing.conflicts, userId: user.uid, userEmail: user.email, userName: user.displayName, createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => screens.find(s => s.id === id)?.name || 'Unknown'), timeSlotSummary: slotSummary
+      amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, 
+      type, 
+      detailedSlots, 
+      targetDate: detailedSlots[0]?.date || '', 
+      isBundle: isBundleMode, 
+      slotCount: pricing.totalSlots, 
+      creativeStatus: 'empty', // Explicitly set default
+      conflicts: [], // Reset conflicts for clean db
+      userId: user.uid, 
+      userEmail: user.email, 
+      userName: user.displayName || 'Guest', 
+      createdAt: serverTimestamp(), 
+      status: 'pending_auth', 
+      hasVideo: false, 
+      emailSent: false, 
+      screens: Array.from(selectedScreens).map(id => {
+          const s = screens.find(sc => sc.id === id);
+          return s ? s.name : String(id);
+      }), 
+      timeSlotSummary: slotSummary
     };
 
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
+    
     try {
-        setTransactionStep('processing');
+        setTransactionStep('processing'); // Show Loader
         console.log("📡 Sending to Firestore...", txnData);
+        
         const docRef = await addDoc(collection(db, "orders"), txnData);
         console.log("✅ Firestore Doc ID:", docRef.id);
-        localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
-        setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary');
+        
+        localStorage.setItem('temp_order_id', docRef.id); 
+        localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
+        
+        setPendingTransaction({ ...txnData, id: docRef.id }); 
+        setCurrentOrderId(docRef.id); 
+        
+        // 🔥 CRITICAL FIX: Ensure step update happens after doc creation
+        setTransactionStep('summary'); // Show Payment Button
+
+        // 🔥 Async Email Trigger (Non-blocking)
+        if (type === 'bid') {
+             // Don't await this, let it run in background
+             callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email trigger failed:", e));
+        }
+
     } catch (error) { 
         console.error("❌ AddDoc Error:", error);
-        showToast("建立訂單失敗"); setTransactionStep('idle'); 
+        showToast("建立訂單失敗"); 
+        setTransactionStep('idle'); 
     }
   };
 
@@ -533,18 +562,32 @@ const handleRealUpload = async (e) => {
     setTransactionStep('processing');
     const targetId = localStorage.getItem('temp_order_id') || currentOrderId;
     if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
+    
     const currentUrl = window.location.origin + window.location.pathname;
     const captureMethod = pendingTransaction && pendingTransaction.type === 'buyout' ? 'automatic' : 'manual';
+    
     try {
         const response = await fetch('/.netlify/functions/create-checkout-session', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }),
+            body: JSON.stringify({ 
+                amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, 
+                productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, 
+                orderId: targetId, 
+                successUrl: `${currentUrl}?success=true&order_id=${targetId}`, 
+                cancelUrl: `${currentUrl}?canceled=true`, 
+                customerEmail: user.email, 
+                captureMethod: captureMethod, 
+                orderType: pendingTransaction.type 
+            }),
         });
         const data = await response.json();
         console.log("💳 Stripe Response:", data);
         if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); }
     } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
+
+  const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
+  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
   // --- Return Objects for View ---
   return {
@@ -556,20 +599,19 @@ const handleRealUpload = async (e) => {
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
     occupiedSlots, 
-
-        // 🔥🔥🔥 補上這些缺失的 State 變數 🔥🔥🔥
+    
+    // Modal Flags & States
     isBuyoutModalOpen, 
     isBidModalOpen, 
     slotBids, 
     batchBidInput, 
     termsAccepted,
-    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-
     
     // Setters / Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted,
+    setCurrentOrderId, // Export this
     
     handleGoogleLogin, handleLogout,
     toggleScreen, toggleHour, toggleWeekday, toggleDate,
