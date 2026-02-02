@@ -6,7 +6,8 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy, Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy
+  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy,
+  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy // 🔥 新增 Icons
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -34,7 +35,7 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Pricing Config ---
+  // --- Pricing Config States (Global & Active) ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
@@ -53,15 +54,17 @@ const AdminPanel = () => {
   
   // --- Screen Management States (Enhanced) ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
+  const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1); // 默認顯示星期一 (0=Sun, 1=Mon...)
+  
   const [newScreenData, setNewScreenData] = useState({
     name: '',
     location: '',
     district: '',
     basePrice: 50,
-    images: ['', '', ''], 
-    specifications: '',   
-    mapUrl: '',           
+    images: ['', '', ''], // 支援 3 張圖
+    specifications: '',   // 規格
+    mapUrl: '',           // Google Map
     bundleGroup: '',
     // 🔥 初始化 7 日的規則
     tierRules: {
@@ -69,15 +72,16 @@ const AdminPanel = () => {
         3: { ...EMPTY_DAY_RULE }, 4: { ...EMPTY_DAY_RULE }, 5: { ...EMPTY_DAY_RULE }, 6: { ...EMPTY_DAY_RULE }
     }
   });
-  const [editingScreenId, setEditingScreenId] = useState(null);
 
-  // 🔥🔥🔥 Calendar States 🔥🔥🔥
+  // --- Calendar States ---
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
 
   // --- Forms ---
-  const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+  const [newRule, setNewRule] = useState({
+      screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: ''
+  });
 
   // 1. Auth & Data Fetching
   useEffect(() => {
@@ -96,6 +100,7 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
+      
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
         setOrders(snap.docs.map(d => ({ 
             id: d.id, 
@@ -104,17 +109,26 @@ const AdminPanel = () => {
         })));
         setLoading(false);
       });
+
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
-          const sortedScreens = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
-            .sort((a, b) => Number(a.id) - Number(b.id));
-          setScreens(sortedScreens);
+          // Sort numerically if possible
+          const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
+            .sort((a,b) => Number(a.id) - Number(b.id));
+          setScreens(sorted);
       });
+
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
+
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) { setGlobalPricingConfig(docSnap.data()); setActiveConfig(docSnap.data()); }
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              setGlobalPricingConfig(data);
+              setActiveConfig(data);
+          }
       });
+
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
@@ -129,14 +143,20 @@ const AdminPanel = () => {
   }, [orders]);
 
   const stats = useMemo(() => {
-    let totalRevenue = 0, validOrders = 0, pendingReview = 0;
-    let dailyRevenue = {}, statusCount = {};
+    let totalRevenue = 0;
+    let validOrders = 0;
+    let pendingReview = 0;
+    let dailyRevenue = {};
+    let statusCount = {};
 
     orders.forEach(order => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
+        
         const needsReview = order.creativeStatus === 'pending_review' || 
                            (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
+        
         if (needsReview) pendingReview++;
+        
         if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status)) {
             totalRevenue += Number(order.amount) || 0;
             validOrders++;
@@ -145,8 +165,44 @@ const AdminPanel = () => {
         }
     });
 
-    return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
+    return {
+        totalRevenue, totalOrders: orders.length, validOrders, pendingReview,
+        dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })),
+        statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] }))
+    };
   }, [orders]);
+
+  // 🔥🔥🔥 修復：切換價格配置 (Global vs Screen) 🔥🔥🔥
+  useEffect(() => {
+      if (selectedConfigTarget === 'global') {
+          setActiveConfig(globalPricingConfig);
+      } else {
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
+          if (screen && screen.customPricing) {
+              setActiveConfig(screen.customPricing);
+          } else {
+              setActiveConfig(globalPricingConfig);
+          }
+      }
+  }, [selectedConfigTarget, globalPricingConfig, screens]);
+
+  const realMarketStats = useMemo(() => {
+      const statsMap = {}; 
+      for(let d=0; d<7; d++) { for(let h=0; h<24; h++) { statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; } }
+      orders.forEach(order => {
+          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
+              order.detailedSlots.forEach(slot => {
+                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
+                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
+                  if (isScreenSelected && isHourSelected) { const dateObj = new Date(slot.date); const key = `${dateObj.getDay()}-${slot.hour}`; if (statsMap[key]) { statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); statsMap[key].totalBids += 1; } }
+              });
+          }
+      });
+      let selectionTotalAmount = 0; let selectionTotalBids = 0;
+      const rows = Object.values(statsMap).map(item => { if (item.totalBids > 0) { const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; } } return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; });
+      const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
+      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
+  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   // --- Calendar Logic ---
   const monthViewData = useMemo(() => {
@@ -181,7 +237,6 @@ const AdminPanel = () => {
       order.detailedSlots.forEach(slot => {
         if (slot.date !== targetDateStr) return;
         const key = `${slot.hour}-${slot.screenId}`;
-        
         let status = 'normal';
         if (order.status === 'paid_pending_selection') status = 'bidding';
         else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed';
@@ -189,34 +244,71 @@ const AdminPanel = () => {
         else if (order.status === 'won' || order.status === 'paid') status = 'action_needed';
 
         const slotData = { 
-            ...slot, 
-            orderId: order.id, 
-            userEmail: order.userEmail, 
-            videoUrl: order.videoUrl, 
-            status: order.status, 
-            creativeStatus: order.creativeStatus, 
-            isScheduled: order.isScheduled, 
-            displayStatus: status, 
-            price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout',
+            ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, 
+            status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, 
+            displayStatus: status, price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
             priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
         };
-
         if (!grid[key]) grid[key] = [];
         grid[key].push(slotData);
       });
     });
-
-    Object.keys(grid).forEach(key => {
-        grid[key].sort((a, b) => b.priceVal - a.priceVal);
-    });
-
+    Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
     return grid;
   }, [orders, calendarDate]);
 
   // --- Handlers ---
+  const handleConfigChange = (key, val) => { setActiveConfig(prev => ({ ...prev, [key]: parseFloat(val) })); };
+  
+  const savePricingConfig = async () => { 
+      if (selectedConfigTarget === 'global') { 
+          await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); 
+          setGlobalPricingConfig(activeConfig); 
+          alert("🌍 全局價格公式已更新"); 
+      } else { 
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget); 
+          if (!screen) return; 
+          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig }); 
+          alert(`✅ Screen ${screen.name} 的專屬公式已更新`); 
+      } 
+  };
+  
+  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); if (n.has(id)) n.delete(id); else n.add(id); setSelectedOrderIds(n); };
+  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
+  
+  const handleBulkAction = async (action) => { 
+      if (selectedOrderIds.size === 0) return; 
+      if (!window.confirm(`⚠️ 確認對選中的 ${selectedOrderIds.size} 張訂單執行 ${action === 'cancel' ? '批量取消' : action}?`)) return; 
+      try { 
+          const batch = writeBatch(db); 
+          selectedOrderIds.forEach(id => { 
+              const ref = doc(db, "orders", id); 
+              if (action === 'cancel') { batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }); } 
+          }); 
+          await batch.commit(); 
+          alert("✅ 批量操作完成"); setSelectedOrderIds(new Set()); 
+      } catch (e) { console.error(e); alert("❌ 操作失敗"); } 
+  };
+
+  const handleAddRule = async () => { 
+      if (!newRule.date) return alert("❌ 請選擇日期"); 
+      let hours = []; const inputStr = newRule.hoursStr.trim(); 
+      if (!inputStr || inputStr.toLowerCase() === 'all') { hours = Array.from({length: 24}, (_, i) => i); } 
+      else { 
+          if (inputStr.includes('-')) { const [start, end] = inputStr.split('-').map(n => parseInt(n)); if (!isNaN(start) && !isNaN(end) && start <= end) { for (let i = start; i <= end; i++) if (i >= 0 && i <= 23) hours.push(i); } } 
+          else { hours = inputStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23); } 
+      } 
+      if (hours.length === 0) return alert("❌ 時段格式錯誤"); 
+      try { await addDoc(collection(db, "special_rules"), { screenId: newRule.screenId, date: newRule.date, hours: hours, type: newRule.action, value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null, note: newRule.note, createdAt: new Date() }); alert("✅ 規則已建立"); setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' }); } catch (e) { console.error(e); alert("❌ 建立失敗"); } 
+  };
+  
+  const handleDeleteRule = async (id) => { if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id)); };
+
   const handleMarkAsScheduled = async (orderId) => {
     if (!confirm("確認已將影片編排至播放系統？")) return;
-    try { await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); alert("✅ 狀態已更新：準備播放"); 
+    try { 
+        await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); 
+        alert("✅ 狀態已更新：準備播放"); 
         if (selectedSlotGroup) {
             const updatedGroup = selectedSlotGroup.map(s => s.orderId === orderId ? { ...s, isScheduled: true, displayStatus: 'scheduled' } : s);
             setSelectedSlotGroup(updatedGroup);
@@ -248,16 +340,7 @@ const AdminPanel = () => {
       });
   }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // ... (Standard Handlers) ...
-  const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
-  const savePricingConfig = async () => { if (selectedConfigTarget === 'global') { await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); setGlobalPricingConfig(activeConfig); } else { const s = screens.find(s => String(s.id) === selectedConfigTarget); if(s) await updateDoc(doc(db, "screens", s.firestoreId), { customPricing: activeConfig }); } alert("設定已更新"); };
-  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); n.has(id)?n.delete(id):n.add(id); setSelectedOrderIds(n); };
-  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
-  const handleBulkAction = async (act) => { if(selectedOrderIds.size===0)return; if(!confirm('Confirm?'))return; const b=writeBatch(db); selectedOrderIds.forEach(id=>{if(act==='cancel') b.update(doc(db,"orders",id),{status:'cancelled'})}); await b.commit(); alert("Done"); setSelectedOrderIds(new Set()); };
-  const handleAddRule = async () => { if(!newRule.date) return alert("Date required"); await addDoc(collection(db, "special_rules"), { ...newRule, hours: newRule.hoursStr ? newRule.hoursStr.split(',').map(Number) : Array.from({length:24},(_,i)=>i), createdAt: new Date() }); alert("Rule Added"); setNewRule({...newRule, hoursStr:''}); };
-  const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db, "special_rules", id)); };
-  
-  // --- Screen Management Handlers ---
+  // --- Screen Management Handlers (🔥 新增) ---
   const handleScreenChange = (fid, f, v) => setEditingScreens(p => ({ ...p, [fid]: { ...p[fid], [f]: v } }));
   
   const saveScreenSimple = async (s) => { 
@@ -393,17 +476,6 @@ const AdminPanel = () => {
 
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
   const toggleAnalyticsHour = (h) => { const n = new Set(selectedAnalyticsHours); n.has(h)?n.delete(h):n.add(h); setSelectedAnalyticsHours(n); };
-
-  const realMarketStats = useMemo(() => {
-      const statsMap = {}; for(let d=0; d<7; d++) for(let h=0; h<24; h++) statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
-      orders.forEach(o => { if(['paid','won','completed'].includes(o.status) && o.detailedSlots) o.detailedSlots.forEach(s => { 
-          if((selectedStatScreens.size===0 || selectedStatScreens.has(String(s.screenId))) && (selectedAnalyticsHours.size===0 || selectedAnalyticsHours.has(s.hour))) {
-              const k = `${new Date(s.date).getDay()}-${s.hour}`; statsMap[k].totalAmount += (Number(s.bidPrice)||0); statsMap[k].totalBids++;
-      }})});
-      const rows = Object.values(statsMap).map(i => ({...i, averagePrice: i.totalBids>0?Math.round(i.totalAmount/i.totalBids):0})).filter(r=>r.totalBids>0 && (selectedAnalyticsHours.size===0||selectedAnalyticsHours.has(r.hour)));
-      const avg = rows.length>0 ? Math.round(rows.reduce((a,b)=>a+b.averagePrice,0)/rows.length) : 0;
-      return { rows, summary: { avgPrice: avg, totalBids: rows.reduce((a,b)=>a+b.totalBids,0) } };
-  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   if (loading) {
       return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-center"><Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4"/><p className="text-slate-500">Loading Admin Panel...</p></div></div>;
@@ -709,70 +781,6 @@ const AdminPanel = () => {
 
       </div>
 
-      {/* 🔥🔥🔥 新的 Multi-Bid Modal (支援顯示所有競爭者) 🔥🔥🔥 */}
-      {selectedSlotGroup && selectedSlotGroup.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-            <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
-              <h3 className="font-bold flex items-center gap-2 text-sm">
-                  <Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00
-                  <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span>
-              </h3>
-              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">&times;</span></button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* 顯示該時段的所有競價 (已排序) */}
-                {selectedSlotGroup.map((slot, index) => (
-                    <div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}>
-                        {/* 排名 Badge */}
-                        <div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">
-                            {index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}
-                            <div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div>
-                        </div>
-
-                        {/* 內容 */}
-                        <div className="flex-1 min-w-0">
-                            <div className="flex justify-between items-start mb-2">
-                                <div>
-                                    <div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div>
-                                    <div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div>
-                                </div>
-                                <StatusBadge status={slot.status} />
-                            </div>
-
-                            {/* 影片與操作 */}
-                            <div className="flex gap-4 mt-3">
-                                <div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">
-                                    {slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}
-                                </div>
-                                <div className="flex-1 flex flex-col justify-center gap-2">
-                                    {slot.displayStatus === 'review_needed' && (
-                                        <button onClick={() => handleReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2">
-                                            <CheckCircle size={14}/> 審核通過
-                                        </button>
-                                    )}
-                                    {slot.displayStatus === 'action_needed' && (
-                                        <button onClick={() => handleMarkAsScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2">
-                                            <UploadCloud size={14}/> 確認已編排
-                                        </button>
-                                    )}
-                                    {slot.displayStatus === 'bidding' && (
-                                        <div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>
-                                    )}
-                                    {slot.displayStatus === 'scheduled' && (
-                                        <div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 🔥🔥🔥 ADD/EDIT SCREEN MODAL (Enhanced with Weekly Tabs) 🔥🔥🔥 */}
       {isAddScreenModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden">
@@ -929,6 +937,69 @@ const AdminPanel = () => {
         </div>
       )}
 
+      {/* 🔥🔥🔥 新的 Multi-Bid Modal (支援顯示所有競爭者) 🔥🔥🔥 */}
+      {selectedSlotGroup && selectedSlotGroup.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+              <h3 className="font-bold flex items-center gap-2 text-sm">
+                  <Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00
+                  <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span>
+              </h3>
+              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">&times;</span></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* 顯示該時段的所有競價 (已排序) */}
+                {selectedSlotGroup.map((slot, index) => (
+                    <div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}>
+                        {/* 排名 Badge */}
+                        <div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">
+                            {index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}
+                            <div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div>
+                        </div>
+
+                        {/* 內容 */}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div>
+                                    <div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div>
+                                </div>
+                                <StatusBadge status={slot.status} />
+                            </div>
+
+                            {/* 影片與操作 */}
+                            <div className="flex gap-4 mt-3">
+                                <div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">
+                                    {slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}
+                                </div>
+                                <div className="flex-1 flex flex-col justify-center gap-2">
+                                    {slot.displayStatus === 'review_needed' && (
+                                        <button onClick={() => handleReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2">
+                                            <CheckCircle size={14}/> 審核通過
+                                        </button>
+                                    )}
+                                    {slot.displayStatus === 'action_needed' && (
+                                        <button onClick={() => handleMarkAsScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2">
+                                            <UploadCloud size={14}/> 確認已編排
+                                        </button>
+                                    )}
+                                    {slot.displayStatus === 'bidding' && (
+                                        <div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>
+                                    )}
+                                    {slot.displayStatus === 'scheduled' && (
+                                        <div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
