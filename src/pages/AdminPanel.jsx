@@ -6,7 +6,8 @@ import {
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy, Edit, MapPin, Image as ImageIcon, Layers
+  Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy,
+  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map // 🔥 新增 Icons
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -21,9 +22,9 @@ const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
-// Default tier configuration structure
+// 🔥 預設時段設定
 const DEFAULT_TIER_RULES = {
-  default: { prime: [18, 19, 20, 21, 22], gold: [12, 13, 14] } // Default if not set
+  default: { prime: [18, 19, 20, 21, 22], gold: [12, 13, 14] } 
 };
 
 const AdminPanel = () => {
@@ -36,7 +37,7 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Pricing Config ---
+  // --- Pricing Config States (Global & Active) ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
@@ -53,27 +54,27 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // --- Screen Management States ---
+  // --- Screen Management States (🔥 新增) ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
+  const [editingScreenId, setEditingScreenId] = useState(null);
   const [newScreenData, setNewScreenData] = useState({
-    name: '',
-    location: '',
-    district: '',
-    basePrice: 50,
-    imageUrl: '',
+    name: '', location: '', district: '', basePrice: 50,
+    images: ['', '', ''], // 支援 3 張圖
+    specifications: '',   // 規格
+    mapUrl: '',           // Google Map
     bundleGroup: '',
-    tierRules: JSON.parse(JSON.stringify(DEFAULT_TIER_RULES)) // Deep copy
+    tierRules: JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
   });
-  const [editingScreenId, setEditingScreenId] = useState(null); // Track which screen is being fully edited
 
-  
-  // 🔥🔥🔥 Calendar States 🔥🔥🔥
+  // --- Calendar States ---
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
 
   // --- Forms ---
-  const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+  const [newRule, setNewRule] = useState({
+      screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: ''
+  });
 
   // 1. Auth & Data Fetching
   useEffect(() => {
@@ -92,6 +93,7 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
+      
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
         setOrders(snap.docs.map(d => ({ 
             id: d.id, 
@@ -100,18 +102,26 @@ const AdminPanel = () => {
         })));
         setLoading(false);
       });
+
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
-          // Sort by numerical ID if possible, otherwise string comparison
-          const sortedScreens = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
-            .sort((a, b) => Number(a.id) - Number(b.id));
-          setScreens(sortedScreens);
+          // Sort numerically if possible
+          const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }))
+            .sort((a,b) => Number(a.id) - Number(b.id));
+          setScreens(sorted);
       });
+
       const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => {
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
+
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) { setGlobalPricingConfig(docSnap.data()); setActiveConfig(docSnap.data()); }
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              setGlobalPricingConfig(data);
+              setActiveConfig(data);
+          }
       });
+
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
@@ -126,8 +136,11 @@ const AdminPanel = () => {
   }, [orders]);
 
   const stats = useMemo(() => {
-    let totalRevenue = 0, validOrders = 0, pendingReview = 0;
-    let dailyRevenue = {}, statusCount = {};
+    let totalRevenue = 0;
+    let validOrders = 0;
+    let pendingReview = 0;
+    let dailyRevenue = {};
+    let statusCount = {};
 
     orders.forEach(order => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
@@ -145,11 +158,47 @@ const AdminPanel = () => {
         }
     });
 
-    return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
+    return {
+        totalRevenue, totalOrders: orders.length, validOrders, pendingReview,
+        dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })),
+        statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] }))
+    };
   }, [orders]);
 
+  // 🔥🔥🔥 之前遺漏的 Function：切換價格配置 🔥🔥🔥
+  useEffect(() => {
+      if (selectedConfigTarget === 'global') {
+          setActiveConfig(globalPricingConfig);
+      } else {
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
+          if (screen && screen.customPricing) {
+              setActiveConfig(screen.customPricing);
+          } else {
+              setActiveConfig(globalPricingConfig);
+          }
+      }
+  }, [selectedConfigTarget, globalPricingConfig, screens]);
+
+  const realMarketStats = useMemo(() => {
+      const statsMap = {}; 
+      for(let d=0; d<7; d++) { for(let h=0; h<24; h++) { statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; } }
+      orders.forEach(order => {
+          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
+              order.detailedSlots.forEach(slot => {
+                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId));
+                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour);
+                  if (isScreenSelected && isHourSelected) { const dateObj = new Date(slot.date); const key = `${dateObj.getDay()}-${slot.hour}`; if (statsMap[key]) { statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); statsMap[key].totalBids += 1; } }
+              });
+          }
+      });
+      let selectionTotalAmount = 0; let selectionTotalBids = 0;
+      const rows = Object.values(statsMap).map(item => { if (item.totalBids > 0) { const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; } } return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; });
+      const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
+      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
+  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
+
   // --- Calendar Logic ---
-  const monthViewData = useMemo(() => { /* ... existing logic ... */
+  const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
       const days = {};
@@ -171,7 +220,7 @@ const AdminPanel = () => {
       return days;
   }, [orders, calendarDate]);
 
-  const dayViewGrid = useMemo(() => { /* ... existing logic ... */
+  const dayViewGrid = useMemo(() => {
     const grid = {}; 
     const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
 
@@ -181,7 +230,6 @@ const AdminPanel = () => {
       order.detailedSlots.forEach(slot => {
         if (slot.date !== targetDateStr) return;
         const key = `${slot.hour}-${slot.screenId}`;
-        
         let status = 'normal';
         if (order.status === 'paid_pending_selection') status = 'bidding';
         else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed';
@@ -189,34 +237,71 @@ const AdminPanel = () => {
         else if (order.status === 'won' || order.status === 'paid') status = 'action_needed';
 
         const slotData = { 
-            ...slot, 
-            orderId: order.id, 
-            userEmail: order.userEmail, 
-            videoUrl: order.videoUrl, 
-            status: order.status, 
-            creativeStatus: order.creativeStatus, 
-            isScheduled: order.isScheduled, 
-            displayStatus: status, 
-            price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout',
+            ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, 
+            status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, 
+            displayStatus: status, price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
             priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
         };
-
         if (!grid[key]) grid[key] = [];
         grid[key].push(slotData);
       });
     });
-
-    Object.keys(grid).forEach(key => {
-        grid[key].sort((a, b) => b.priceVal - a.priceVal);
-    });
-
+    Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
     return grid;
   }, [orders, calendarDate]);
 
   // --- Handlers ---
+  const handleConfigChange = (key, val) => { setActiveConfig(prev => ({ ...prev, [key]: parseFloat(val) })); };
+  
+  const savePricingConfig = async () => { 
+      if (selectedConfigTarget === 'global') { 
+          await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); 
+          setGlobalPricingConfig(activeConfig); 
+          alert("🌍 全局價格公式已更新"); 
+      } else { 
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget); 
+          if (!screen) return; 
+          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig }); 
+          alert(`✅ Screen ${screen.name} 的專屬公式已更新`); 
+      } 
+  };
+  
+  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); if (n.has(id)) n.delete(id); else n.add(id); setSelectedOrderIds(n); };
+  const handleSelectAll = (e) => { if (e.target.checked) { setSelectedOrderIds(new Set(filteredOrders.map(o => o.id))); } else { setSelectedOrderIds(new Set()); } };
+  
+  const handleBulkAction = async (action) => { 
+      if (selectedOrderIds.size === 0) return; 
+      if (!window.confirm(`⚠️ 確認對選中的 ${selectedOrderIds.size} 張訂單執行 ${action === 'cancel' ? '批量取消' : action}?`)) return; 
+      try { 
+          const batch = writeBatch(db); 
+          selectedOrderIds.forEach(id => { 
+              const ref = doc(db, "orders", id); 
+              if (action === 'cancel') { batch.update(ref, { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }); } 
+          }); 
+          await batch.commit(); 
+          alert("✅ 批量操作完成"); setSelectedOrderIds(new Set()); 
+      } catch (e) { console.error(e); alert("❌ 操作失敗"); } 
+  };
+
+  const handleAddRule = async () => { 
+      if (!newRule.date) return alert("❌ 請選擇日期"); 
+      let hours = []; const inputStr = newRule.hoursStr.trim(); 
+      if (!inputStr || inputStr.toLowerCase() === 'all') { hours = Array.from({length: 24}, (_, i) => i); } 
+      else { 
+          if (inputStr.includes('-')) { const [start, end] = inputStr.split('-').map(n => parseInt(n)); if (!isNaN(start) && !isNaN(end) && start <= end) { for (let i = start; i <= end; i++) if (i >= 0 && i <= 23) hours.push(i); } } 
+          else { hours = inputStr.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23); } 
+      } 
+      if (hours.length === 0) return alert("❌ 時段格式錯誤"); 
+      try { await addDoc(collection(db, "special_rules"), { screenId: newRule.screenId, date: newRule.date, hours: hours, type: newRule.action, value: newRule.action === 'price_override' ? parseFloat(newRule.overridePrice) : null, note: newRule.note, createdAt: new Date() }); alert("✅ 規則已建立"); setNewRule({ ...newRule, hoursStr: '', overridePrice: '', note: '' }); } catch (e) { console.error(e); alert("❌ 建立失敗"); } 
+  };
+  
+  const handleDeleteRule = async (id) => { if(window.confirm("確認刪除此規則？")) await deleteDoc(doc(db, "special_rules", id)); };
+
   const handleMarkAsScheduled = async (orderId) => {
     if (!confirm("確認已將影片編排至播放系統？")) return;
-    try { await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); alert("✅ 狀態已更新：準備播放"); 
+    try { 
+        await updateDoc(doc(db, "orders", orderId), { isScheduled: true, scheduledAt: new Date(), scheduledBy: user.email }); 
+        alert("✅ 狀態已更新：準備播放"); 
         if (selectedSlotGroup) {
             const updatedGroup = selectedSlotGroup.map(s => s.orderId === orderId ? { ...s, isScheduled: true, displayStatus: 'scheduled' } : s);
             setSelectedSlotGroup(updatedGroup);
@@ -248,24 +333,13 @@ const AdminPanel = () => {
       });
   }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // ... (Standard Handlers) ...
-  const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
-  const savePricingConfig = async () => { if (selectedConfigTarget === 'global') { await setDoc(doc(db, "system_config", "pricing_rules"), activeConfig); setGlobalPricingConfig(activeConfig); } else { const s = screens.find(s => String(s.id) === selectedConfigTarget); if(s) await updateDoc(doc(db, "screens", s.firestoreId), { customPricing: activeConfig }); } alert("設定已更新"); };
-  const handleSelectOrder = (id) => { const n = new Set(selectedOrderIds); n.has(id)?n.delete(id):n.add(id); setSelectedOrderIds(n); };
-  const handleSelectAll = (e) => setSelectedOrderIds(e.target.checked ? new Set(filteredOrders.map(o => o.id)) : new Set());
-  const handleBulkAction = async (act) => { if(selectedOrderIds.size===0)return; if(!confirm('Confirm?'))return; const b=writeBatch(db); selectedOrderIds.forEach(id=>{if(act==='cancel') b.update(doc(db,"orders",id),{status:'cancelled'})}); await b.commit(); alert("Done"); setSelectedOrderIds(new Set()); };
-  const handleAddRule = async () => { if(!newRule.date) return alert("Date required"); await addDoc(collection(db, "special_rules"), { ...newRule, hours: newRule.hoursStr ? newRule.hoursStr.split(',').map(Number) : Array.from({length:24},(_,i)=>i), createdAt: new Date() }); alert("Rule Added"); setNewRule({...newRule, hoursStr:''}); };
-  const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db, "special_rules", id)); };
-  
-  // --- Screen Management Handlers ---
+  // --- Screen Management Handlers (🔥 新增) ---
   const handleScreenChange = (fid, f, v) => setEditingScreens(p => ({ ...p, [fid]: { ...p[fid], [f]: v } }));
   
   const saveScreenSimple = async (s) => { 
       const d = editingScreens[s.firestoreId]; 
       if(d) { 
-          // Parse price
           if(d.basePrice) d.basePrice = parseFloat(d.basePrice);
-          
           await updateDoc(doc(db, "screens", s.firestoreId), d); 
           alert("Saved"); 
           setEditingScreens(p=>{const n={...p};delete n[s.firestoreId];return n;}); 
@@ -278,7 +352,12 @@ const AdminPanel = () => {
           location: screen.location,
           district: screen.district || '',
           basePrice: screen.basePrice || 50,
-          imageUrl: screen.imageUrl || '',
+          // 🔥 確保 images 是陣列且有 3 個元素
+          images: Array.isArray(screen.images) && screen.images.length >= 3 ? 
+                  screen.images.slice(0,3) : 
+                  [screen.imageUrl || '', '', ''],
+          specifications: screen.specifications || '',
+          mapUrl: screen.mapUrl || '',
           bundleGroup: screen.bundleGroup || '',
           tierRules: screen.tierRules || JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
       });
@@ -288,21 +367,33 @@ const AdminPanel = () => {
 
   const handleAddScreen = () => {
       setNewScreenData({
-          name: '', location: '', district: '', basePrice: 50, imageUrl: '', bundleGroup: '',
+          name: '', location: '', district: '', basePrice: 50, 
+          images: ['', '', ''], specifications: '', mapUrl: '',
+          bundleGroup: '',
           tierRules: JSON.parse(JSON.stringify(DEFAULT_TIER_RULES))
       });
       setEditingScreenId(null);
       setIsAddScreenModalOpen(true);
   };
 
+  const handleImageChange = (index, value) => {
+      const newImages = [...newScreenData.images];
+      newImages[index] = value;
+      setNewScreenData({ ...newScreenData, images: newImages });
+  };
+
   const saveScreenFull = async () => {
       try {
+          const cleanedImages = newScreenData.images.filter(url => url.trim() !== '');
           const payload = {
               name: newScreenData.name,
               location: newScreenData.location,
               district: newScreenData.district,
               basePrice: parseFloat(newScreenData.basePrice),
-              imageUrl: newScreenData.imageUrl,
+              images: cleanedImages,
+              imageUrl: cleanedImages[0] || '', // 兼容舊版
+              specifications: newScreenData.specifications,
+              mapUrl: newScreenData.mapUrl,
               bundleGroup: newScreenData.bundleGroup,
               tierRules: newScreenData.tierRules,
               isActive: true,
@@ -313,7 +404,6 @@ const AdminPanel = () => {
               await updateDoc(doc(db, "screens", editingScreenId), payload);
               alert("✅ 屏幕資料已更新");
           } else {
-              // Generate a simple numeric ID for compatibility (e.g., max existing ID + 1)
               const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0);
               payload.id = String(maxId + 1);
               payload.createdAt = new Date();
@@ -321,23 +411,17 @@ const AdminPanel = () => {
               alert("✅ 新屏幕已建立");
           }
           setIsAddScreenModalOpen(false);
-      } catch (e) {
-          console.error(e);
-          alert("❌ 儲存失敗");
-      }
+      } catch (e) { console.error(e); alert("❌ 儲存失敗"); }
   };
 
   const toggleTierHour = (type, hour) => {
-      // Toggle hour in Prime or Gold list for 'default' rule
       setNewScreenData(prev => {
           const currentRules = { ...prev.tierRules };
           if (!currentRules.default) currentRules.default = { prime: [], gold: [] };
-          
           let list = currentRules.default[type];
           if (list.includes(hour)) {
               list = list.filter(h => h !== hour);
           } else {
-              // Ensure an hour can't be both Prime and Gold
               const otherType = type === 'prime' ? 'gold' : 'prime';
               currentRules.default[otherType] = currentRules.default[otherType].filter(h => h !== hour);
               list.push(hour);
@@ -349,17 +433,6 @@ const AdminPanel = () => {
 
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
   const toggleAnalyticsHour = (h) => { const n = new Set(selectedAnalyticsHours); n.has(h)?n.delete(h):n.add(h); setSelectedAnalyticsHours(n); };
-
-  const realMarketStats = useMemo(() => {
-      const statsMap = {}; for(let d=0; d<7; d++) for(let h=0; h<24; h++) statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 };
-      orders.forEach(o => { if(['paid','won','completed'].includes(o.status) && o.detailedSlots) o.detailedSlots.forEach(s => { 
-          if((selectedStatScreens.size===0 || selectedStatScreens.has(String(s.screenId))) && (selectedAnalyticsHours.size===0 || selectedAnalyticsHours.has(s.hour))) {
-              const k = `${new Date(s.date).getDay()}-${s.hour}`; statsMap[k].totalAmount += (Number(s.bidPrice)||0); statsMap[k].totalBids++;
-      }})});
-      const rows = Object.values(statsMap).map(i => ({...i, averagePrice: i.totalBids>0?Math.round(i.totalAmount/i.totalBids):0})).filter(r=>r.totalBids>0 && (selectedAnalyticsHours.size===0||selectedAnalyticsHours.has(r.hour)));
-      const avg = rows.length>0 ? Math.round(rows.reduce((a,b)=>a+b.averagePrice,0)/rows.length) : 0;
-      return { rows, summary: { avgPrice: avg, totalBids: rows.reduce((a,b)=>a+b.totalBids,0) } };
-  }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   if (loading) {
       return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-center"><Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4"/><p className="text-slate-500">Loading Admin Panel...</p></div></div>;
@@ -386,8 +459,8 @@ const AdminPanel = () => {
                 {id:'review',icon:<Video size={16}/>,label:`審核 (${stats.pendingReview})`, alert:stats.pendingReview>0},
                 {id:'rules',icon:<Settings size={16}/>,label:'特別規則'},
                 {id:'screens',icon:<Monitor size={16}/>,label:'屏幕管理'},
-                {id:'analytics',icon:<TrendingUp size={16}/>,label:'數據'},
-                {id:'config',icon:<Settings size={16}/>,label:'公式'},
+                {id:'analytics',icon:<TrendingUp size={16}/>,label:'市場數據'},
+                {id:'config',icon:<Settings size={16}/>,label:'價格公式'},
             ].map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
                     {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
@@ -405,34 +478,8 @@ const AdminPanel = () => {
                     <StatCard title="總記錄" value={stats.totalOrders} icon={<List className="text-slate-500"/>} bg="bg-slate-50" border="border-slate-100" />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full">
-                        <h3 className="font-bold mb-4">每日生意額</h3>
-                        <div className="w-full h-[280px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={stats.dailyChartData}>
-                                    <CartesianGrid strokeDasharray="3 3"/>
-                                    <XAxis dataKey="date"/>
-                                    <YAxis/>
-                                    <Tooltip/>
-                                    <Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/>
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full">
-                        <h3 className="font-bold mb-4">訂單狀態</h3>
-                        <div className="w-full h-[280px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                        {stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
-                                    </Pie>
-                                    <Tooltip/>
-                                    <Legend/>
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full"><h3 className="font-bold mb-4">每日生意額</h3><div className="w-full h-[280px]"><ResponsiveContainer width="100%" height="100%"><LineChart data={stats.dailyChartData}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/><Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/></LineChart></ResponsiveContainer></div></div>
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full"><h3 className="font-bold mb-4">訂單狀態</h3><div className="w-full h-[280px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip/><Legend/></PieChart></ResponsiveContainer></div></div>
                 </div>
             </div>
         )}
@@ -440,7 +487,6 @@ const AdminPanel = () => {
         {/* === 2. Calendar === */}
         {activeTab === 'calendar' && (
             <div className="bg-white rounded-xl shadow border border-slate-200 overflow-hidden flex flex-col h-[750px] animate-in fade-in">
-                {/* Header Controls */}
                 <div className="flex justify-between items-center bg-slate-50 p-3 border-b border-slate-200">
                     <div className="flex gap-4 items-center">
                         <h2 className="text-lg font-bold flex items-center gap-2"><Calendar size={20}/> 排程總表</h2>
@@ -461,8 +507,6 @@ const AdminPanel = () => {
                         <span className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div> Ready</span>
                     </div>
                 </div>
-
-                {/* --- A. Month View --- */}
                 {calendarViewMode === 'month' && (
                     <div className="flex-1 p-4 overflow-auto">
                         <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -481,15 +525,11 @@ const AdminPanel = () => {
                         </div>
                     </div>
                 )}
-
-                {/* --- B. Day View (Detailed) --- */}
                 {calendarViewMode === 'day' && (
                     <div className="flex-1 overflow-auto flex flex-col min-h-0">
                         <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
                             <div className="w-12 shrink-0 border-r border-slate-200 p-2 text-center text-[10px] font-bold text-slate-400 bg-slate-50 sticky left-0 z-20">Time</div>
-                            {screens.sort((a,b)=>Number(a.id)-Number(b.id)).map(s => (
-                                <div key={s.id} className="flex-1 min-w-[120px] border-r border-slate-200 p-2 text-center text-xs font-bold truncate">{s.name}</div>
-                            ))}
+                            {screens.sort((a,b)=>Number(a.id)-Number(b.id)).map(s => (<div key={s.id} className="flex-1 min-w-[120px] border-r border-slate-200 p-2 text-center text-xs font-bold truncate">{s.name}</div>))}
                         </div>
                         {Array.from({length: 24},(_,i)=>i).map(h => (
                             <div key={h} className="flex h-12 border-b border-slate-100 hover:bg-slate-50/50">
@@ -499,7 +539,6 @@ const AdminPanel = () => {
                                     const slotGroup = dayViewGrid[key]; 
                                     const bidCount = slotGroup?.length || 0;
                                     const topSlot = slotGroup ? slotGroup[0] : null; 
-                                    
                                     let colorClass = 'bg-white';
                                     if(topSlot) {
                                         if(topSlot.displayStatus==='scheduled') colorClass='bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -507,23 +546,13 @@ const AdminPanel = () => {
                                         else if(topSlot.displayStatus==='review_needed') colorClass='bg-red-100 text-red-700 border-red-200 font-bold';
                                         else if(topSlot.displayStatus==='bidding') colorClass='bg-yellow-50 text-yellow-600 border-yellow-200';
                                     }
-
                                     return (
                                         <div key={key} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${colorClass}`} onClick={()=>slotGroup && setSelectedSlotGroup(slotGroup)}>
                                             {topSlot && (
                                                 <div className="w-full h-full flex flex-col justify-center px-1 text-[10px] leading-tight relative">
-                                                    {bidCount > 1 && (
-                                                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold shadow-sm z-10">
-                                                            {bidCount}
-                                                        </span>
-                                                    )}
+                                                    {bidCount > 1 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold shadow-sm z-10">{bidCount}</span>}
                                                     <div className="font-bold truncate">{topSlot.userEmail}</div>
-                                                    <div className="flex justify-between mt-0.5 opacity-80">
-                                                        <span>{topSlot.price === 'Buyout' ? 'Buy' : `$${topSlot.price}`}</span>
-                                                        {topSlot.displayStatus==='review_needed' && <AlertCircle size={10}/>}
-                                                        {topSlot.displayStatus==='action_needed' && <UploadCloud size={10}/>}
-                                                        {topSlot.displayStatus==='scheduled' && <CheckCircle size={10}/>}
-                                                    </div>
+                                                    <div className="flex justify-between mt-0.5 opacity-80"><span>{topSlot.price === 'Buyout' ? 'Buy' : `$${topSlot.price}`}</span>{topSlot.displayStatus==='review_needed' && <AlertCircle size={10}/>}{topSlot.displayStatus==='action_needed' && <UploadCloud size={10}/>}{topSlot.displayStatus==='scheduled' && <CheckCircle size={10}/>}</div>
                                                 </div>
                                             )}
                                         </div>
@@ -549,16 +578,7 @@ const AdminPanel = () => {
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
-                            <tr>
-                                <th className="p-4 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.size === filteredOrders.length}/></th>
-                                <th className="p-4">時間</th>
-                                <th className="p-4 w-1/3">訂單詳情 / 聯絡客戶</th>
-                                <th className="p-4 text-right">金額</th>
-                                <th className="p-4 text-center">狀態</th>
-                                <th className="p-4 text-right">操作</th>
-                            </tr>
-                        </thead>
+                        <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold"><tr><th className="p-4 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.size === filteredOrders.length}/></th><th className="p-4">時間</th><th className="p-4 w-1/3">訂單詳情 / 聯絡客戶</th><th className="p-4 text-right">金額</th><th className="p-4 text-center">狀態</th><th className="p-4 text-right">操作</th></tr></thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredOrders.map(order => {
                                 const isRepeat = customerHistory[order.userEmail] > 1;
@@ -568,22 +588,14 @@ const AdminPanel = () => {
                                         <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate ? order.createdAtDate.toLocaleString('zh-HK') : 'N/A'}</td>
                                         <td className="p-4 align-top">
                                             <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
-                                            
                                             <div className="my-2 p-2 bg-slate-50 border border-slate-200 rounded">
-                                                <div className="text-xs text-slate-700 font-bold flex items-center gap-2 mb-1">
-                                                    {order.userEmail}
-                                                    {isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP</span>}
-                                                </div>
+                                                <div className="text-xs text-slate-700 font-bold flex items-center gap-2 mb-1">{order.userEmail}{isRepeat && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5"><Star size={10} fill="currentColor"/> VIP</span>}</div>
                                                 <div className="flex flex-wrap gap-2 mt-2">
                                                     <a href={`mailto:${order.userEmail}?subject=DOOH廣告訂單 #${order.id} 跟進`} className="text-[10px] px-2 py-1 bg-white border border-slate-300 rounded hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition-colors"><Mail size={12}/> Email</a>
                                                     {(order.mobile || order.phone) && <a href={`https://wa.me/${(order.mobile || order.phone).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 bg-green-50 border border-green-200 rounded hover:bg-green-100 text-green-700 flex items-center gap-1 transition-colors"><MessageCircle size={12}/> WhatsApp</a>}
                                                 </div>
                                             </div>
-
-                                            <div className="mb-2">
-                                                {order.hasVideo ? <span className="inline-flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-100"><CheckCircle size={12}/> 影片已上傳 ({order.videoName?.slice(0, 15)}...)</span> : <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded text-xs font-bold border border-red-100 animate-pulse"><AlertTriangle size={12}/> ⚠️ 尚未上傳影片 (請追片)</span>}
-                                            </div>
-
+                                            <div className="mb-2">{order.hasVideo ? <span className="inline-flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-100"><CheckCircle size={12}/> 影片已上傳 ({order.videoName?.slice(0, 15)}...)</span> : <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded text-xs font-bold border border-red-100 animate-pulse"><AlertTriangle size={12}/> ⚠️ 尚未上傳影片 (請追片)</span>}</div>
                                             <div className="text-xs text-slate-500 font-bold mb-1">購買時段:</div>
                                             <div className="bg-white border border-slate-200 rounded p-2 text-xs space-y-1 max-h-32 overflow-y-auto">
                                                 {order.detailedSlots && order.detailedSlots.map((slot, idx) => (
@@ -594,9 +606,7 @@ const AdminPanel = () => {
                                         </td>
                                         <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
                                         <td className="p-4 text-center align-top"><StatusBadge status={order.status} /></td>
-                                        <td className="p-4 text-right align-top">
-                                            {order.status !== 'cancelled' && <button onClick={async () => { if(window.confirm("取消此訂單？")) await updateDoc(doc(db, "orders", order.id), { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }) }} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>}
-                                        </td>
+                                        <td className="p-4 text-right align-top">{order.status !== 'cancelled' && <button onClick={async () => { if(window.confirm("取消此訂單？")) await updateDoc(doc(db, "orders", order.id), { status: 'cancelled', cancelledAt: new Date(), cancelledBy: user.email }) }} className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs border border-transparent hover:border-red-200">取消</button>}</td>
                                     </tr>
                                 );
                             })}
@@ -612,25 +622,14 @@ const AdminPanel = () => {
                 {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
                 filteredOrders.map(order => (
                     <div key={order.id} className="bg-white rounded-xl shadow-md border border-orange-200 overflow-hidden flex flex-col">
-                        <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center">
-                            <span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span>
-                            <span className="text-[10px] text-slate-500">{order.createdAtDate ? order.createdAtDate.toLocaleDateString() : 'N/A'}</span>
-                        </div>
-                        
-                        <div className="relative bg-black aspect-video w-full">
-                            {order.videoUrl ? <video controls src={order.videoUrl} className="w-full h-full object-contain" /> : <div className="flex items-center justify-center h-full text-white/50 text-xs">No Video File</div>}
-                        </div>
-
+                        <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center"><span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span><span className="text-[10px] text-slate-500">{order.createdAtDate ? order.createdAtDate.toLocaleDateString() : 'N/A'}</span></div>
+                        <div className="relative bg-black aspect-video w-full">{order.videoUrl ? <video controls src={order.videoUrl} className="w-full h-full object-contain" /> : <div className="flex items-center justify-center h-full text-white/50 text-xs">No Video File</div>}</div>
                         <div className="p-4 space-y-3 flex-1 flex flex-col">
                             <div><p className="text-xs text-slate-400">客戶</p><p className="font-bold text-sm">{order.userEmail}</p></div>
                             <div className="text-xs text-slate-500">檔案: {order.videoName || 'Unknown'}</div>
-                            
                             <div className="mt-auto pt-3 border-t border-slate-100 flex flex-col gap-2">
                                 <button onClick={() => handleReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-green-700 shadow-sm flex items-center justify-center gap-2"><CheckCircle size={16}/> 通過並發送 Email</button>
-                                <div className="flex gap-2">
-                                    <input type="text" placeholder="拒絕原因..." className="flex-1 border rounded px-3 py-1.5 text-xs bg-slate-50" onChange={e => setReviewNote(e.target.value)} />
-                                    <button onClick={() => handleReview(order.id, 'reject')} className="bg-white text-red-600 border border-red-200 px-3 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center gap-1"><XCircle size={14}/> 拒絕</button>
-                                </div>
+                                <div className="flex gap-2"><input type="text" placeholder="拒絕原因..." className="flex-1 border rounded px-3 py-1.5 text-xs bg-slate-50" onChange={e => setReviewNote(e.target.value)} /><button onClick={() => handleReview(order.id, 'reject')} className="bg-white text-red-600 border border-red-200 px-3 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center gap-1"><XCircle size={14}/> 拒絕</button></div>
                             </div>
                         </div>
                     </div>
@@ -733,7 +732,6 @@ const AdminPanel = () => {
         {/* === 8. Config === */}
         {activeTab === 'config' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
-                {/* ... (Config Code Kept Same) ... */}
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div><div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
             </div>
         )}
@@ -749,7 +747,7 @@ const AdminPanel = () => {
                   <Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00
                   <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span>
               </h3>
-              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">&times;</span></button>
+              <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -848,11 +846,47 @@ const AdminPanel = () => {
                             </div>
                             <p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p>
                         </div>
+                        
+                        {/* 🔥 3 Images Input */}
                         <div className="col-span-2">
-                            <label className="block text-xs font-bold text-slate-500 mb-1">圖片連結 (Image URL)</label>
+                            <label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label>
+                            <div className="space-y-2">
+                                {newScreenData.images.map((url, index) => (
+                                    <div key={index} className="flex items-center gap-2 border rounded px-3 py-2">
+                                        <ImageIcon size={14} className="text-slate-400"/>
+                                        <input 
+                                            type="text" 
+                                            value={url} 
+                                            onChange={e => handleImageChange(index, e.target.value)} 
+                                            className="w-full text-sm outline-none" 
+                                            placeholder={`Image URL ${index + 1} (https://...)`}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 🔥 Map Link */}
+                        <div className="col-span-2">
+                            <label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label>
                             <div className="flex items-center gap-2 border rounded px-3 py-2">
-                                <ImageIcon size={14} className="text-slate-400"/>
-                                <input type="text" value={newScreenData.imageUrl} onChange={e => setNewScreenData({...newScreenData, imageUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://..."/>
+                                <Map size={14} className="text-slate-400"/>
+                                <input type="text" value={newScreenData.mapUrl} onChange={e => setNewScreenData({...newScreenData, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://maps.google.com/..."/>
+                            </div>
+                        </div>
+
+                        {/* 🔥 Specifications */}
+                        <div className="col-span-2">
+                            <label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label>
+                            <div className="flex items-start gap-2 border rounded px-3 py-2">
+                                <FileText size={14} className="text-slate-400 mt-1"/>
+                                <textarea 
+                                    rows="3"
+                                    value={newScreenData.specifications} 
+                                    onChange={e => setNewScreenData({...newScreenData, specifications: e.target.value})} 
+                                    className="w-full text-sm outline-none resize-none" 
+                                    placeholder="e.g. 1920x1080px, 55 inch, LED..."
+                                />
                             </div>
                         </div>
                     </div>
