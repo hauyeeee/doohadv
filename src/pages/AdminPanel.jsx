@@ -35,13 +35,11 @@ const AdminPanel = () => {
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Pricing Config States (Global & Active) ---
+  // --- Pricing Config ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
-  
-  // 🔥🔥🔥 FIX: Initialize localBundleRules state to prevent crash
-  const [localBundleRules, setLocalBundleRules] = useState([]);
+  const [localBundleRules, setLocalBundleRules] = useState([]); // Fixed: Initialized state
 
   // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -55,7 +53,7 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // --- Screen Management States ---
+  // --- Screen Management States (Enhanced) ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
@@ -64,10 +62,8 @@ const AdminPanel = () => {
     name: '', location: '', district: '', basePrice: 50,
     images: ['', '', ''], specifications: '', mapUrl: '',
     bundleGroup: '',
-    footfall: '',       // 新增
-  audience: '',       // 新增
-  operatingHours: '', // 新增
-  resolution: '',     // 新增
+    // 🔥 New Marketing Fields
+    footfall: '', audience: '', operatingHours: '', resolution: '',
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
 
@@ -111,12 +107,8 @@ const AdminPanel = () => {
               const data = docSnap.data();
               setGlobalPricingConfig(data);
               setActiveConfig(data);
-              // 🔥 Sync bundle rules if they exist
               if (data.bundleRules) {
-                 const formatted = data.bundleRules.map(r => ({
-                    screensStr: r.screens.join(','),
-                    multiplier: r.multiplier
-                 }));
+                 const formatted = data.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier }));
                  setLocalBundleRules(formatted);
               }
           }
@@ -124,13 +116,10 @@ const AdminPanel = () => {
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // 🔥 Sync Logic for Bundle Rules
+  // Sync Bundle Rules
   useEffect(() => {
       if (globalPricingConfig.bundleRules) {
-          const formatted = globalPricingConfig.bundleRules.map(r => ({
-              screensStr: r.screens.join(','),
-              multiplier: r.multiplier
-          }));
+          const formatted = globalPricingConfig.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier }));
           setLocalBundleRules(formatted);
       }
   }, [globalPricingConfig]);
@@ -158,7 +147,7 @@ const AdminPanel = () => {
     return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
   }, [orders]);
 
-  // 🔥 Switch Config Logic
+  // Switch Config Logic
   useEffect(() => {
       if (selectedConfigTarget === 'global') { setActiveConfig(globalPricingConfig); } 
       else { const screen = screens.find(s => String(s.id) === selectedConfigTarget); if (screen && screen.customPricing) { setActiveConfig(screen.customPricing); } else { setActiveConfig(globalPricingConfig); } }
@@ -190,18 +179,10 @@ const AdminPanel = () => {
 
   const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
   
-  // 🔥🔥🔥 Bundle Rules Save Logic 🔥🔥🔥
   const savePricingConfig = async () => { 
-      const formattedRules = localBundleRules.map(r => ({
-          screens: r.screensStr.split(',').map(s => s.trim()).filter(s => s !== ""),
-          multiplier: parseFloat(r.multiplier)
-      }));
-
+      const formattedRules = localBundleRules.map(r => ({ screens: r.screensStr.split(',').map(s => s.trim()).filter(s => s !== ""), multiplier: parseFloat(r.multiplier) }));
       if (selectedConfigTarget === 'global') { 
-          await setDoc(doc(db, "system_config", "pricing_rules"), {
-              ...activeConfig,
-              bundleRules: formattedRules 
-          }); 
+          await setDoc(doc(db, "system_config", "pricing_rules"), { ...activeConfig, bundleRules: formattedRules }); 
           setGlobalPricingConfig(activeConfig); 
           alert("🌍 全局價格公式及 Bundle 規則已更新"); 
       } else { 
@@ -212,7 +193,6 @@ const AdminPanel = () => {
       } 
   };
 
-  // 🔥 Bundle Rule Handlers
   const handleAddBundleRule = () => { setLocalBundleRules([...localBundleRules, { screensStr: "", multiplier: 1.2 }]); };
   const handleBundleRuleChange = (index, field, value) => { const newRules = [...localBundleRules]; newRules[index][field] = value; setLocalBundleRules(newRules); };
   const handleRemoveBundleRule = (index) => { const newRules = [...localBundleRules]; newRules.splice(index, 1); setLocalBundleRules(newRules); };
@@ -228,18 +208,13 @@ const AdminPanel = () => {
   const handleReview = async (orderId, action) => { const targetOrder = orders.find(o => o.id === orderId); if (!targetOrder || !window.confirm(`確定要 ${action === 'approve' ? '通過' : '拒絕'}?`)) return; try { const updateData = { creativeStatus: action === 'approve' ? 'approved' : 'rejected', reviewedAt: new Date(), reviewedBy: user.email, reviewNote: action === 'reject' ? reviewNote : '', isApproved: action === 'approve', isRejected: action === 'reject' }; await updateDoc(doc(db, "orders", orderId), updateData); if (action === 'approve') sendBidConfirmation({ email: targetOrder.userEmail, displayName: targetOrder.userName }, targetOrder, 'video_approved'); alert(action === 'approve' ? "✅ 已批核並發送 Email" : "✅ 已拒絕"); setReviewNote(""); if (selectedSlotGroup) setSelectedSlotGroup(null); } catch (e) { alert("操作失敗"); } };
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // --- Modal: Edit Screen Logic ---
   const handleEditScreenFull = (screen) => {
       let initializedRules = {}; 
       const existingRules = screen.tierRules || {};
-      
-      // Migration: default -> 0-6
       if (existingRules.default && !existingRules['0']) {
          for(let i=0; i<7; i++) initializedRules[i] = existingRules.default;
       } else {
-         for(let i=0; i<7; i++) {
-             initializedRules[i] = existingRules[i] || { prime: [], gold: [] };
-         }
+         for(let i=0; i<7; i++) { initializedRules[i] = existingRules[i] || { prime: [], gold: [] }; }
       }
 
       setNewScreenData({
@@ -247,17 +222,16 @@ const AdminPanel = () => {
           location: screen.location,
           district: screen.district || '',
           basePrice: screen.basePrice || 50,
-          // 🔥 確保 images 陣列存在
           images: Array.isArray(screen.images) && screen.images.length >= 3 ? screen.images.slice(0,3) : [screen.imageUrl || '', '', ''],
-          // 🔥 讀取你的 Firebase 欄位
           specifications: screen.specifications || '',
-          mapUrl: screen.mapUrl || screen.mapEmbedUrl || '', // 兼容舊地圖欄位
-          bundleGroup: screen.bundleGroup || screen.bundlegroup || '', // 兼容大小寫
+          mapUrl: screen.mapUrl || screen.mapEmbedUrl || '',
+          bundleGroup: screen.bundleGroup || screen.bundlegroup || '',
+          // 🔥 Load new fields
           footfall: screen.footfall || '',
-        audience: screen.audience || '',
-        operatingHours: screen.operatingHours || '',
-        resolution: screen.resolution || '',
-        tierRules: initializedRules
+          audience: screen.audience || '',
+          operatingHours: screen.operatingHours || '',
+          resolution: screen.resolution || '',
+          tierRules: initializedRules
       });
       setEditingScreenId(screen.firestoreId);
       setIsAddScreenModalOpen(true);
@@ -266,10 +240,12 @@ const AdminPanel = () => {
 
   const handleAddScreen = () => {
       let initializedRules = {}; for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
-      setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', tierRules: initializedRules });
+      setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: initializedRules });
       setEditingScreenId(null); setIsAddScreenModalOpen(true); setActiveDayTab(1);
   };
   const handleImageChange = (index, value) => { const newImages = [...newScreenData.images]; newImages[index] = value; setNewScreenData({ ...newScreenData, images: newImages }); };
+  
+  // 🔥🔥🔥 FIX: Correctly close the object in saveScreenFull 🔥🔥🔥
   const saveScreenFull = async () => { 
     try { 
         const cleanedImages = newScreenData.images.filter(url => url.trim() !== ''); 
@@ -281,14 +257,31 @@ const AdminPanel = () => {
             images: cleanedImages, 
             imageUrl: cleanedImages[0] || '', 
             specifications: newScreenData.specifications, 
-            mapUrl: newScreenData.mapUrl, bundleGroup: 
-           footfall: newScreenData.footfall,
-            audience: newScreenData.audience,
-            operatingHours: newScreenData.operatingHours,
+            mapUrl: newScreenData.mapUrl, 
+            bundleGroup: newScreenData.bundleGroup, 
+            footfall: newScreenData.footfall, 
+            audience: newScreenData.audience, 
+            operatingHours: newScreenData.operatingHours, 
             resolution: newScreenData.resolution,
-            tierRules: newScreenData.tierRules,
+            tierRules: newScreenData.tierRules, 
             isActive: true, 
-            lastUpdated: new Date() }; if (editingScreenId) { await updateDoc(doc(db, "screens", editingScreenId), payload); alert("✅ 屏幕資料已更新"); } else { const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0); payload.id = String(maxId + 1); payload.createdAt = new Date(); await addDoc(collection(db, "screens"), payload); alert("✅ 新屏幕已建立"); } setIsAddScreenModalOpen(false); } catch (e) { console.error(e); alert("❌ 儲存失敗"); } };
+            lastUpdated: new Date() 
+        }; // <--- The closing brace was missing or malformed in your error
+        
+        if (editingScreenId) { 
+            await updateDoc(doc(db, "screens", editingScreenId), payload); 
+            alert("✅ 屏幕資料已更新"); 
+        } else { 
+            const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0); 
+            payload.id = String(maxId + 1); 
+            payload.createdAt = new Date(); 
+            await addDoc(collection(db, "screens"), payload); 
+            alert("✅ 新屏幕已建立"); 
+        } 
+        setIsAddScreenModalOpen(false); 
+    } catch (e) { console.error(e); alert("❌ 儲存失敗"); } 
+  };
+
   const toggleTierHour = (type, hour) => { setNewScreenData(prev => { const currentRules = { ...prev.tierRules }; const dayKey = String(activeDayTab); if (!currentRules[dayKey]) currentRules[dayKey] = { prime: [], gold: [] }; let list = currentRules[dayKey][type] || []; if (list.includes(hour)) { list = list.filter(h => h !== hour); } else { const otherType = type === 'prime' ? 'gold' : 'prime'; currentRules[dayKey][otherType] = (currentRules[dayKey][otherType] || []).filter(h => h !== hour); list.push(hour); } currentRules[dayKey][type] = list.sort((a,b) => a-b); return { ...prev, tierRules: currentRules }; }); };
   const handleApplyToAllDays = () => { if(!confirm(`將 ${WEEKDAYS[activeDayTab]} 的時段設定套用到所有日子 (週一至週日)？`)) return; const templateRule = newScreenData.tierRules[activeDayTab]; setNewScreenData(prev => { const newRules = {}; for(let i=0; i<7; i++) { newRules[i] = JSON.parse(JSON.stringify(templateRule)); } return { ...prev, tierRules: newRules }; }); alert("✅ 已套用至所有日子"); };
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
@@ -523,7 +516,6 @@ const AdminPanel = () => {
                                             <div className="text-xs text-slate-500 flex items-center gap-1"><MapPin size={10}/> {s.location}</div>
                                         </td>
                                         <td className="p-4">
-                                            {/* 🔥 FIX 3: Bundle Group Compatibility */}
                                             {s.bundleGroup || s.bundlegroup ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-200">{s.bundleGroup || s.bundlegroup}</span> : <span className="text-slate-300">-</span>}
                                         </td>
                                         <td className="p-4 text-center"><button onClick={()=>toggleScreenActive(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?<><Unlock size={12} className="inline"/> 上架中</>:<><Lock size={12} className="inline"/> 已鎖定</>}</button></td>
@@ -544,7 +536,6 @@ const AdminPanel = () => {
         {/* --- ANALYTICS --- */}
         {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
-                {/* ... (Analytics Code Kept Same) ... */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4"><div><h3 className="font-bold flex items-center gap-2"><TrendingUp size={18}/> 真實成交數據</h3><p className="text-xs text-slate-500">已選: {selectedStatScreens.size === 0 ? "全部 (All)" : `${selectedStatScreens.size} 部`}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => setSelectedStatScreens(new Set())} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.size === 0 ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>全部</button>{screens.map(s => (<button key={s.id} onClick={() => {const n=new Set(selectedStatScreens); n.has(String(s.id))?n.delete(String(s.id)):n.add(String(s.id)); setSelectedStatScreens(n);}} className={`px-3 py-1 rounded text-xs font-bold border ${selectedStatScreens.has(String(s.id)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600'}`}>{s.name}</button>))}</div></div><div className="flex flex-wrap gap-1 items-center mb-4"><span className="text-xs font-bold text-slate-500 uppercase w-12">Hours:</span><button onClick={() => setSelectedAnalyticsHours(new Set())} className={`w-8 h-8 rounded text-xs font-bold border ${selectedAnalyticsHours.size===0?'bg-slate-800 text-white':'bg-white text-slate-600'}`}>All</button>{Array.from({length:24},(_,i)=>i).map(h => (<button key={h} onClick={() => toggleAnalyticsHour(h)} className={`w-8 h-8 rounded text-xs border font-bold transition-all ${selectedAnalyticsHours.has(h)?'bg-orange-500 text-white border-orange-500':'bg-white text-slate-600 hover:bg-slate-100'}`}>{h}</button>))}</div><div className="mb-4 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white flex justify-between items-center shadow-lg"><div><h3 className="font-bold text-lg mb-1">所選組合平均成交價 (Average Price)</h3><p className="text-blue-100 text-sm">範圍: {selectedStatScreens.size===0?'全部屏幕':selectedStatScreens.size+' 個屏幕'} × {selectedAnalyticsHours.size===0?'24小時':selectedAnalyticsHours.size+' 個時段'}</p></div><div className="text-right"><div className="text-3xl font-bold">HK$ {realMarketStats.summary.avgPrice.toLocaleString()}</div><div className="text-xs text-blue-200">基於 {realMarketStats.summary.totalBids} 次出價</div></div></div><div className="overflow-x-auto h-[400px] border rounded-lg"><table className="w-full text-sm"><thead className="bg-slate-50 sticky top-0 z-10"><tr><th className="p-3 text-left">星期</th><th className="p-3 text-left">時段</th><th className="p-3 text-right">平均成交價</th><th className="p-3 text-right">出價次數</th><th className="p-3 text-left pl-6">建議</th></tr></thead><tbody className="divide-y divide-slate-100">{realMarketStats.rows.sort((a,b)=>(a.dayOfWeek-b.dayOfWeek)||(a.hour-b.hour)).map((m,i)=>(<tr key={i} className="hover:bg-slate-50"><td className="p-3 text-slate-600 font-medium">{WEEKDAYS[m.dayOfWeek]}</td><td className="p-3">{String(m.hour).padStart(2,'0')}:00</td><td className="p-3 text-right font-bold text-slate-700">${m.averagePrice}</td><td className="p-3 text-right"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${m.totalBids>0?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-400'}`}>{m.totalBids}</span></td><td className="p-3 pl-6">{m.totalBids>3?<span className="text-green-600 text-xs font-bold flex items-center gap-1"><ArrowUp size={12}/> 加價</span>:m.totalBids===0?<span className="text-red-500 text-xs font-bold flex items-center gap-1"><ArrowDown size={12}/> 減價</span>:<span className="text-slate-300">-</span>}</td></tr>))}</tbody></table></div>
             </div>
         )}
@@ -554,7 +545,7 @@ const AdminPanel = () => {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div>
                 
-                {/* 🔥🔥🔥 Bundle Rules UI (Added) 🔥🔥🔥 */}
+                {/* 🔥🔥🔥 Bundle Rules UI 🔥🔥🔥 */}
                 <div className="border-t pt-6 mt-6">
                     <h3 className="font-bold text-lg flex items-center gap-2 mb-4"><Layers size={20}/> 聯播網組合規則 (Bundle Rules)</h3>
                     <div className="space-y-3">
@@ -591,38 +582,16 @@ const AdminPanel = () => {
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{newScreenData.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={newScreenData.mapUrl} onChange={e => setNewScreenData({...newScreenData, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://maps.google.com/..."/></div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={newScreenData.specifications} onChange={e => setNewScreenData({...newScreenData, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px, 55 inch, LED..."/></div></div>
-                    
-                    {/* 🔥🔥🔥 在這裡插入你的代碼 🔥🔥🔥 */}
-        <div className="col-span-2 border-t pt-4 mt-2">
-            <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據 (Marketing Data)</h4>
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">每日人流 (Footfall)</label>
-                    <input type="text" value={newScreenData.footfall} onChange={e => setNewScreenData({...newScreenData, footfall: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 50,000+ / day"/>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">受眾類型 (Audience)</label>
-                    <input type="text" value={newScreenData.audience} onChange={e => setNewScreenData({...newScreenData, audience: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. OL, Tourists"/>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">播放時間 (Operating Hours)</label>
-                    <input type="text" value={newScreenData.operatingHours} onChange={e => setNewScreenData({...newScreenData, operatingHours: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 08:00 - 23:00"/>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">解析度 (Resolution)</label>
-                    <input type="text" value={newScreenData.resolution} onChange={e => setNewScreenData({...newScreenData, resolution: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 1080x1920"/>
-                </div>
-            </div>
-        </div>
-        {/* 🔥🔥🔥 插入結束 🔥🔥🔥 */}
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    
+                        {/* 🔥 New Marketing Fields */}
+                        <div className="col-span-2 border-t pt-4 mt-2">
+                            <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據 (Marketing Data)</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">每日人流 (Footfall)</label><input type="text" value={newScreenData.footfall} onChange={e => setNewScreenData({...newScreenData, footfall: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 50,000+ / day"/></div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">受眾類型 (Audience)</label><input type="text" value={newScreenData.audience} onChange={e => setNewScreenData({...newScreenData, audience: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. OL, Tourists"/></div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">播放時間 (Operating Hours)</label><input type="text" value={newScreenData.operatingHours} onChange={e => setNewScreenData({...newScreenData, operatingHours: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 08:00 - 23:00"/></div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">解析度 (Resolution)</label><input type="text" value={newScreenData.resolution} onChange={e => setNewScreenData({...newScreenData, resolution: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 1080x1920"/></div>
+                            </div>
+                        </div>
                     </div>
                     <div className="border-t pt-4">
                         <div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4><button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1"><Copy size={12}/> 複製至所有日子</button></div>
