@@ -23,7 +23,7 @@ export const useDoohSystem = () => {
   
   const [screens, setScreens] = useState([]);
   const [isScreensLoading, setIsScreensLoading] = useState(true);
-  const [pricingConfig, setPricingConfig] = useState({}); 
+  const [pricingConfig, setPricingConfig] = useState(null); // Init as null to detect loading
   const [specialRules, setSpecialRules] = useState([]);
 
   const [currentDate, setCurrentDate] = useState(new Date()); 
@@ -122,6 +122,7 @@ export const useDoohSystem = () => {
         onSnapshot(collection(db, "special_rules"), (snap) => setSpecialRules(snap.docs.map(d => d.data())));
         onSnapshot(doc(db, "system_config", "pricing_rules"), (docSnap) => {
             if (docSnap.exists()) setPricingConfig(docSnap.data());
+            else setPricingConfig({}); // Empty fallback
         });
     };
     fetchScreens(); fetchConfig();
@@ -206,34 +207,24 @@ export const useDoohSystem = () => {
   
   const callEmailService = async (id, data, isManual = false) => {
       setEmailStatus('sending'); 
-      console.log(`📧 callEmailService triggered for ID: ${id}, Type: ${data.type}`);
+      console.log(`📧 Sending Email for ID: ${id}`);
 
       let targetUser = { 
           email: data.userEmail || user?.email, 
           displayName: data.userName || user?.displayName || 'Customer' 
       };
 
-      if (!targetUser.email) {
-          console.error("❌ Email service failed: No target email found.");
-          setEmailStatus('error');
-          return;
-      }
+      let templateType = data.type === 'bid' ? 'bid_submission' : 'buyout';
 
-      let templateType = 'buyout';
-      if (data.type === 'bid') {
-          templateType = 'bid_submission';
-      }
-
-      const success = await sendBidConfirmation(targetUser, { id, ...data }, templateType);
-      
-      if (success) { 
-          setEmailStatus('sent'); 
-          try { 
-              await updateDoc(doc(db, "orders", id), { emailSent: true }); 
-          } catch (e) { console.error(e); }
-      } else { 
-          setEmailStatus('error'); 
-      }
+      try {
+          const success = await sendBidConfirmation(targetUser, { id, ...data }, templateType);
+          if (success) { 
+              setEmailStatus('sent'); 
+              await updateDoc(doc(db, "orders", id), { emailSent: true }).catch(e=>console.error(e)); 
+          } else { 
+              setEmailStatus('error'); 
+          }
+      } catch(e) { console.error(e); setEmailStatus('error'); }
   };
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
@@ -245,13 +236,10 @@ export const useDoohSystem = () => {
         setTimeout(async () => { 
             try { 
                 const docSnap = await getDoc(orderRef); 
-                if (docSnap.exists()) {
-                     const data = docSnap.data();
-                     if (!data.emailSent) {
-                         callEmailService(docSnap.id, data, false); 
-                     }
+                if (docSnap.exists() && !docSnap.data().emailSent) {
+                     callEmailService(docSnap.id, docSnap.data(), false); 
                 }
-            } catch(e) { console.error("Error fetching order for email:", e); } 
+            } catch(e) { console.error(e); } 
         }, 1500); 
     }
 
@@ -293,35 +281,15 @@ export const useDoohSystem = () => {
           uploadTask.on('state_changed', (snapshot) => { 
               setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100); 
           }, 
-          (error) => { 
-              showToast("❌ 上傳失敗"); 
-              setIsUploadingReal(false); 
-              setCreativeStatus('empty'); 
-          }, 
+          (error) => { showToast("❌ 上傳失敗"); setIsUploadingReal(false); setCreativeStatus('empty'); }, 
           async () => { 
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
-              
-              // 🔥 核心修正：加入 creativeStatus: 'pending_review'
               await updateDoc(doc(db, "orders", targetId), { 
-                  hasVideo: true, 
-                  videoUrl: downloadURL, 
-                  videoName: file.name, 
-                  uploadedAt: serverTimestamp(),
-                  creativeStatus: 'pending_review'
+                  hasVideo: true, videoUrl: downloadURL, videoName: file.name, uploadedAt: serverTimestamp(), creativeStatus: 'pending_review'
               }); 
-              
-              setCreativeName(file.name); 
-              setCreativeStatus('approved'); 
-              setIsUploadingReal(false); 
-              showToast("✅ 上傳成功！等待審核"); 
-              localStorage.removeItem('temp_order_id'); 
-              localStorage.removeItem('temp_txn_time'); 
+              setCreativeName(file.name); setCreativeStatus('approved'); setIsUploadingReal(false); showToast("✅ 上傳成功！等待審核"); localStorage.removeItem('temp_order_id'); 
           });
-      } catch (error) { 
-          console.error(error); 
-          showToast("上傳錯誤"); 
-          setIsUploadingReal(false); 
-      }
+      } catch (error) { console.error(error); showToast("上傳錯誤"); setIsUploadingReal(false); }
   };
 
   const closeTransaction = () => { setTransactionStep('idle'); setPendingTransaction(null); setCurrentOrderId(null); };
@@ -354,9 +322,11 @@ export const useDoohSystem = () => {
       showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
   };
 
-  // 🔥🔥🔥 核心生成邏輯
+  // 🔥🔥🔥 核心生成邏輯 (Crash Protection Added) 🔥🔥🔥
   const generateAllSlots = useMemo(() => {
-    if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0) return [];
+    // ⚠️ 防崩潰：如果數據未準備好，直接回傳空，防止計算錯誤
+    if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
+    
     let slots = [];
     let datesToProcess = [];
 
@@ -420,7 +390,7 @@ export const useDoohSystem = () => {
                     minBid: finalMinBid, buyoutPrice: finalBuyout,
                     marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(finalMinBid * 1.5), 
                     isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled,
-                    canBid, hoursUntil, isUrgent, 
+                    canBid, hoursUntil, isUrgent: hoursUntil > 0 && hoursUntil <= 24, 
                     competitorBid: currentHighestBid, isSoldOut: isLocked, warning
                 });
             });
@@ -432,7 +402,6 @@ export const useDoohSystem = () => {
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const totalSlots = availableSlots.length; 
-    const soldOutCount = generateAllSlots.length - availableSlots.length;
     
     let buyoutTotal = 0, currentBidTotal = 0, minBidTotal = 0, urgentCount = 0; 
     let conflicts = [], missingBids = 0, invalidBids = 0; 
@@ -441,11 +410,13 @@ export const useDoohSystem = () => {
     let hasPrimeFarFutureLock = false; 
 
     availableSlots.forEach(slot => {
+        // 🔥 Logic Fix: Just Check, Don't Stop
         if (!slot.canBid && slot.isBuyoutDisabled) {
             hasPrimeFarFutureLock = true;
         }
 
-        if (!hasPrimeFarFutureLock) {
+        // Only add to Total if NOT completely locked
+        if (!(!slot.canBid && slot.isBuyoutDisabled)) {
              buyoutTotal += slot.buyoutPrice; 
              minBidTotal += slot.minBid; 
         }
@@ -471,7 +442,7 @@ export const useDoohSystem = () => {
     return { 
         totalSlots, 
         buyoutTotal, currentBidTotal, minBidTotal,
-        conflicts, missingBids, invalidBids, soldOutCount, urgentCount,
+        conflicts, missingBids, invalidBids, urgentCount,
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock
@@ -486,15 +457,14 @@ export const useDoohSystem = () => {
   const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; if (mode === 'recurring') { /* Optional */ } const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
   
   const initiateTransaction = async (type = 'bid') => {
-    console.log(`🚀 Initiating Transaction: ${type}`);
-    const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    
-    // Safety check
+    // Basic validations...
     if (!user) { showToast("請先登入"); return; }
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
     
+    // Create detailed slots
+    const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const detailedSlots = validSlots.map(slot => ({
         date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName,
         bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout'
@@ -502,63 +472,49 @@ export const useDoohSystem = () => {
 
     let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
     
-    // 🔥 Sanitize Data: Ensure no undefined values
+    // Construct DB Object
     const txnData = {
       amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, 
-      type, 
-      detailedSlots, 
+      type, detailedSlots, 
       targetDate: detailedSlots[0]?.date || '', 
       isBundle: isBundleMode, 
       slotCount: pricing.totalSlots, 
-      creativeStatus: 'empty', // Explicitly set default
-      conflicts: [], // Reset conflicts for clean db
-      userId: user.uid, 
-      userEmail: user.email, 
-      userName: user.displayName || 'Guest', 
-      createdAt: serverTimestamp(), 
-      status: 'pending_auth', 
-      hasVideo: false, 
-      emailSent: false, 
-      screens: Array.from(selectedScreens).map(id => {
-          const s = screens.find(sc => sc.id === id);
-          return s ? s.name : String(id);
-      }), 
+      creativeStatus: 'empty', 
+      conflicts: [], 
+      userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', 
+      createdAt: serverTimestamp(), status: 'pending_auth', 
+      hasVideo: false, emailSent: false, 
+      screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), 
       timeSlotSummary: slotSummary
     };
 
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
     
     try {
-        setTransactionStep('processing'); // Show Loader
-        console.log("📡 Sending to Firestore...", txnData);
-        
+        setTransactionStep('processing'); // Show spinner
         const docRef = await addDoc(collection(db, "orders"), txnData);
-        console.log("✅ Firestore Doc ID:", docRef.id);
         
+        // Save ID for next steps
         localStorage.setItem('temp_order_id', docRef.id); 
         localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
-        
         setPendingTransaction({ ...txnData, id: docRef.id }); 
         setCurrentOrderId(docRef.id); 
         
-        // 🔥 CRITICAL FIX: Ensure step update happens after doc creation
-        setTransactionStep('summary'); // Show Payment Button
+        // 🔥 CRITICAL FIX: Update UI immediately
+        setTransactionStep('summary'); 
 
-        // 🔥 Async Email Trigger (Non-blocking)
+        // 🔥 CRITICAL FIX: Send Email in Background (Non-blocking)
         if (type === 'bid') {
-             // Don't await this, let it run in background
-             callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email trigger failed:", e));
+             callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email bg trigger failed:", e));
         }
 
     } catch (error) { 
         console.error("❌ AddDoc Error:", error);
-        showToast("建立訂單失敗"); 
-        setTransactionStep('idle'); 
+        showToast("建立訂單失敗"); setTransactionStep('idle'); 
     }
   };
 
   const processPayment = async () => {
-    console.log("💸 Processing Payment...");
     setTransactionStep('processing');
     const targetId = localStorage.getItem('temp_order_id') || currentOrderId;
     if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
@@ -581,7 +537,6 @@ export const useDoohSystem = () => {
             }),
         });
         const data = await response.json();
-        console.log("💳 Stripe Response:", data);
         if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); }
     } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
@@ -600,18 +555,12 @@ export const useDoohSystem = () => {
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
     occupiedSlots, 
     
-    // Modal Flags & States
-    isBuyoutModalOpen, 
-    isBidModalOpen, 
-    slotBids, 
-    batchBidInput, 
-    termsAccepted,
+    isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     
-    // Setters / Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted,
-    setCurrentOrderId, // Export this
+    setCurrentOrderId, // Export for App.jsx
     
     handleGoogleLogin, handleLogout,
     toggleScreen, toggleHour, toggleWeekday, toggleDate,
@@ -620,7 +569,6 @@ export const useDoohSystem = () => {
     initiateTransaction, processPayment, handleRealUpload, closeTransaction,
     viewingScreen,
     
-    // UI Helpers
     HOURS, WEEKDAYS_LABEL,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
   };
