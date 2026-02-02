@@ -26,7 +26,7 @@ export const useDoohSystem = () => {
   const [pricingConfig, setPricingConfig] = useState(null);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // 🔥 Bundle Rules from Admin
+  // 🔥 新增：儲存從 Admin 設定的 Bundle Rules
   const [bundleRules, setBundleRules] = useState([]);
 
   const [currentDate, setCurrentDate] = useState(new Date()); 
@@ -118,6 +118,7 @@ export const useDoohSystem = () => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setPricingConfig(data);
+                // 🔥 讀取你設定的 Bundle Rules
                 setBundleRules(data.bundleRules || []);
             }
             else setPricingConfig({});
@@ -268,24 +269,34 @@ export const useDoohSystem = () => {
       showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
   };
 
-  // 🔥🔥🔥 NEW: Smart Bundle Multiplier Logic 🔥🔥🔥
-  // 核心改動：不再回傳單一 Multiplier，而是內部處理 "哪些 Screen 有 Bundle 效果"
+  // 🔥🔥🔥 FIX 3: 智能 Bundle 判斷 (包含邏輯 & 優先級) 🔥🔥🔥
   const getMultiplierForScreen = (screenId) => {
-      const selectedIds = Array.from(selectedScreens).map(String).sort();
+      const selectedIds = Array.from(selectedScreens).map(String); // 目前已選的所有 ID
+      
+      // 1. 檢查 Admin 設定的 Strict Rules (ID 組合)
+      // 邏輯：檢查每一條規則，看看目前選取的組合是否「包含 (Contains)」了這條規則的所有 ID
+      let maxRuleMultiplier = 1.0;
 
-      // 1. 檢查 Strict Rules (Admin 定義的 ID 組合)
-      // 如果目前選取的組合，包含了某個 Rule 的所有 ID，那麼該 Rule 裡面的 ID 都有加成
-      const matchedRule = bundleRules.find(rule => {
+      bundleRules.forEach(rule => {
           const ruleIds = rule.screens.map(String);
-          // 邏輯：如果你選的屏幕包含了 Rule 的所有屏幕，那些屏幕就生效
-          return ruleIds.every(rid => selectedIds.includes(rid));
+          
+          // 如果選取的組合包含了這條規則的所有 ID (Subset Match)
+          const isSubsetMatch = ruleIds.every(rid => selectedIds.includes(rid));
+          
+          if (isSubsetMatch) {
+              // 並且目前正在計算的這個 screenId 也是這條規則的一部分
+              if (ruleIds.includes(String(screenId))) {
+                  // 取最大的倍率 (例如同時中了 1.25x 和 2.0x 的規則，取 2.0x)
+                  const m = parseFloat(rule.multiplier);
+                  if (m > maxRuleMultiplier) maxRuleMultiplier = m;
+              }
+          }
       });
 
-      if (matchedRule && matchedRule.screens.map(String).includes(String(screenId))) {
-          return parseFloat(matchedRule.multiplier);
-      }
+      if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
 
       // 2. 檢查 Implicit Grouping (同名 BundleGroup)
+      // 如果沒有中 Rule，但同一個 Group 選了多過 1 部，給予預設優惠
       const currentScreen = screens.find(s => String(s.id) === String(screenId));
       if (!currentScreen) return 1.0;
       
@@ -298,7 +309,7 @@ export const useDoohSystem = () => {
               return g === myGroup;
           }).length;
 
-          // 🔥 重點：只要同 Group 的選了 > 1 個，這些屏幕就獲得溢價
+          // 只要同 Group 的選了 > 1 個，這些屏幕就獲得溢價
           if (countInGroup > 1) {
               return pricingConfig?.defaultBundleMultiplier || 1.25; // 默認 1.25x
           }
@@ -342,9 +353,10 @@ export const useDoohSystem = () => {
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
                 
-                // 🔥 NEW: Calculate Multiplier specifically for THIS screen in THIS selection context
+                // 🔥 重點：為每個屏幕單獨計算它的 Bundle 倍率
                 const screenMultiplier = getMultiplierForScreen(screenId);
 
+                // 🔥 傳入該屏幕專屬的 Multiplier
                 const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
                 
                 let currentHighestBid = existingBids[key] || 0;
@@ -372,14 +384,14 @@ export const useDoohSystem = () => {
                     competitorBid: currentHighestBid, 
                     isSoldOut: isLocked, 
                     warning,
-                    // 🔥 Pass the multiplier down so UI can show it if needed
+                    // 🔥 把這個屏幕當前的倍率傳出去，給 UI 顯示用
                     activeMultiplier: screenMultiplier 
                 });
             });
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]); // 🔥 Added dependencies
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]); // 🔥 Added bundleRules dep
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -390,7 +402,7 @@ export const useDoohSystem = () => {
     let hasDateRestrictedBid = false; 
     let hasPrimeFarFutureLock = false; 
     
-    // Find max multiplier to show in UI
+    // 🔥 Find max multiplier to show in UI text (e.g. +100% or +50%)
     let maxAppliedMultiplier = 1.0;
 
     availableSlots.forEach(slot => {
@@ -420,7 +432,7 @@ export const useDoohSystem = () => {
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
-        currentBundleMultiplier: maxAppliedMultiplier // Export max multiplier for UI
+        currentBundleMultiplier: maxAppliedMultiplier // Export max for UI
     };
   }, [generateAllSlots, slotBids]);
 
