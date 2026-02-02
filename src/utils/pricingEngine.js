@@ -13,7 +13,7 @@ const DEFAULT_CONFIG = {
 export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.0, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
     const now = new Date();
     
-    // --- 0. Check Special Rules (優先檢查特別規則) ---
+    // --- 0. Check Special Rules (Priority) ---
     const year = dateObj.getFullYear();
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
     const dayDate = String(dateObj.getDate()).padStart(2, '0');
@@ -30,7 +30,7 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
     if (activeRule && activeRule.type === 'lock') {
         return {
             minBid: 0, buyoutPrice: 0, isBuyoutDisabled: true, canBid: false,
-            warning: `🔒 ${activeRule.note || '管理員鎖定'}`, isLocked: true
+            warning: `🔒 ${activeRule.note || 'Admin Locked'}`, isLocked: true
         };
     }
 
@@ -71,7 +71,7 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         isGold = true;
     } 
 
-    // 🔥 使用從 Hook 傳入的 Bundle 倍率
+    // Use Bundle Multiplier from Hook
     const fSync = activeBundleMultiplier; 
 
     // --- 4. Calculate Base Dynamic Price ---
@@ -89,28 +89,30 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
     let expeditedLabel = null;
     let canBid = true;
     let warning = null;
+    let infoMessage = null; // New field for non-warning info
 
     if (hoursUntil < 0) {
         canBid = false; warning = "Expired";
     } else if (hoursUntil < 1) {
         expeditedFeeRate = effectiveConfig.urgentFee1h - 1; 
-        expeditedLabel = `⚡ 極速審批 (+${Math.round(expeditedFeeRate*100)}%)`;
-        canBid = false; warning = "Risk: 審批不保證";
+        expeditedLabel = `⚡ Speed Approval (+${Math.round(expeditedFeeRate*100)}%)`;
+        canBid = false; warning = "Risk: Approval not guaranteed";
     } else if (hoursUntil < 24) {
         expeditedFeeRate = effectiveConfig.urgentFee24h - 1; 
-        expeditedLabel = `🚀 加急 (+${Math.round(expeditedFeeRate*100)}%)`;
+        expeditedLabel = `🚀 Urgent (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
-        // 🔥🔥🔥 核心：計算具體開放日期 (Slot 時間 - 7天) 🔥🔥🔥
+        // 🔥🔥🔥 Logic: Calculate specific open date (Slot Date - 7 days) 🔥🔥🔥
         canBid = false; 
         
         const openDate = new Date(slotTime);
-        openDate.setDate(openDate.getDate() - 7); // 減去 7 天
+        openDate.setDate(openDate.getDate() - 7); // Subtract 7 days
         
-        // 格式化日期 (例如: 2月10日)
+        // Format date (e.g., Feb 10)
         const openDateStr = openDate.toLocaleDateString('zh-HK', { month: 'numeric', day: 'numeric' });
         
-        warning = `🔒 遠期 (競價將於 ${openDateStr} 開放)`;
+        // Use infoMessage instead of warning for a neutral tone
+        infoMessage = `📅 Bidding opens on ${openDateStr}`;
     }
 
     const finalMinBid = Math.ceil(dynamicBase * (1 + expeditedFeeRate));
@@ -137,6 +139,7 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel,
         canBid,
         warning,
+        infoMessage, // Export the info message
         hoursUntil,
         ruleApplied: activeRule ? activeRule.note : null
     };
