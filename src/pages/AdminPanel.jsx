@@ -64,6 +64,10 @@ const AdminPanel = () => {
     name: '', location: '', district: '', basePrice: 50,
     images: ['', '', ''], specifications: '', mapUrl: '',
     bundleGroup: '',
+    footfall: '',       // 新增
+  audience: '',       // 新增
+  operatingHours: '', // 新增
+  resolution: '',     // 新增
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
 
@@ -249,7 +253,11 @@ const AdminPanel = () => {
           specifications: screen.specifications || '',
           mapUrl: screen.mapUrl || screen.mapEmbedUrl || '', // 兼容舊地圖欄位
           bundleGroup: screen.bundleGroup || screen.bundlegroup || '', // 兼容大小寫
-          tierRules: initializedRules
+          footfall: screen.footfall || '',
+        audience: screen.audience || '',
+        operatingHours: screen.operatingHours || '',
+        resolution: screen.resolution || '',
+        tierRules: initializedRules
       });
       setEditingScreenId(screen.firestoreId);
       setIsAddScreenModalOpen(true);
@@ -262,7 +270,25 @@ const AdminPanel = () => {
       setEditingScreenId(null); setIsAddScreenModalOpen(true); setActiveDayTab(1);
   };
   const handleImageChange = (index, value) => { const newImages = [...newScreenData.images]; newImages[index] = value; setNewScreenData({ ...newScreenData, images: newImages }); };
-  const saveScreenFull = async () => { try { const cleanedImages = newScreenData.images.filter(url => url.trim() !== ''); const payload = { name: newScreenData.name, location: newScreenData.location, district: newScreenData.district, basePrice: parseFloat(newScreenData.basePrice), images: cleanedImages, imageUrl: cleanedImages[0] || '', specifications: newScreenData.specifications, mapUrl: newScreenData.mapUrl, bundleGroup: newScreenData.bundleGroup, tierRules: newScreenData.tierRules, isActive: true, lastUpdated: new Date() }; if (editingScreenId) { await updateDoc(doc(db, "screens", editingScreenId), payload); alert("✅ 屏幕資料已更新"); } else { const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0); payload.id = String(maxId + 1); payload.createdAt = new Date(); await addDoc(collection(db, "screens"), payload); alert("✅ 新屏幕已建立"); } setIsAddScreenModalOpen(false); } catch (e) { console.error(e); alert("❌ 儲存失敗"); } };
+  const saveScreenFull = async () => { 
+    try { 
+        const cleanedImages = newScreenData.images.filter(url => url.trim() !== ''); 
+        const payload = { 
+            name: newScreenData.name, 
+            location: newScreenData.location, 
+            district: newScreenData.district, 
+            basePrice: parseFloat(newScreenData.basePrice), 
+            images: cleanedImages, 
+            imageUrl: cleanedImages[0] || '', 
+            specifications: newScreenData.specifications, 
+            mapUrl: newScreenData.mapUrl, bundleGroup: 
+           footfall: newScreenData.footfall,
+            audience: newScreenData.audience,
+            operatingHours: newScreenData.operatingHours,
+            resolution: newScreenData.resolution,
+            tierRules: newScreenData.tierRules,
+            isActive: true, 
+            lastUpdated: new Date() }; if (editingScreenId) { await updateDoc(doc(db, "screens", editingScreenId), payload); alert("✅ 屏幕資料已更新"); } else { const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0); payload.id = String(maxId + 1); payload.createdAt = new Date(); await addDoc(collection(db, "screens"), payload); alert("✅ 新屏幕已建立"); } setIsAddScreenModalOpen(false); } catch (e) { console.error(e); alert("❌ 儲存失敗"); } };
   const toggleTierHour = (type, hour) => { setNewScreenData(prev => { const currentRules = { ...prev.tierRules }; const dayKey = String(activeDayTab); if (!currentRules[dayKey]) currentRules[dayKey] = { prime: [], gold: [] }; let list = currentRules[dayKey][type] || []; if (list.includes(hour)) { list = list.filter(h => h !== hour); } else { const otherType = type === 'prime' ? 'gold' : 'prime'; currentRules[dayKey][otherType] = (currentRules[dayKey][otherType] || []).filter(h => h !== hour); list.push(hour); } currentRules[dayKey][type] = list.sort((a,b) => a-b); return { ...prev, tierRules: currentRules }; }); };
   const handleApplyToAllDays = () => { if(!confirm(`將 ${WEEKDAYS[activeDayTab]} 的時段設定套用到所有日子 (週一至週日)？`)) return; const templateRule = newScreenData.tierRules[activeDayTab]; setNewScreenData(prev => { const newRules = {}; for(let i=0; i<7; i++) { newRules[i] = JSON.parse(JSON.stringify(templateRule)); } return { ...prev, tierRules: newRules }; }); alert("✅ 已套用至所有日子"); };
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db, "screens", s.firestoreId), { isActive: !s.isActive }); };
@@ -565,6 +591,38 @@ const AdminPanel = () => {
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{newScreenData.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={newScreenData.mapUrl} onChange={e => setNewScreenData({...newScreenData, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://maps.google.com/..."/></div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={newScreenData.specifications} onChange={e => setNewScreenData({...newScreenData, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px, 55 inch, LED..."/></div></div>
+                    
+                    {/* 🔥🔥🔥 在這裡插入你的代碼 🔥🔥🔥 */}
+        <div className="col-span-2 border-t pt-4 mt-2">
+            <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據 (Marketing Data)</h4>
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">每日人流 (Footfall)</label>
+                    <input type="text" value={newScreenData.footfall} onChange={e => setNewScreenData({...newScreenData, footfall: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 50,000+ / day"/>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">受眾類型 (Audience)</label>
+                    <input type="text" value={newScreenData.audience} onChange={e => setNewScreenData({...newScreenData, audience: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. OL, Tourists"/>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">播放時間 (Operating Hours)</label>
+                    <input type="text" value={newScreenData.operatingHours} onChange={e => setNewScreenData({...newScreenData, operatingHours: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 08:00 - 23:00"/>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">解析度 (Resolution)</label>
+                    <input type="text" value={newScreenData.resolution} onChange={e => setNewScreenData({...newScreenData, resolution: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 1080x1920"/>
+                </div>
+            </div>
+        </div>
+        {/* 🔥🔥🔥 插入結束 🔥🔥🔥 */}
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
                     </div>
                     <div className="border-t pt-4">
                         <div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4><button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1"><Copy size={12}/> 複製至所有日子</button></div>

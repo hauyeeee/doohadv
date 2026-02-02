@@ -1,5 +1,7 @@
+// src/components/ScreenSelector.jsx
+
 import React from 'react';
-import { Monitor, Search, Loader2, MapPin, Map as MapIcon } from 'lucide-react';
+import { MapPin, Info } from 'lucide-react';
 
 const ScreenSelector = ({ 
   selectedScreens, 
@@ -9,76 +11,69 @@ const ScreenSelector = ({
   filteredScreens, 
   toggleScreen, 
   setViewingScreen 
-}) => (
-  <section className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[350px]">
-    <div className="p-4 border-b bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-        <Monitor size={16} /> 1. 選擇屏幕 ({selectedScreens.size})
-      </h2>
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block"></div>
-        <div className="relative flex-1 w-full sm:w-48">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
-          <input 
-            type="text" 
-            placeholder="搜尋地點..." 
-            value={screenSearchTerm} 
-            onChange={(e) => setScreenSearchTerm(e.target.value)} 
-            className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500 outline-none"
-          />
-        </div>
-      </div>
-    </div>
-    <div className="flex-1 overflow-y-auto min-h-0">
-      {isScreensLoading ? (
-        <div className="text-center p-10"><Loader2 className="animate-spin inline"/></div>
-      ) : (
-        <table className="w-full text-left text-sm border-collapse table-fixed">
-          <thead className="bg-slate-50 sticky top-0 z-10 text-xs text-slate-500 font-semibold">
+}) => {
+
+  // ... (保留原本的 Header / Search Bar 部分)
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* ... Search Input ... */}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
             <tr>
-              <th className="p-3 w-[15%] text-center">選取</th>
-              <th className="p-3 w-[60%] sm:w-[40%]">屏幕名稱</th>
-              <th className="p-3 hidden sm:table-cell sm:w-[15%]">區域</th>
-              <th className="p-3 hidden sm:table-cell sm:w-[15%]">規格</th>
-              <th className="p-3 w-[25%] sm:w-[15%] text-right">詳情</th>
+              <th className="p-4 w-16 text-center">選取</th>
+              <th className="p-4">屏幕資料</th>
+              {/* 🔥 刪除了「區域」和「規格」的 TH */}
+              <th className="p-4 text-right">詳情</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredScreens.map(s => (
-              <tr key={s.id} className={`hover:bg-blue-50/50 ${selectedScreens.has(s.id) ? 'bg-blue-50' : ''}`}>
-                <td className="p-3 text-center">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedScreens.has(s.id)} 
-                    onChange={() => toggleScreen(s.id)} 
-                    className="cursor-pointer w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                  />
-                </td>
-                <td className="p-3 overflow-hidden">
-                  <div className="font-bold truncate text-slate-800">{s.name}</div>
-                  <div className="text-xs text-slate-500 flex items-center gap-1 truncate">
-                    <MapPin size={10} className="shrink-0"/> {s.location}
-                  </div>
-                </td>
-                <td className="p-3 hidden sm:table-cell">
-                  <span className="bg-slate-100 px-2 py-1 rounded-full text-xs text-slate-600">{s.district}</span>
-                </td>
-                <td className="p-3 hidden sm:table-cell text-slate-500 text-xs">{s.size}</td>
-                <td className="p-3 text-right">
-                  <button 
-                    onClick={() => setViewingScreen(s)} 
-                    className="text-blue-600 text-xs flex items-center justify-end gap-1 ml-auto font-bold hover:underline bg-blue-50 sm:bg-transparent px-2 py-1 sm:p-0 rounded"
-                  >
-                    <MapIcon size={14}/> 詳情
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {isScreensLoading ? (
+               <tr><td colSpan="3" className="p-8 text-center text-slate-400">Loading...</td></tr>
+            ) : filteredScreens.length === 0 ? (
+               <tr><td colSpan="3" className="p-8 text-center text-slate-400">沒有找到屏幕</td></tr>
+            ) : (
+              filteredScreens.map(screen => (
+                <tr 
+                  key={screen.id} 
+                  className={`transition-colors cursor-pointer hover:bg-slate-50 ${selectedScreens.has(screen.id) ? 'bg-blue-50/60' : ''}`}
+                  onClick={() => toggleScreen(screen.id)}
+                >
+                  <td className="p-4 text-center">
+                    <div className={`w-5 h-5 rounded border flex items-center justify-center mx-auto transition-all ${selectedScreens.has(screen.id) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white'}`}>
+                      {selectedScreens.has(screen.id) && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                  </td>
+                  
+                  <td className="p-4">
+                    <div className="font-bold text-slate-800 text-base">{screen.name}</div>
+                    <div className="flex items-center gap-1 text-slate-500 text-xs mt-0.5">
+                      <MapPin size={12} /> 
+                      {/* 將地點和區域合併顯示在這裡，比較美觀 */}
+                      {screen.location} {screen.district ? `(${screen.district})` : ''}
+                    </div>
+                  </td>
+
+                  {/* 🔥 刪除了顯示規格和區域的 TD */}
+
+                  <td className="p-4 text-right">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setViewingScreen(screen); }} // 防止點擊按鈕時觸發選取
+                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors flex items-center justify-end gap-1 ml-auto font-bold text-xs"
+                    >
+                      <Info size={16}/> 詳情
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
-      )}
+      </div>
     </div>
-  </section>
-);
+  );
+};
 
 export default ScreenSelector;
