@@ -74,17 +74,30 @@ const AdminPanel = () => {
   // --- Forms ---
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
-  // 1. Auth Logic
+ // 1. Auth & Data Fetching (已修復權限漏洞)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
-        setUser(currentUser); 
-        fetchAllData();
-      } else {
-        setUser(currentUser);
-        fetchAllData();
+      // 1. 檢查是否已登入
+      if (!currentUser) {
+        // 未登入 -> 踢回首頁
+        navigate("/"); 
+        return;
       }
+
+      // 2. 檢查 Email 是否在 ADMIN_EMAILS 名單內
+      if (!ADMIN_EMAILS.includes(currentUser.email)) {
+        // 已登入但不是 Admin -> 顯示警告 + 登出 + 踢回首頁
+        alert("⛔ 權限不足：你沒有權限進入後台。");
+        signOut(auth);
+        navigate("/");
+        return;
+      }
+
+      // 3. 通過驗證 -> 載入資料
+      setUser(currentUser);
+      fetchAllData();
     });
+    
     return () => unsubscribe();
   }, [navigate]);
 
