@@ -28,11 +28,11 @@ const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutCli
             </div>
           )}
           
-          {/* 🔥 Informative Message for Future Dates (Blue/Neutral) */}
+          {/* 🔥 具體開放日期 (藍色提示) */}
           {pricing.hasDateRestrictedBid && !pricing.hasUrgentRisk && (
             <div className="text-xs text-blue-300 flex items-center gap-1 bg-blue-900/30 px-2 py-1 rounded border border-blue-800">
               <Info size={12}/> 
-              <span>Future slots: Bidding opens 7 days prior. Buyout available now.</span>
+              <span>{pricing.futureDateText || "包含遠期時段：僅限 Buyout"}</span>
             </div>
           )}
 

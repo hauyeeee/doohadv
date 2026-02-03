@@ -25,8 +25,6 @@ export const useDoohSystem = () => {
   const [isScreensLoading, setIsScreensLoading] = useState(true);
   const [pricingConfig, setPricingConfig] = useState(null);
   const [specialRules, setSpecialRules] = useState([]);
-  
-  // 🔥 新增：儲存從 Admin 設定的 Bundle Rules
   const [bundleRules, setBundleRules] = useState([]);
 
   const [currentDate, setCurrentDate] = useState(new Date()); 
@@ -118,7 +116,6 @@ export const useDoohSystem = () => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setPricingConfig(data);
-                // 🔥 讀取你設定的 Bundle Rules
                 setBundleRules(data.bundleRules || []);
             }
             else setPricingConfig({});
@@ -269,64 +266,38 @@ export const useDoohSystem = () => {
       showToast(`🔥 已選取聯播組合 (${groupScreens.length}屏)`);
   };
 
-  // 🔥🔥🔥 FIX 3: 智能 Bundle 判斷 (包含邏輯 & 優先級) 🔥🔥🔥
   const getMultiplierForScreen = (screenId) => {
-      const selectedIds = Array.from(selectedScreens).map(String); // 目前已選的所有 ID
-      
-      // 1. 檢查 Admin 設定的 Strict Rules (ID 組合)
-      // 邏輯：檢查每一條規則，看看目前選取的組合是否「包含 (Contains)」了這條規則的所有 ID
+      const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
-
       bundleRules.forEach(rule => {
           const ruleIds = rule.screens.map(String);
-          
-          // 如果選取的組合包含了這條規則的所有 ID (Subset Match)
           const isSubsetMatch = ruleIds.every(rid => selectedIds.includes(rid));
-          
           if (isSubsetMatch) {
-              // 並且目前正在計算的這個 screenId 也是這條規則的一部分
               if (ruleIds.includes(String(screenId))) {
-                  // 取最大的倍率 (例如同時中了 1.25x 和 2.0x 的規則，取 2.0x)
                   const m = parseFloat(rule.multiplier);
                   if (m > maxRuleMultiplier) maxRuleMultiplier = m;
               }
           }
       });
-
       if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
-
-      // 2. 檢查 Implicit Grouping (同名 BundleGroup)
-      // 如果沒有中 Rule，但同一個 Group 選了多過 1 部，給予預設優惠
       const currentScreen = screens.find(s => String(s.id) === String(screenId));
       if (!currentScreen) return 1.0;
-      
       const myGroup = currentScreen.bundleGroup || currentScreen.bundlegroup;
       if (myGroup) {
-          // 算出目前已選取的屏幕中，有多少個是屬於同一個 Group
           const countInGroup = Array.from(selectedScreens).filter(id => {
               const s = screens.find(sc => String(sc.id) === String(id));
               const g = s?.bundleGroup || s?.bundlegroup;
               return g === myGroup;
           }).length;
-
-          // 只要同 Group 的選了 > 1 個，這些屏幕就獲得溢價
-          if (countInGroup > 1) {
-              return pricingConfig?.defaultBundleMultiplier || 1.25; // 默認 1.25x
-          }
+          if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
       }
-
-      // 3. 沒有 Bundle，原價
       return 1.0;
   };
 
-  // 用來給 UI 判斷是否顯示 "Bundle Active" Badge (只要有任何一個 > 1.0 就算)
   const isBundleMode = useMemo(() => {
-      for (const id of selectedScreens) {
-          if (getMultiplierForScreen(id) > 1.0) return true;
-      }
+      for (const id of selectedScreens) { if (getMultiplierForScreen(id) > 1.0) return true; }
       return false;
   }, [selectedScreens, screens, bundleRules, pricingConfig]);
-
 
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
@@ -344,54 +315,33 @@ export const useDoohSystem = () => {
     datesToProcess.forEach(d => {
         const dateStr = formatDateKey(d.getFullYear(), d.getMonth(), d.getDate());
         const dayOfWeek = new Date(d).getDay(); 
-
         selectedHours.forEach(h => {
             selectedScreens.forEach(screenId => {
                 const screen = screens.find(s => s.id === screenId);
                 if (!screen) return;
-                
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
-                
-                // 🔥 重點：為每個屏幕單獨計算它的 Bundle 倍率
                 const screenMultiplier = getMultiplierForScreen(screenId);
-
-                // 🔥 傳入該屏幕專屬的 Multiplier
                 const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
-                
                 let currentHighestBid = existingBids[key] || 0;
                 let finalBuyout = basePricing.buyoutPrice;
-                if (currentHighestBid > 0) {
-                    const dynamicFloor = Math.ceil(currentHighestBid * 1.5);
-                    if (dynamicFloor > finalBuyout) { finalBuyout = dynamicFloor; }
-                }
-
+                if (currentHighestBid > 0) { const dynamicFloor = Math.ceil(currentHighestBid * 1.5); if (dynamicFloor > finalBuyout) { finalBuyout = dynamicFloor; } }
                 let canBid = basePricing.canBid && !basePricing.isLocked && !isSoldOut;
                 let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
                 let warning = basePricing.warning;
                 const isLocked = basePricing.isLocked || isSoldOut;
-
                 slots.push({ 
                     key, dateStr, hour: h, screenId, screenName: screen.name, location: screen.location, 
-                    minBid: basePricing.minBid, 
-                    buyoutPrice: finalBuyout, 
-                    marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
-                    isPrime: basePricing.isPrime, 
-                    isBuyoutDisabled: isBuyoutDisabled,
-                    canBid, 
-                    hoursUntil: basePricing.hoursUntil, 
-                    isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, 
-                    competitorBid: currentHighestBid, 
-                    isSoldOut: isLocked, 
-                    warning,
-                    // 🔥 把這個屏幕當前的倍率傳出去，給 UI 顯示用
-                    activeMultiplier: screenMultiplier 
+                    minBid: basePricing.minBid, buyoutPrice: finalBuyout, marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
+                    isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled, canBid, hoursUntil: basePricing.hoursUntil, 
+                    isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, competitorBid: currentHighestBid, 
+                    isSoldOut: isLocked, warning, activeMultiplier: screenMultiplier 
                 });
             });
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]); // 🔥 Added bundleRules dep
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -401,38 +351,39 @@ export const useDoohSystem = () => {
     let hasRestrictedBuyout = false, hasRestrictedBid = false, hasUrgentRisk = false;
     let hasDateRestrictedBid = false; 
     let hasPrimeFarFutureLock = false; 
-    
-    // 🔥 Find max multiplier to show in UI text (e.g. +100% or +50%)
     let maxAppliedMultiplier = 1.0;
+    
+    // 🔥🔥🔥 核心修改：捕捉未來的開放日期訊息 🔥🔥🔥
+    let futureDateText = null; 
 
     availableSlots.forEach(slot => {
         if (slot.activeMultiplier > maxAppliedMultiplier) maxAppliedMultiplier = slot.activeMultiplier;
-
         if (!slot.canBid && slot.isBuyoutDisabled) hasPrimeFarFutureLock = true;
         if (!(!slot.canBid && slot.isBuyoutDisabled)) { buyoutTotal += slot.buyoutPrice; minBidTotal += slot.minBid; }
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
         if (!slot.canBid) {
             hasRestrictedBid = true;
-            if (slot.warning && (slot.warning.includes("遠期") || slot.warning.includes("急單"))) hasDateRestrictedBid = true;
+            if (slot.warning && (slot.warning.includes("遠期") || slot.warning.includes("急單"))) {
+                hasDateRestrictedBid = true;
+                // 🔥 如果是遠期，捕捉那句「競價將於...開放」的文字
+                if (slot.warning.includes("遠期") && !futureDateText) {
+                    futureDateText = slot.warning.replace('🔒 ', ''); // 去掉鎖頭符號，留文字
+                }
+            }
         }
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
         if (slot.isUrgent) urgentCount++; 
-
         const userPrice = slotBids[slot.key]; 
-        if (userPrice) { 
-            currentBidTotal += parseInt(userPrice); 
-            if (parseInt(userPrice) < slot.minBid) invalidBids++;
-            if (parseInt(userPrice) <= slot.competitorBid) conflicts.push({ ...slot, userPrice }); 
-        } else { missingBids++; }
+        if (userPrice) { currentBidTotal += parseInt(userPrice); if (parseInt(userPrice) < slot.minBid) invalidBids++; if (parseInt(userPrice) <= slot.competitorBid) conflicts.push({ ...slot, userPrice }); } else { missingBids++; }
     });
     
     return { 
-        totalSlots, buyoutTotal, currentBidTotal, minBidTotal,
-        conflicts, missingBids, invalidBids, urgentCount,
+        totalSlots, buyoutTotal, currentBidTotal, minBidTotal, conflicts, missingBids, invalidBids, urgentCount,
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
-        currentBundleMultiplier: maxAppliedMultiplier // Export max for UI
+        currentBundleMultiplier: maxAppliedMultiplier,
+        futureDateText // 🔥 將這句文字傳出去
     };
   }, [generateAllSlots, slotBids]);
 
@@ -448,60 +399,21 @@ export const useDoohSystem = () => {
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
-    
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const detailedSlots = validSlots.map(slot => ({
-        date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName,
-        bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout'
-    }));
-
+    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
     let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
-    
-    const txnData = {
-      amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, 
-      type, detailedSlots, targetDate: detailedSlots[0]?.date || '', 
-      isBundle: isBundleMode, slotCount: pricing.totalSlots, 
-      creativeStatus: 'empty', conflicts: [], 
-      userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', 
-      createdAt: serverTimestamp(), status: 'pending_auth', 
-      hasVideo: false, emailSent: false, 
-      screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), 
-      timeSlotSummary: slotSummary
-    };
-
+    const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
-    
-    try {
-        setTransactionStep('processing'); 
-        const docRef = await addDoc(collection(db, "orders"), txnData);
-        localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
-        setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); 
-        setTransactionStep('summary'); 
-        if (type === 'bid') { callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email bg trigger failed:", e)); }
-    } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
+    try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); if (type === 'bid') { callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email bg trigger failed:", e)); } } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
   };
 
   const processPayment = async () => {
     setTransactionStep('processing');
     const targetId = localStorage.getItem('temp_order_id') || currentOrderId;
     if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
-    
     const currentUrl = window.location.origin + window.location.pathname;
     const captureMethod = pendingTransaction && pendingTransaction.type === 'buyout' ? 'automatic' : 'manual';
-    
-    try {
-        const response = await fetch('/.netlify/functions/create-checkout-session', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, 
-                productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, 
-                orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, 
-                customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type 
-            }),
-        });
-        const data = await response.json();
-        if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); }
-    } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
+    try { const response = await fetch('/.netlify/functions/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), }); const data = await response.json(); if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); } } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
 
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
@@ -515,23 +427,11 @@ export const useDoohSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, 
-    
-    isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    
+    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
-    setBatchBidInput, setTermsAccepted,
-    setCurrentOrderId, 
-    
-    handleGoogleLogin, handleLogout,
-    toggleScreen, toggleHour, toggleWeekday, toggleDate,
-    handleBatchBid, handleSlotBidChange,
-    handleBidClick, handleBuyoutClick,
-    initiateTransaction, processPayment, handleRealUpload, closeTransaction,
-    viewingScreen,
-    
-    HOURS, WEEKDAYS_LABEL,
-    getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
+    setBatchBidInput, setTermsAccepted, setCurrentOrderId, 
+    handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
+    HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
   };
 };

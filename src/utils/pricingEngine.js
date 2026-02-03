@@ -13,7 +13,7 @@ const DEFAULT_CONFIG = {
 export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.0, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
     const now = new Date();
     
-    // --- 0. Check Special Rules (Priority) ---
+    // --- 0. Check Special Rules ---
     const year = dateObj.getFullYear();
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
     const dayDate = String(dateObj.getDate()).padStart(2, '0');
@@ -71,7 +71,6 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         isGold = true;
     } 
 
-    // Use Bundle Multiplier from Hook
     const fSync = activeBundleMultiplier; 
 
     // --- 4. Calculate Base Dynamic Price ---
@@ -89,7 +88,6 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
     let expeditedLabel = null;
     let canBid = true;
     let warning = null;
-    let infoMessage = null; // New field for non-warning info
 
     if (hoursUntil < 0) {
         canBid = false; warning = "Expired";
@@ -102,17 +100,12 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel = `🚀 Urgent (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
-        // 🔥🔥🔥 Logic: Calculate specific open date (Slot Date - 7 days) 🔥🔥🔥
+        // 🔥🔥🔥 這裡計算日期 🔥🔥🔥
         canBid = false; 
-        
         const openDate = new Date(slotTime);
-        openDate.setDate(openDate.getDate() - 7); // Subtract 7 days
-        
-        // Format date (e.g., Feb 10)
+        openDate.setDate(openDate.getDate() - 7); 
         const openDateStr = openDate.toLocaleDateString('zh-HK', { month: 'numeric', day: 'numeric' });
-        
-        // Use infoMessage instead of warning for a neutral tone
-        infoMessage = `📅 Bidding opens on ${openDateStr}`;
+        warning = `🔒 遠期 (競價將於 ${openDateStr} 開放)`;
     }
 
     const finalMinBid = Math.ceil(dynamicBase * (1 + expeditedFeeRate));
@@ -139,7 +132,6 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel,
         canBid,
         warning,
-        infoMessage, // Export the info message
         hoursUntil,
         ruleApplied: activeRule ? activeRule.note : null
     };
