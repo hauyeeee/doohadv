@@ -1,146 +1,95 @@
-// src/utils/pricingEngine.js
+import React from 'react';
+import { DollarSign, Sparkles, AlertTriangle, Lock, Ban, Zap, Clock, Info } from 'lucide-react';
 
-const DEFAULT_CONFIG = {
-    baseImpressions: 10000,
-    primeMultiplier: 3.5,     
-    goldMultiplier: 1.8,
-    weekendMultiplier: 1.5,
-    bundleMultiplier: 1.25,
-    urgentFee24h: 1.5,
-    urgentFee1h: 2.0
-};
+const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutClick }) => {
+  // Calculate premium percentage
+  const premiumPercent = pricing.currentBundleMultiplier > 1 
+    ? Math.round((pricing.currentBundleMultiplier - 1) * 100) 
+    : 0;
 
-export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.0, screenData, globalConfig = DEFAULT_CONFIG, specialRules = []) => {
-    const now = new Date();
-    
-    // --- 0. Check Special Rules (Priority) ---
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const dayDate = String(dateObj.getDate()).padStart(2, '0');
-    const dateStr = `${year}-${month}-${dayDate}`; 
-    const screenIdStr = String(screenData.id);
+  return (
+    <section className="bg-slate-900 text-white rounded-xl p-5 shadow-lg flex flex-col justify-between border-t-4 border-blue-500">
+      <div className="mb-4">
+        <div className="flex justify-between items-start mb-2">
+          <h2 className="text-sm font-bold text-slate-400 flex items-center gap-2"><DollarSign size={16}/> Price Preview {isBundleMode && <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><Sparkles size={10}/> Bundle Active</span>}</h2>
+          <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">Total {pricing.totalSlots} Slots</span>
+        </div>
+        <div className="flex items-center justify-between gap-4 mt-1">
+          <div><p className="text-xs text-slate-400 mb-0.5">Min Bid Total</p><div className="flex items-baseline gap-1"><span className="text-sm text-orange-500 font-bold">HK$</span><span className="text-2xl font-bold text-orange-400 tracking-tight">{pricing.minBidTotal.toLocaleString()}</span><span className="text-xs text-slate-500">up</span></div></div>
+          <div className="w-px h-10 bg-slate-700"></div>
+          <div className="text-right"><p className="text-xs text-slate-400 mb-0.5">Buyout Total</p>{pricing.hasRestrictedBuyout ? (<div className="text-red-400 text-sm font-bold flex items-center justify-end gap-1"><Lock size={14}/> N/A</div>) : (<div className="flex items-baseline justify-end gap-1"><span className="text-sm text-emerald-600 font-bold">HK$</span><span className="text-2xl font-bold text-emerald-500 tracking-tight">{pricing.buyoutTotal.toLocaleString()}</span></div>)}</div>
+        </div>
+        <div className="space-y-1 mt-3 min-h-[20px]">
+          {/* 🔥 Bundle Explanation */}
+          {isBundleMode && (
+            <div className="text-xs text-purple-300 flex items-center gap-1 bg-purple-900/30 px-2 py-1 rounded border border-purple-800">
+              <Sparkles size={12} className="text-purple-400"/> 
+              <span>⚡ Network Effect Active: Ads sync across screens for max impact. (+{premiumPercent}%)</span>
+            </div>
+          )}
+          
+          {/* 🔥 Informative Message for Future Dates (Blue/Neutral) */}
+          {pricing.hasDateRestrictedBid && !pricing.hasUrgentRisk && (
+            <div className="text-xs text-blue-300 flex items-center gap-1 bg-blue-900/30 px-2 py-1 rounded border border-blue-800">
+              <Info size={12}/> 
+              <span>Future slots: Bidding opens 7 days prior. Buyout available now.</span>
+            </div>
+          )}
 
-    const activeRule = specialRules.find(r => {
-        const isDateMatch = r.date === dateStr;
-        const isScreenMatch = r.screenId === 'all' || String(r.screenId) === screenIdStr;
-        const isHourMatch = r.hours.includes(hour);
-        return isDateMatch && isScreenMatch && isHourMatch;
-    });
+           {/* Warnings */}
+          {pricing.hasUrgentRisk && (
+             <div className="text-xs text-orange-300 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded border border-orange-800">
+              <Clock size={12}/> 
+              <span>Urgent/Last-minute slots included: Buyout Only</span>
+            </div>
+          )}
 
-    if (activeRule && activeRule.type === 'lock') {
-        return {
-            minBid: 0, buyoutPrice: 0, isBuyoutDisabled: true, canBid: false,
-            warning: `🔒 ${activeRule.note || 'Admin Locked'}`, isLocked: true
-        };
-    }
+          {pricing.hasPrimeFarFutureLock && (
+            <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
+              <Lock size={12}/> 
+              <span>Prime Future (Locked)</span>
+            </div>
+          )}
 
-    // --- 1. Config Merge ---
-    const effectiveConfig = { 
-        ...DEFAULT_CONFIG, 
-        ...globalConfig, 
-        ...(screenData.customPricing || {}) 
-    };
-    
-    const day = dateObj.getDay(); 
-    const dayKey = String(day);
-    
-    const rules = screenData.tierRules || {};
-    const todayRules = rules[dayKey] || rules["default"] || { prime: [], gold: [] };
-    const primeHours = todayRules.prime || [];
-    const goldHours = todayRules.gold || [];
+          {pricing.urgentCount > 0 && (<div className="text-xs text-orange-400 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded"><Zap size={12}/> Includes {pricing.urgentCount} urgent slots (+20%)</div>)}
+          {pricing.soldOutCount > 0 && <div className="text-xs text-slate-400 flex items-center gap-1 bg-slate-800 px-2 py-1 rounded"><Ban size={12}/> {pricing.soldOutCount} sold-out slots hidden</div>}
+        </div>
+      </div>
+      <div className="flex gap-3">
+        {/* Bid Button */}
+        <button onClick={handleBidClick} disabled={!pricing.canStartBidding} className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all shadow-lg flex flex-col items-center justify-center gap-0.5 ${!pricing.canStartBidding ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-blue-900/50'}`}>
+          <span>
+            {pricing.hasRestrictedBid ? '🚫 Bid Paused' : 'Place Bid'}
+          </span>
+          {!pricing.hasRestrictedBid && pricing.totalSlots > 0 && <span className="text-[10px] font-normal opacity-80">Free Bid</span>}
+        </button>
 
-    // --- 2. Base Price ---
-    let basePrice = screenData.basePrice || 50;
-    if (activeRule && activeRule.type === 'price_override' && activeRule.value) {
-        basePrice = activeRule.value;
-    }
+        {/* Buyout Button (Flashy) */}
+        <button 
+          onClick={handleBuyoutClick} 
+          disabled={pricing.hasRestrictedBuyout || pricing.totalSlots === 0} 
+          className={`flex-1 py-3 rounded-lg font-bold text-sm transition-all shadow-lg flex flex-col items-center justify-center gap-0.5 relative overflow-hidden group 
+          ${(pricing.hasRestrictedBuyout || pricing.totalSlots === 0) 
+              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
+              : 'bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-emerald-500/40 hover:shadow-emerald-500/60 hover:scale-[1.02]'}`}
+        >
+          <span className="flex items-center gap-1 z-10 relative">
+              <Zap size={14} className="fill-white"/> 
+              Buyout Now
+          </span>
+          {pricing.totalSlots > 0 && !pricing.hasRestrictedBuyout && (
+              <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded z-10 relative">
+                  Instant Confirm
+              </span>
+          )}
+          {/* Shine Effect */}
+          {!pricing.hasRestrictedBuyout && pricing.totalSlots > 0 && (
+              <div className="absolute top-0 -inset-full h-full w-1/2 z-5 block transform -skew-x-12 bg-gradient-to-r from-transparent to-white opacity-20 group-hover:animate-shine" />
+          )}
+        </button>
+      </div>
+    </section>
+  );
+}
 
-    // --- 3. Multipliers ---
-    let mDay = 1.0;
-    if (day === 5 || day === 6) mDay = effectiveConfig.weekendMultiplier;
-    
-    let mTime = 1.0; 
-    let isPrime = false;
-    let isGold = false; 
-    
-    if (primeHours.includes(hour)) {
-        mTime = effectiveConfig.primeMultiplier; 
-        isPrime = true;
-    } else if (goldHours.includes(hour)) {
-        mTime = effectiveConfig.goldMultiplier;
-        isGold = true;
-    } 
-
-    // Use Bundle Multiplier from Hook
-    const fSync = activeBundleMultiplier; 
-
-    // --- 4. Calculate Base Dynamic Price ---
-    let dynamicBase = Math.ceil(basePrice * mDay * mTime * fSync);
-    
-    // --- 5. Time Constraints & Fees ---
-    const slotTime = new Date(dateObj);
-    slotTime.setHours(hour, 0, 0, 0);
-    
-    const timeDiffMs = slotTime.getTime() - now.getTime();
-    const hoursUntil = timeDiffMs / (1000 * 60 * 60);
-    const daysUntil = hoursUntil / 24;
-
-    let expeditedFeeRate = 0;
-    let expeditedLabel = null;
-    let canBid = true;
-    let warning = null;
-    let infoMessage = null; // New field for non-warning info
-
-    if (hoursUntil < 0) {
-        canBid = false; warning = "Expired";
-    } else if (hoursUntil < 1) {
-        expeditedFeeRate = effectiveConfig.urgentFee1h - 1; 
-        expeditedLabel = `⚡ Speed Approval (+${Math.round(expeditedFeeRate*100)}%)`;
-        canBid = false; warning = "Risk: Approval not guaranteed";
-    } else if (hoursUntil < 24) {
-        expeditedFeeRate = effectiveConfig.urgentFee24h - 1; 
-        expeditedLabel = `🚀 Urgent (+${Math.round(expeditedFeeRate*100)}%)`;
-        canBid = false; 
-    } else if (daysUntil > 7) {
-        // 🔥🔥🔥 Logic: Calculate specific open date (Slot Date - 7 days) 🔥🔥🔥
-        canBid = false; 
-        
-        const openDate = new Date(slotTime);
-        openDate.setDate(openDate.getDate() - 7); // Subtract 7 days
-        
-        // Format date (e.g., Feb 10)
-        const openDateStr = openDate.toLocaleDateString('zh-HK', { month: 'numeric', day: 'numeric' });
-        
-        // Use infoMessage instead of warning for a neutral tone
-        infoMessage = `📅 Bidding opens on ${openDateStr}`;
-    }
-
-    const finalMinBid = Math.ceil(dynamicBase * (1 + expeditedFeeRate));
-
-    // --- 6. Buyout Logic ---
-    let buyoutMultiplier = 3.0; 
-    if (isPrime) buyoutMultiplier = 5.0;
-    else if (isGold) buyoutMultiplier = 4.0;
-
-    let originalBuyout = Math.ceil(finalMinBid * buyoutMultiplier);
-
-    if (activeRule && activeRule.type === 'buyout_override' && activeRule.value) {
-        originalBuyout = activeRule.value;
-    }
-
-    let isBuyoutDisabled = (activeRule && activeRule.type === 'disable_buyout');
-
-    return {
-        minBid: finalMinBid,
-        buyoutPrice: originalBuyout,
-        isBuyoutDisabled,
-        isPrime,
-        isGold, 
-        expeditedLabel,
-        canBid,
-        warning,
-        infoMessage, // Export the info message
-        hoursUntil,
-        ruleApplied: activeRule ? activeRule.note : null
-    };
-};
+export default PricingSummary;

@@ -39,7 +39,7 @@ const AdminPanel = () => {
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
-  const [localBundleRules, setLocalBundleRules] = useState([]); // Fixed: Initialized state
+  const [localBundleRules, setLocalBundleRules] = useState([]); 
 
   // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -53,7 +53,7 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
   
-  // --- Screen Management States (Enhanced) ---
+  // --- Screen Management States ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
@@ -62,7 +62,6 @@ const AdminPanel = () => {
     name: '', location: '', district: '', basePrice: 50,
     images: ['', '', ''], specifications: '', mapUrl: '',
     bundleGroup: '',
-    // 🔥 New Marketing Fields
     footfall: '', audience: '', operatingHours: '', resolution: '',
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
@@ -75,7 +74,7 @@ const AdminPanel = () => {
   // --- Forms ---
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
-  // 1. Auth & Data Fetching
+  // 1. Auth Logic
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
@@ -116,7 +115,6 @@ const AdminPanel = () => {
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // Sync Bundle Rules
   useEffect(() => {
       if (globalPricingConfig.bundleRules) {
           const formatted = globalPricingConfig.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier }));
@@ -147,7 +145,6 @@ const AdminPanel = () => {
     return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
   }, [orders]);
 
-  // Switch Config Logic
   useEffect(() => {
       if (selectedConfigTarget === 'global') { setActiveConfig(globalPricingConfig); } 
       else { const screen = screens.find(s => String(s.id) === selectedConfigTarget); if (screen && screen.customPricing) { setActiveConfig(screen.customPricing); } else { setActiveConfig(globalPricingConfig); } }
@@ -226,7 +223,6 @@ const AdminPanel = () => {
           specifications: screen.specifications || '',
           mapUrl: screen.mapUrl || screen.mapEmbedUrl || '',
           bundleGroup: screen.bundleGroup || screen.bundlegroup || '',
-          // 🔥 Load new fields
           footfall: screen.footfall || '',
           audience: screen.audience || '',
           operatingHours: screen.operatingHours || '',
@@ -245,7 +241,6 @@ const AdminPanel = () => {
   };
   const handleImageChange = (index, value) => { const newImages = [...newScreenData.images]; newImages[index] = value; setNewScreenData({ ...newScreenData, images: newImages }); };
   
-  // 🔥🔥🔥 FIX: Correctly close the object in saveScreenFull 🔥🔥🔥
   const saveScreenFull = async () => { 
     try { 
         const cleanedImages = newScreenData.images.filter(url => url.trim() !== ''); 
@@ -266,7 +261,7 @@ const AdminPanel = () => {
             tierRules: newScreenData.tierRules, 
             isActive: true, 
             lastUpdated: new Date() 
-        }; // <--- The closing brace was missing or malformed in your error
+        };
         
         if (editingScreenId) { 
             await updateDoc(doc(db, "screens", editingScreenId), payload); 
@@ -516,6 +511,7 @@ const AdminPanel = () => {
                                             <div className="text-xs text-slate-500 flex items-center gap-1"><MapPin size={10}/> {s.location}</div>
                                         </td>
                                         <td className="p-4">
+                                            {/* 🔥 FIX 3: Bundle Group Compatibility */}
                                             {s.bundleGroup || s.bundlegroup ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-200">{s.bundleGroup || s.bundlegroup}</span> : <span className="text-slate-300">-</span>}
                                         </td>
                                         <td className="p-4 text-center"><button onClick={()=>toggleScreenActive(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?<><Unlock size={12} className="inline"/> 上架中</>:<><Lock size={12} className="inline"/> 已鎖定</>}</button></td>
@@ -558,7 +554,8 @@ const AdminPanel = () => {
                         ))}
                     </div>
                     <button onClick={handleAddBundleRule} className="mt-3 text-sm font-bold text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded"><Plus size={16}/> 新增組合規則</button>
-                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID > 相同 Bundle Group > 預設倍率</p>
+                    {/* 🔥 修復: 轉義 > 為 &gt; */}
+                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID &gt; 相同 Bundle Group &gt; 預設倍率</p>
                 </div>
 
                 <div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
