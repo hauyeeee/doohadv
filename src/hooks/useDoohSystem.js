@@ -190,7 +190,7 @@ export const useDoohSystem = () => {
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
-  // 🔥🔥🔥 Scenario 5: Check & Notify Losers (Outbid by Buyout) 🔥🔥🔥
+// 🔥🔥🔥 Scenario 5: Check & Notify Losers (Smart Partial Update) 🔥🔥🔥
   const checkAndNotifyLosers = async (buyoutOrder) => {
       if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
 
@@ -199,10 +199,11 @@ export const useDoohSystem = () => {
 
       console.log("🔍 Checking for losers to notify...");
 
+      // 產生所有被 Buyout 佔用的 Key
       const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
 
-      // 找出所有還在 "paid_pending_selection" (競價中) 的訂單
-      const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+      // 找出所有還在 "paid_pending_selection" (競價中) 或 "partially_outbid" 的訂單
+      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
       const snapshot = await getDocs(q);
       
       const batch = writeBatch(db);
@@ -212,25 +213,50 @@ export const useDoohSystem = () => {
           const loserOrder = docSnap.data();
           const loserId = docSnap.id;
           
-          // 檢查是否有衝突
+          // 檢查這張單有沒有撞中 Buyout 的時段
           const hasConflict = loserOrder.detailedSlots.some(s => 
-              affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`)
+              // 只有原本還未輸(status != outbid) 的才需要檢查
+              s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`)
           );
 
           if (hasConflict) {
-              console.log(`⚡ Outbid User: ${loserOrder.userEmail}`);
+              console.log(`⚡ Partial Outbid User: ${loserOrder.userEmail}`);
               losersFound = true;
-
-              // Send Notification
-              const conflictSlot = loserOrder.detailedSlots.find(s => affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`));
-              const slotInfo = `${conflictSlot.date} ${conflictSlot.hour}:00`;
               
-              sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfo);
+              let lostSlotsInfo = [];
 
-              // Update Loser Status
+              // 🔥 核心邏輯：只更新被撞中的 Slot，保留其他的
+              const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
+                      lostSlotsInfo.push(`${slot.date} ${slot.hour}:00`);
+                      return { ...slot, slotStatus: 'outbid' }; // 標記這個 Slot 已輸
+                  }
+                  return slot; // 其他 Slot 保持原狀
+              });
+
+              // 計算這張單現在的情況
+              const totalSlots = updatedDetailedSlots.length;
+              const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid').length;
+              
+              let newStatus = 'paid_pending_selection'; // 預設還在競價
+              if (outbidCount === totalSlots) {
+                  newStatus = 'outbid_needs_action'; // 全輸了
+              } else if (outbidCount > 0) {
+                  newStatus = 'partially_outbid'; // 輸了一部分，還有希望
+              }
+
+              // Send Notification (告訴他具體輸了哪幾個)
+              if (lostSlotsInfo.length > 0) {
+                  const slotInfoStr = lostSlotsInfo.join(', ');
+                  sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
+              }
+
+              // Update Order (寫入新的 Slots 陣列和狀態)
               const loserRef = doc(db, "orders", loserId);
               batch.update(loserRef, { 
-                  status: 'outbid_needs_action', // Custom Status
+                  detailedSlots: updatedDetailedSlots, // 更新內部的陣列
+                  status: newStatus, 
                   lastUpdated: serverTimestamp() 
               });
           }
@@ -238,7 +264,7 @@ export const useDoohSystem = () => {
 
       if (losersFound) {
           await batch.commit();
-          console.log("✅ Losers notified and statuses updated.");
+          console.log("✅ Losers notified and statuses updated (Partial Logic).");
       }
   };
 
