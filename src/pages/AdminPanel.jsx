@@ -247,6 +247,106 @@ const AdminPanel = () => {
       setActiveDayTab(1);
   };
 
+  // 🔥🔥🔥 自動結算競價 (Smart Auction Resolve) 🔥🔥🔥
+  const handleAutoResolve = async () => {
+      if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家。")) return;
+      setLoading(true);
+
+      try {
+          // 1. 獲取所有「競價中」的訂單
+          const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+          const snapshot = await getDocs(q);
+          const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          // 2. 建立一個 Map 來記錄每個時段的最高出價
+          // Key: "YYYY-MM-DD-HH-ScreenID", Value: { maxPrice: 0, winnerOrderId: "" }
+          const slotWars = {};
+
+          // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
+          allOrders.forEach(order => {
+              order.detailedSlots.forEach(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const myPrice = parseInt(slot.bidPrice);
+
+                  if (!slotWars[key]) {
+                      slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                  } else {
+                      // 如果我出價更高，我就是新的 King
+                      if (myPrice > slotWars[key].maxPrice) {
+                          slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      }
+                  }
+              });
+          });
+
+          console.log("👑 Slot Winners:", slotWars);
+
+          // 3. 第二輪 Loop：根據結果更新每張訂單
+          const batch = writeBatch(db);
+          let updateCount = 0;
+
+          allOrders.forEach(order => {
+              let winCount = 0;
+              let loseCount = 0;
+              let newDetailedSlots = [...order.detailedSlots];
+              let hasChange = false;
+
+              // 檢查這張單的每一個 Slot 係贏定輸
+              newDetailedSlots = newDetailedSlots.map(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const winner = slotWars[key];
+
+                  // 如果贏家 ID 不是我，即係我輸左
+                  if (winner && winner.winnerOrderId !== order.id) {
+                      loseCount++;
+                      if (slot.slotStatus !== 'outbid') {
+                          hasChange = true;
+                          return { ...slot, slotStatus: 'outbid' }; // 標記為輸
+                      }
+                  } else {
+                      winCount++;
+                      if (slot.slotStatus !== 'winning') {
+                          hasChange = true;
+                          return { ...slot, slotStatus: 'winning' }; // 標記為贏
+                      }
+                  }
+                  return slot;
+              });
+
+              // 決定整張單的命運
+              let newStatus = order.status;
+              if (loseCount > 0 && winCount === 0) {
+                  newStatus = 'outbid_needs_action'; // 全輸
+              } else if (loseCount > 0 && winCount > 0) {
+                  newStatus = 'partially_outbid'; // 輸一半
+              } else if (loseCount === 0 && winCount > 0) {
+                  // 如果全部贏哂，而且時間已到 (例如 Admin 決定截標)，可以改為 'won'
+                  // 這裡我們暫時保持 'paid_pending_selection' 但標記 slot 為 winning
+                  // 或者如果你想直接結算： newStatus = 'won';
+              }
+
+              if (hasChange || newStatus !== order.status) {
+                  const orderRef = doc(db, "orders", order.id);
+                  batch.update(orderRef, {
+                      detailedSlots: newDetailedSlots,
+                      status: newStatus,
+                      lastUpdated: new Date()
+                  });
+                  updateCount++;
+              }
+          });
+
+          await batch.commit();
+          alert(`✅ 結算完成！已更新 ${updateCount} 張訂單的狀態。`);
+
+      } catch (error) {
+          console.error("Auto Resolve Error:", error);
+          alert("❌ 結算失敗");
+      } finally {
+          setLoading(false);
+      }
+  };
+
   const handleAddScreen = () => {
       let initializedRules = {}; for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
       setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: initializedRules });
@@ -305,6 +405,14 @@ const AdminPanel = () => {
             <div className="flex gap-2">
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">返回首頁</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
+            <button 
+        onClick={handleAutoResolve} 
+        className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"
+    >
+        <Gavel size={16}/> 智能結算 (按Slot比價)
+    </button>
+</div>
+            
             </div>
         </div>
 
