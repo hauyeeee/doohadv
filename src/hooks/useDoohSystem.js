@@ -1,15 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  signInWithPopup, signOut, onAuthStateChanged 
-} from "firebase/auth";
-import { 
-  collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, doc, getDoc, getDocs 
-} from "firebase/firestore";
-import { 
-  ref, uploadBytesResumable, getDownloadURL 
-} from "firebase/storage";
+import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, doc, getDoc, getDocs, writeBatch } from "firebase/firestore";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { auth, db, storage, googleProvider } from '../firebase';
-import { initEmailService, sendBidConfirmation } from '../utils/emailService';
+import { 
+    initEmailService, 
+    sendBidReceivedEmail, 
+    sendBuyoutSuccessEmail, 
+    sendOutbidByBuyoutEmail 
+} from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
@@ -191,24 +190,95 @@ export const useDoohSystem = () => {
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
-  const callEmailService = async (id, data, isManual = false) => {
-      setEmailStatus('sending'); 
-      let targetUser = { email: data.userEmail || user?.email, displayName: data.userName || user?.displayName || 'Customer' };
-      let templateType = data.type === 'bid' ? 'bid_submission' : 'buyout';
-      try {
-          const success = await sendBidConfirmation(targetUser, { id, ...data }, templateType);
-          if (success) { setEmailStatus('sent'); await updateDoc(doc(db, "orders", id), { emailSent: true }).catch(e=>console.error(e)); } 
-          else { setEmailStatus('error'); }
-      } catch(e) { console.error(e); setEmailStatus('error'); }
+  // 🔥🔥🔥 Scenario 5: Check & Notify Losers (Outbid by Buyout) 🔥🔥🔥
+  const checkAndNotifyLosers = async (buyoutOrder) => {
+      if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
+
+      const slots = buyoutOrder.detailedSlots;
+      if (!slots || slots.length === 0) return;
+
+      console.log("🔍 Checking for losers to notify...");
+
+      const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
+
+      // 找出所有還在 "paid_pending_selection" (競價中) 的訂單
+      const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+      const snapshot = await getDocs(q);
+      
+      const batch = writeBatch(db);
+      let losersFound = false;
+
+      snapshot.forEach(docSnap => {
+          const loserOrder = docSnap.data();
+          const loserId = docSnap.id;
+          
+          // 檢查是否有衝突
+          const hasConflict = loserOrder.detailedSlots.some(s => 
+              affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`)
+          );
+
+          if (hasConflict) {
+              console.log(`⚡ Outbid User: ${loserOrder.userEmail}`);
+              losersFound = true;
+
+              // Send Notification
+              const conflictSlot = loserOrder.detailedSlots.find(s => affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`));
+              const slotInfo = `${conflictSlot.date} ${conflictSlot.hour}:00`;
+              
+              sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfo);
+
+              // Update Loser Status
+              const loserRef = doc(db, "orders", loserId);
+              batch.update(loserRef, { 
+                  status: 'outbid_needs_action', // Custom Status
+                  lastUpdated: serverTimestamp() 
+              });
+          }
+      });
+
+      if (losersFound) {
+          await batch.commit();
+          console.log("✅ Losers notified and statuses updated.");
+      }
   };
 
+  // 🔥 整合所有付款成功後的 Email 邏輯
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
+    
     if (isUrlSuccess) { 
         setModalPaymentStatus('paid'); 
-        setTimeout(async () => { try { const docSnap = await getDoc(orderRef); if (docSnap.exists() && !docSnap.data().emailSent) { callEmailService(docSnap.id, docSnap.data(), false); } } catch(e) { console.error(e); } }, 1500); 
+        setTimeout(async () => { 
+            try { 
+                const docSnap = await getDoc(orderRef); 
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const userInfo = { email: data.userEmail, displayName: data.userName };
+
+                    // 避免重複發送
+                    if (!data.emailSent) {
+                         // Scenario 1 & 2: 根據訂單類型發送確認信
+                         if (data.type === 'buyout') {
+                             await sendBuyoutSuccessEmail(userInfo, data);
+                         } else {
+                             await sendBidReceivedEmail(userInfo, data);
+                         }
+                         
+                         // 標記已發送
+                         await updateDoc(orderRef, { emailSent: true });
+                    }
+
+                    // Scenario 5: 如果是 Buyout，檢查有無其他人被 Outbid
+                    if (data.type === 'buyout') {
+                        checkAndNotifyLosers(data);
+                    }
+                }
+            } catch(e) { console.error(e); } 
+        }, 1500); 
     }
+    
+    // ... (實時監聽訂單狀態更新 UI) ...
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
@@ -352,8 +422,6 @@ export const useDoohSystem = () => {
     let hasDateRestrictedBid = false; 
     let hasPrimeFarFutureLock = false; 
     let maxAppliedMultiplier = 1.0;
-    
-    // 🔥🔥🔥 核心修改：捕捉未來的開放日期訊息 🔥🔥🔥
     let futureDateText = null; 
 
     availableSlots.forEach(slot => {
@@ -365,9 +433,8 @@ export const useDoohSystem = () => {
             hasRestrictedBid = true;
             if (slot.warning && (slot.warning.includes("遠期") || slot.warning.includes("急單"))) {
                 hasDateRestrictedBid = true;
-                // 🔥 如果是遠期，捕捉那句「競價將於...開放」的文字
                 if (slot.warning.includes("遠期") && !futureDateText) {
-                    futureDateText = slot.warning.replace('🔒 ', ''); // 去掉鎖頭符號，留文字
+                    futureDateText = slot.warning.replace('🔒 ', '');
                 }
             }
         }
@@ -383,7 +450,7 @@ export const useDoohSystem = () => {
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
         currentBundleMultiplier: maxAppliedMultiplier,
-        futureDateText // 🔥 將這句文字傳出去
+        futureDateText 
     };
   }, [generateAllSlots, slotBids]);
 
@@ -404,7 +471,7 @@ export const useDoohSystem = () => {
     let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
-    try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); if (type === 'bid') { callEmailService(docRef.id, txnData, false).catch(e => console.warn("Email bg trigger failed:", e)); } } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
+    try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
   };
 
   const processPayment = async () => {
