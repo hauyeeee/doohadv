@@ -96,6 +96,21 @@ export const sendVideoApprovedEmail = async (user, orderData) => {
   });
 };
 
+// 🔥 新增：普通競價被超越 (Standard Outbid)
+export const sendStandardOutbidEmail = async (loserEmail, loserName, slotInfo, newPrice) => {
+  // 這裡我們可以重用 "Bid Lost" 或者 "Outbid" 的 Template
+  // 建議在 EmailJS 開一個新 Template 或者用 generic 既
+  // 這裡暫時用 TEMPLATES.OUTBID_BY_BUYOUT (template_9vthu4n)，但改改 message
+  
+  return sendEmail("template_9vthu4n", {
+    to_name: loserName || 'Customer',
+    to_email: loserEmail,
+    slot_info: slotInfo, 
+    // 這句是重點：告訴他不是被買斷，而是有人出更高價
+    message: `注意：有其他買家出價 HK$${newPrice} 超越了你！請盡快登入系統加價，否則將失去此時段。` 
+  });
+};
+
 // 舊函數兼容 (你可以保留或慢慢替換)
 export const sendBidConfirmation = async (user, data, type) => {
     if (type === 'bid_submission') return sendBidReceivedEmail(user, data);

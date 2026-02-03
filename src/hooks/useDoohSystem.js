@@ -1,13 +1,20 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, doc, getDoc, getDocs, writeBatch } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { 
+  signInWithPopup, signOut, onAuthStateChanged 
+} from "firebase/auth";
+import { 
+  collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, doc, getDoc, getDocs, writeBatch 
+} from "firebase/firestore";
+import { 
+  ref, uploadBytesResumable, getDownloadURL 
+} from "firebase/storage";
 import { auth, db, storage, googleProvider } from '../firebase';
 import { 
     initEmailService, 
     sendBidReceivedEmail, 
     sendBuyoutSuccessEmail, 
-    sendOutbidByBuyoutEmail 
+    sendOutbidByBuyoutEmail,
+    sendStandardOutbidEmail // 🔥 Imported
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
@@ -190,19 +197,17 @@ export const useDoohSystem = () => {
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
-// 🔥🔥🔥 Scenario 5: Check & Notify Losers (Smart Partial Update) 🔥🔥🔥
+  // 🔥🔥🔥 Scenario 5a: Outbid by Buyout (Kick user out) 🔥🔥🔥
   const checkAndNotifyLosers = async (buyoutOrder) => {
       if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
 
       const slots = buyoutOrder.detailedSlots;
       if (!slots || slots.length === 0) return;
 
-      console.log("🔍 Checking for losers to notify...");
+      console.log("🔍 Checking for losers to notify (Buyout)...");
 
-      // 產生所有被 Buyout 佔用的 Key
       const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
 
-      // 找出所有還在 "paid_pending_selection" (競價中) 或 "partially_outbid" 的訂單
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
       const snapshot = await getDocs(q);
       
@@ -213,9 +218,7 @@ export const useDoohSystem = () => {
           const loserOrder = docSnap.data();
           const loserId = docSnap.id;
           
-          // 檢查這張單有沒有撞中 Buyout 的時段
           const hasConflict = loserOrder.detailedSlots.some(s => 
-              // 只有原本還未輸(status != outbid) 的才需要檢查
               s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`)
           );
 
@@ -225,37 +228,33 @@ export const useDoohSystem = () => {
               
               let lostSlotsInfo = [];
 
-              // 🔥 核心邏輯：只更新被撞中的 Slot，保留其他的
               const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
                       lostSlotsInfo.push(`${slot.date} ${slot.hour}:00`);
-                      return { ...slot, slotStatus: 'outbid' }; // 標記這個 Slot 已輸
+                      return { ...slot, slotStatus: 'outbid' }; 
                   }
-                  return slot; // 其他 Slot 保持原狀
+                  return slot; 
               });
 
-              // 計算這張單現在的情況
               const totalSlots = updatedDetailedSlots.length;
               const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid').length;
               
-              let newStatus = 'paid_pending_selection'; // 預設還在競價
+              let newStatus = 'paid_pending_selection'; 
               if (outbidCount === totalSlots) {
-                  newStatus = 'outbid_needs_action'; // 全輸了
+                  newStatus = 'outbid_needs_action'; 
               } else if (outbidCount > 0) {
-                  newStatus = 'partially_outbid'; // 輸了一部分，還有希望
+                  newStatus = 'partially_outbid'; 
               }
 
-              // Send Notification (告訴他具體輸了哪幾個)
               if (lostSlotsInfo.length > 0) {
                   const slotInfoStr = lostSlotsInfo.join(', ');
                   sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
               }
 
-              // Update Order (寫入新的 Slots 陣列和狀態)
               const loserRef = doc(db, "orders", loserId);
               batch.update(loserRef, { 
-                  detailedSlots: updatedDetailedSlots, // 更新內部的陣列
+                  detailedSlots: updatedDetailedSlots, 
                   status: newStatus, 
                   lastUpdated: serverTimestamp() 
               });
@@ -264,11 +263,56 @@ export const useDoohSystem = () => {
 
       if (losersFound) {
           await batch.commit();
-          console.log("✅ Losers notified and statuses updated (Partial Logic).");
+          console.log("✅ Losers notified and statuses updated.");
       }
   };
 
-  // 🔥 整合所有付款成功後的 Email 邏輯
+  // 🔥🔥🔥 Scenario 5b: Standard Outbid (Higher Price) 🔥🔥🔥
+  const checkAndNotifyStandardOutbid = async (newOrder) => {
+      if (newOrder.type === 'buyout') return;
+
+      const newSlots = newOrder.detailedSlots;
+      if (!newSlots || newSlots.length === 0) return;
+
+      console.log("🔍 Checking for standard outbids (Higher Bid)...");
+
+      // Find all ACTIVE bids
+      const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+      const snapshot = await getDocs(q);
+      
+      snapshot.forEach(docSnap => {
+          const oldOrder = docSnap.data();
+          if (oldOrder.userId === newOrder.userId) return; 
+
+          let outbidInfo = [];
+
+          oldOrder.detailedSlots.forEach(oldSlot => {
+              const matchNewSlot = newSlots.find(ns => 
+                  ns.date === oldSlot.date && 
+                  ns.hour === oldSlot.hour && 
+                  ns.screenId === oldSlot.screenId
+              );
+
+              if (matchNewSlot) {
+                  const oldPrice = parseInt(oldSlot.bidPrice);
+                  const newPrice = parseInt(matchNewSlot.bidPrice);
+
+                  if (newPrice > oldPrice) {
+                      console.log(`⚡ User ${oldOrder.userEmail} ($${oldPrice}) outbid by $${newPrice}`);
+                      outbidInfo.push(`${oldSlot.date} ${oldSlot.hour}:00 (現價 $${newPrice})`);
+                  }
+              }
+          });
+
+          if (outbidInfo.length > 0) {
+              const infoStr = outbidInfo.join(', ');
+              // Send the Casual Email
+              sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName, infoStr, "Higher Bid");
+          }
+      });
+  };
+
+  // 🔥 Integrated Finalize Logic
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
@@ -282,29 +326,28 @@ export const useDoohSystem = () => {
                     const data = docSnap.data();
                     const userInfo = { email: data.userEmail, displayName: data.userName };
 
-                    // 避免重複發送
+                    // 1. Send Confirmation Email to Buyer
                     if (!data.emailSent) {
-                         // Scenario 1 & 2: 根據訂單類型發送確認信
                          if (data.type === 'buyout') {
                              await sendBuyoutSuccessEmail(userInfo, data);
                          } else {
                              await sendBidReceivedEmail(userInfo, data);
                          }
-                         
-                         // 標記已發送
                          await updateDoc(orderRef, { emailSent: true });
                     }
 
-                    // Scenario 5: 如果是 Buyout，檢查有無其他人被 Outbid
+                    // 2. Check for Conflicts (Outbid Logic)
                     if (data.type === 'buyout') {
                         checkAndNotifyLosers(data);
+                    } else {
+                        checkAndNotifyStandardOutbid(data);
                     }
                 }
             } catch(e) { console.error(e); } 
         }, 1500); 
     }
     
-    // ... (實時監聽訂單狀態更新 UI) ...
+    // Listen for updates
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
@@ -494,8 +537,21 @@ export const useDoohSystem = () => {
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
-    let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
+    
+    // 🔥 Update slotSummary to include times
+    let slotSummary = "";
+    if (mode === 'specific') {
+        const hours = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${h}:00`).join(', ');
+        const dates = Array.from(selectedSpecificDates).join(', ');
+        slotSummary = `${dates} [${hours}]`; 
+    } else {
+        const hours = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${h}:00`).join(', ');
+        const weekDays = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',');
+        slotSummary = `逢星期[${weekDays}] [${hours}] x ${weekCount}週`;
+    }
+
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
+    
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
     try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
   };
