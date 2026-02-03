@@ -2,7 +2,7 @@ import emailjs from '@emailjs/browser';
 
 // 初始化 EmailJS
 export const initEmailService = () => {
-  emailjs.init("YOUR_PUBLIC_KEY"); // 🔥 請確保這裡填入你的 Public Key
+  emailjs.init("zTr4nyY_nusfPcNZU"); // 🔥 請確保這裡填入你的 Public Key
 };
 
 // 定義 Template IDs (根據你的截圖)
@@ -15,7 +15,7 @@ const TEMPLATES = {
   VIDEO_APPROVED: "template_409gjoj"     // Video Approved / 影片審核通過
 };
 
-const SERVICE_ID = "YOUR_SERVICE_ID"; // 🔥 請確保這裡填入你的 Service ID
+const SERVICE_ID = "service_euz8rzz"; // 🔥 請確保這裡填入你的 Service ID
 
 // 通用發送函數
 const sendEmail = async (templateId, params) => {
