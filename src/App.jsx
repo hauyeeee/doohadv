@@ -42,6 +42,7 @@ const DOOHBiddingSystem = () => {
     handleBidClick, handleBuyoutClick,
     initiateTransaction, processPayment, handleRealUpload, closeTransaction,
     viewingScreen,
+    handleUpdateBid, // 🔥🔥🔥 1. Imported from Hook
     
     // UI Helpers & Constants
     HOURS, getHourTier,
@@ -159,6 +160,7 @@ const DOOHBiddingSystem = () => {
         onLogout={handleLogout} 
         // 這裡傳入我們新定義的 handleUploadClick
         onUploadClick={handleUploadClick} 
+        handleUpdateBid={handleUpdateBid} // 🔥🔥🔥 2. Passed to Modal
       />
 
       <BuyoutModal 
