@@ -269,8 +269,6 @@ export const useDoohSystem = () => {
 
   // 🔥🔥🔥 Scenario 5b: Standard Outbid (Higher Price) - FIXED: Updates DB 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
-      // 這裡無論係 'buyout' 定係普通加價，只要係新單，都可以觸發比較
-      // 但如果係 Buyout 單，一般唔會入黎呢度，因為 fetchAndFinalizeOrder 做左分流
       if (newOrder.type === 'buyout') return;
 
       const newSlots = newOrder.detailedSlots;
@@ -278,27 +276,23 @@ export const useDoohSystem = () => {
 
       console.log("🔍 Checking for standard outbids (Higher Bid)...");
 
-      // 找出所有正在競價的對手 (包括部分被踢走的)
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
       const snapshot = await getDocs(q);
       
-      const batch = writeBatch(db); // 🔥 準備批量寫入
+      const batch = writeBatch(db);
       let outbidFound = false;
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          if (oldOrder.userId === newOrder.userId) return; // 自己唔好通知自己
+          if (oldOrder.userId === newOrder.userId) return;
 
           let outbidInfo = [];
-          let hasChange = false; // 標記這張單是否有變動
+          let hasChange = false;
 
-          // 產生新的 slot 陣列 (如果不複製，就無法更新)
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-              // 找找看新訂單有沒有買同一個 Slot
-              // 🔥 這裡加強了比對邏輯，確保 ID 類型 (String/Number) 不會導致此問題
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
-                  ns.hour == oldSlot.hour && // 使用 == 容許 "18" == 18
+                  ns.hour == oldSlot.hour && 
                   String(ns.screenId) === String(oldSlot.screenId)
               );
 
@@ -306,21 +300,19 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice);
                   const newPrice = parseInt(matchNewSlot.bidPrice);
 
-                  // 只有當新價錢 > 舊價錢，且舊既未死 (normal)，先判佢輸
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ User ${oldOrder.userEmail} ($${oldPrice}) outbid by $${newPrice}`);
                       outbidInfo.push(`${oldSlot.date} ${oldSlot.hour}:00 (現價 $${newPrice})`);
                       hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; // 🔥 標記為輸
+                      return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
               }
-              return oldSlot; // 沒事就保持原狀
+              return oldSlot;
           });
 
           if (hasChange) {
               outbidFound = true;
               
-              // 計算新狀態
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               
@@ -331,13 +323,11 @@ export const useDoohSystem = () => {
                   newStatus = 'partially_outbid'; 
               }
 
-              // 1. 發送 Email 通知
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join(', ');
                   sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName, infoStr, "Higher Bid");
               }
 
-              // 2. 🔥🔥🔥 寫入資料庫 (這步最重要)
               const oldOrderRef = doc(db, "orders", docSnap.id);
               batch.update(oldOrderRef, { 
                   detailedSlots: updatedOldSlots, 
@@ -348,7 +338,7 @@ export const useDoohSystem = () => {
       });
 
       if (outbidFound) {
-          await batch.commit(); // 提交所有更改
+          await batch.commit();
           console.log("✅ Standard Outbid: DB updated for losers.");
       }
   };
@@ -634,6 +624,100 @@ export const useDoohSystem = () => {
       }
   };
 
+  // 🔥🔥🔥 NEW FUNCTION: Recalculate All Bids (The Fixer) 🔥🔥🔥
+  const recalculateAllBids = async () => {
+      console.log("🔄 開始逐個時段重新計算...");
+      setTransactionStep('processing');
+
+      try {
+          const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
+          const snapshot = await getDocs(q);
+          const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          const arena = {};
+
+          allOrders.forEach(order => {
+              if (!order.detailedSlots) return;
+              order.detailedSlots.forEach(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const myPrice = parseInt(slot.bidPrice);
+
+                  if (!arena[key]) {
+                      arena[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                  } else {
+                      if (myPrice > arena[key].maxPrice) {
+                          arena[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      }
+                  }
+              });
+          });
+
+          console.log("👑 戰場最高價分佈:", arena);
+
+          const batch = writeBatch(db);
+          let updatedCount = 0;
+
+          allOrders.forEach(order => {
+              if (!order.detailedSlots) return;
+
+              let winCount = 0;
+              let loseCount = 0;
+              let hasChange = false;
+
+              const newDetailedSlots = order.detailedSlots.map(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const winner = arena[key];
+                  
+                  let newSlotStatus = 'normal'; 
+
+                  if (winner && winner.winnerOrderId === order.id) {
+                      winCount++;
+                      newSlotStatus = 'winning'; 
+                  } else {
+                      loseCount++;
+                      newSlotStatus = 'outbid'; 
+                  }
+
+                  if (slot.slotStatus !== newSlotStatus) {
+                      hasChange = true;
+                  }
+                  
+                  return { ...slot, slotStatus: newSlotStatus };
+              });
+
+              let newStatus = order.status;
+              
+              if (winCount > 0 && loseCount === 0) {
+                  newStatus = 'paid_pending_selection'; 
+              } else if (winCount === 0 && loseCount > 0) {
+                  newStatus = 'outbid_needs_action'; 
+              } else if (winCount > 0 && loseCount > 0) {
+                  newStatus = 'partially_outbid';
+              }
+
+              if (hasChange || newStatus !== order.status) {
+                  const orderRef = doc(db, "orders", order.id);
+                  batch.update(orderRef, {
+                      detailedSlots: newDetailedSlots,
+                      status: newStatus,
+                      lastUpdated: serverTimestamp()
+                  });
+                  updatedCount++;
+              }
+          });
+
+          await batch.commit();
+          showToast(`✅ 已重新結算 ${updatedCount} 張訂單！`);
+          console.log("✅ 結算完成");
+
+      } catch (e) {
+          console.error("Recalculate Error:", e);
+          showToast("❌ 結算失敗");
+      } finally {
+          setTransactionStep('idle');
+      }
+  };
+
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
@@ -650,7 +734,8 @@ export const useDoohSystem = () => {
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted, setCurrentOrderId, 
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
-    handleUpdateBid, // 🔥 Exported for UI
+    handleUpdateBid, // 🔥 Exported
+    recalculateAllBids, // 🔥 Exported
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
   };
 };
