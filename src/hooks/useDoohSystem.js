@@ -14,7 +14,7 @@ import {
     sendBidReceivedEmail, 
     sendBuyoutSuccessEmail, 
     sendOutbidByBuyoutEmail,
-    sendStandardOutbidEmail // 🔥 Imported
+    sendStandardOutbidEmail 
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
@@ -269,20 +269,22 @@ export const useDoohSystem = () => {
 
   // 🔥🔥🔥 Scenario 5b: Standard Outbid (Higher Price) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
-      if (newOrder.type === 'buyout') return;
+      // 這裡無論係 'buyout' 定係普通加價，只要係新單，都可以觸發比較
+      // 但如果係 Buyout 單，一般唔會入黎呢度，因為 fetchAndFinalizeOrder 做左分流
+      // 但如果是 handleUpdateBid 呼叫，type 係 'bid'
 
       const newSlots = newOrder.detailedSlots;
       if (!newSlots || newSlots.length === 0) return;
 
       console.log("🔍 Checking for standard outbids (Higher Bid)...");
 
-      // Find all ACTIVE bids
+      // 找出所有正在競價的對手
       const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
       const snapshot = await getDocs(q);
       
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          if (oldOrder.userId === newOrder.userId) return; 
+          if (oldOrder.userId === newOrder.userId) return; // 自己唔好通知自己
 
           let outbidInfo = [];
 
@@ -297,6 +299,7 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice);
                   const newPrice = parseInt(matchNewSlot.bidPrice);
 
+                  // 只有當新價錢 > 舊價錢，舊既先算輸
                   if (newPrice > oldPrice) {
                       console.log(`⚡ User ${oldOrder.userEmail} ($${oldPrice}) outbid by $${newPrice}`);
                       outbidInfo.push(`${oldSlot.date} ${oldSlot.hour}:00 (現價 $${newPrice})`);
@@ -306,13 +309,11 @@ export const useDoohSystem = () => {
 
           if (outbidInfo.length > 0) {
               const infoStr = outbidInfo.join(', ');
-              // Send the Casual Email
               sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName, infoStr, "Higher Bid");
           }
       });
   };
 
-  // 🔥 Integrated Finalize Logic
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
@@ -326,7 +327,6 @@ export const useDoohSystem = () => {
                     const data = docSnap.data();
                     const userInfo = { email: data.userEmail, displayName: data.userName };
 
-                    // 1. Send Confirmation Email to Buyer
                     if (!data.emailSent) {
                          if (data.type === 'buyout') {
                              await sendBuyoutSuccessEmail(userInfo, data);
@@ -336,7 +336,6 @@ export const useDoohSystem = () => {
                          await updateDoc(orderRef, { emailSent: true });
                     }
 
-                    // 2. Check for Conflicts (Outbid Logic)
                     if (data.type === 'buyout') {
                         checkAndNotifyLosers(data);
                     } else {
@@ -347,7 +346,6 @@ export const useDoohSystem = () => {
         }, 1500); 
     }
     
-    // Listen for updates
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
@@ -565,6 +563,51 @@ export const useDoohSystem = () => {
     try { const response = await fetch('/.netlify/functions/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), }); const data = await response.json(); if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); } } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
 
+  // 🔥🔥🔥 NEW FUNCTION: Update Bid & Notify 🔥🔥🔥
+  const handleUpdateBid = async (orderId, slotIndex, newPrice) => {
+      if (!user) return alert("請先登入");
+      
+      const orderRef = doc(db, "orders", orderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) return alert("找不到訂單");
+      
+      const orderData = orderSnap.data();
+      const oldSlots = [...orderData.detailedSlots];
+      const targetSlot = oldSlots[slotIndex];
+      
+      if (newPrice <= parseInt(targetSlot.bidPrice)) {
+          return alert("新出價必須高於舊出價！");
+      }
+
+      oldSlots[slotIndex] = { 
+          ...targetSlot, 
+          bidPrice: newPrice,
+          slotStatus: 'normal' 
+      };
+
+      const newTotalAmount = oldSlots.reduce((sum, slot) => sum + Number(slot.bidPrice), 0);
+
+      try {
+          await updateDoc(orderRef, {
+              detailedSlots: oldSlots,
+              amount: newTotalAmount,
+              status: 'paid_pending_selection', 
+              lastUpdated: serverTimestamp()
+          });
+
+          alert("✅ 加價成功！");
+
+          // Notify others if this new bid outbids them
+          const updatedOrderObj = { ...orderData, detailedSlots: oldSlots, id: orderId };
+          checkAndNotifyStandardOutbid(updatedOrderObj);
+
+      } catch (e) {
+          console.error("Update Bid Error:", e);
+          alert("更新失敗，請稍後再試");
+      }
+  };
+
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
@@ -581,6 +624,7 @@ export const useDoohSystem = () => {
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted, setCurrentOrderId, 
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
+    handleUpdateBid, // 🔥 Exported for UI
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
   };
 };
