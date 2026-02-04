@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc
+  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp
 } from "firebase/firestore";
 import { 
   BarChart3, TrendingUp, Users, DollarSign, 
   Search, Video, Monitor, Save, Trash2, 
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
   Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy,
-  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy
+  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy, Gavel
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -148,7 +148,7 @@ const AdminPanel = () => {
         statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
         const needsReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
         if (needsReview) pendingReview++;
-        if (['paid', 'won', 'completed', 'paid_pending_selection'].includes(order.status)) {
+        if (['paid', 'won', 'completed', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status)) {
             totalRevenue += Number(order.amount) || 0;
             validOrders++;
             const dateKey = order.createdAtDate.toISOString().split('T')[0];
@@ -175,14 +175,66 @@ const AdminPanel = () => {
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
-      const days = {}; for(let d = 1; d <= endOfMonth.getDate(); d++) { const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 }; }
-      orders.forEach(order => { if (!['paid', 'won', 'paid_pending_selection'].includes(order.status) || !order.detailedSlots) return; order.detailedSlots.forEach(slot => { if(days[slot.date]) { days[slot.date].count++; if(order.status === 'paid_pending_selection') days[slot.date].bidding++; else if(order.creativeStatus === 'pending_review' || (order.hasVideo && !order.isApproved && !order.isRejected)) days[slot.date].pending++; else if(order.isScheduled) days[slot.date].scheduled++; } }); });
+      
+      const days = {}; 
+      // Initialize ALL days in month
+      for(let d = 1; d <= endOfMonth.getDate(); d++) { 
+          // 🔥 FIX: Ensure consistent date format (YYYY-MM-DD)
+          const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; 
+          days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 }; 
+      }
+      
+      orders.forEach(order => { 
+          if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
+          
+          order.detailedSlots.forEach(slot => { 
+              if(days[slot.date]) { 
+                  days[slot.date].count++; 
+                  if(order.status === 'paid_pending_selection' || order.status === 'partially_outbid') days[slot.date].bidding++; 
+                  else if(order.creativeStatus === 'pending_review' || (order.hasVideo && !order.isApproved && !order.isRejected)) days[slot.date].pending++; 
+                  else if(order.isScheduled) days[slot.date].scheduled++; 
+              } 
+          }); 
+      });
       return days;
   }, [orders, calendarDate]);
 
   const dayViewGrid = useMemo(() => {
-    const grid = {}; const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
-    orders.forEach(order => { if (!['paid', 'won', 'paid_pending_selection'].includes(order.status) || !order.detailedSlots) return; order.detailedSlots.forEach(slot => { if (slot.date !== targetDateStr) return; const key = `${slot.hour}-${slot.screenId}`; let status = 'normal'; if (order.status === 'paid_pending_selection') status = 'bidding'; else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed'; else if (order.isScheduled) status = 'scheduled'; else if (order.status === 'won' || order.status === 'paid') status = 'action_needed'; const slotData = { ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, displayStatus: status, price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 }; if (!grid[key]) grid[key] = []; grid[key].push(slotData); }); });
+    const grid = {}; 
+    const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
+    
+    orders.forEach(order => { 
+        if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
+        
+        order.detailedSlots.forEach(slot => { 
+            if (slot.date !== targetDateStr) return; 
+            
+            const key = `${slot.hour}-${slot.screenId}`; 
+            let status = 'normal'; 
+            
+            if (order.status === 'paid_pending_selection') status = 'bidding'; 
+            else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed'; 
+            else if (order.isScheduled) status = 'scheduled'; 
+            else if (order.status === 'won' || order.status === 'paid' || order.status === 'partially_won') status = 'action_needed'; 
+            
+            const slotData = { 
+                ...slot, 
+                orderId: order.id, 
+                userEmail: order.userEmail, 
+                videoUrl: order.videoUrl, 
+                status: order.status, 
+                creativeStatus: order.creativeStatus, 
+                isScheduled: order.isScheduled, 
+                displayStatus: status, 
+                price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
+                priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
+            }; 
+            
+            if (!grid[key]) grid[key] = []; 
+            grid[key].push(slotData); 
+        }); 
+    });
+    
     Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
     return grid;
   }, [orders, calendarDate]);
@@ -254,7 +306,7 @@ const AdminPanel = () => {
 
       try {
           // 1. 獲取所有「競價中」的訂單
-          const q = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+          const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
           const snapshot = await getDocs(q);
           const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -264,6 +316,7 @@ const AdminPanel = () => {
 
           // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
           allOrders.forEach(order => {
+              if(!order.detailedSlots) return;
               order.detailedSlots.forEach(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const myPrice = parseInt(slot.bidPrice);
@@ -286,6 +339,8 @@ const AdminPanel = () => {
           let updateCount = 0;
 
           allOrders.forEach(order => {
+              if(!order.detailedSlots) return;
+              
               let winCount = 0;
               let loseCount = 0;
               let newDetailedSlots = [...order.detailedSlots];
@@ -295,22 +350,22 @@ const AdminPanel = () => {
               newDetailedSlots = newDetailedSlots.map(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const winner = slotWars[key];
+                  
+                  let newSlotStatus = 'normal';
 
                   // 如果贏家 ID 不是我，即係我輸左
                   if (winner && winner.winnerOrderId !== order.id) {
                       loseCount++;
-                      if (slot.slotStatus !== 'outbid') {
-                          hasChange = true;
-                          return { ...slot, slotStatus: 'outbid' }; // 標記為輸
-                      }
+                      newSlotStatus = 'outbid';
                   } else {
                       winCount++;
-                      if (slot.slotStatus !== 'winning') {
-                          hasChange = true;
-                          return { ...slot, slotStatus: 'winning' }; // 標記為贏
-                      }
+                      newSlotStatus = 'winning';
                   }
-                  return slot;
+                  
+                  if (slot.slotStatus !== newSlotStatus) {
+                      hasChange = true;
+                  }
+                  return { ...slot, slotStatus: newSlotStatus };
               });
 
               // 決定整張單的命運
@@ -320,9 +375,7 @@ const AdminPanel = () => {
               } else if (loseCount > 0 && winCount > 0) {
                   newStatus = 'partially_outbid'; // 輸一半
               } else if (loseCount === 0 && winCount > 0) {
-                  // 如果全部贏哂，而且時間已到 (例如 Admin 決定截標)，可以改為 'won'
-                  // 這裡我們暫時保持 'paid_pending_selection' 但標記 slot 為 winning
-                  // 或者如果你想直接結算： newStatus = 'won';
+                  newStatus = 'paid_pending_selection'; // 全贏 (保持競價中)
               }
 
               if (hasChange || newStatus !== order.status) {
@@ -330,7 +383,7 @@ const AdminPanel = () => {
                   batch.update(orderRef, {
                       detailedSlots: newDetailedSlots,
                       status: newStatus,
-                      lastUpdated: new Date()
+                      lastUpdated: serverTimestamp()
                   });
                   updateCount++;
               }
@@ -405,14 +458,12 @@ const AdminPanel = () => {
             <div className="flex gap-2">
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">返回首頁</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
-            <button 
-        onClick={handleAutoResolve} 
-        className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"
-    >
-        <Gavel size={16}/> 智能結算 (按Slot比價)
-    </button>
-</div>
-            
+                <button 
+                    onClick={handleAutoResolve} 
+                    className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"
+                >
+                    <Gavel size={16}/> 智能結算 (按Slot比價)
+                </button>
             </div>
         </div>
 
@@ -675,8 +726,8 @@ const AdminPanel = () => {
                         ))}
                     </div>
                     <button onClick={handleAddBundleRule} className="mt-3 text-sm font-bold text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded"><Plus size={16}/> 新增組合規則</button>
-                    {/* 🔥 修復: 轉義 > 為 &gt; */}
-                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID &gt; 相同 Bundle Group &gt; 預設倍率</p>
+                    {/* 🔥 修復: 轉義 > 為 > */}
+                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID > 相同 Bundle Group > 預設倍率</p>
                 </div>
 
                 <div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
@@ -722,8 +773,7 @@ const AdminPanel = () => {
                 </div>
                 <div className="p-4 border-t bg-slate-50 flex justify-end gap-3"><button onClick={() => setIsAddScreenModalOpen(false)} className="px-4 py-2 rounded text-sm font-bold text-slate-500 hover:bg-slate-200">取消</button><button onClick={saveScreenFull} className="px-6 py-2 rounded text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-2"><Save size={16}/> {editingScreenId ? '儲存變更' : '建立屏幕'}</button></div>
             </div>
-        </div>
-      )}
+        )}
       {/* ... MultiBid Modal (No Change) ... */}
       {selectedSlotGroup && selectedSlotGroup.length > 0 && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]"><div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0"><h3 className="font-bold flex items-center gap-2 text-sm"><Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00<span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span></h3><button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button></div><div className="flex-1 overflow-y-auto p-4 space-y-4">{selectedSlotGroup.map((slot, index) => (<div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}><div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">{index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}<div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div></div><div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-2"><div><div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div><div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div></div><StatusBadge status={slot.status} /></div><div className="flex gap-4 mt-3"><div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">{slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}</div><div className="flex-1 flex flex-col justify-center gap-2">{slot.displayStatus === 'review_needed' && (<button onClick={() => handleReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><CheckCircle size={14}/> 審核通過</button>)}{slot.displayStatus === 'action_needed' && (<button onClick={() => handleMarkAsScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><UploadCloud size={14}/> 確認已編排</button>)}{slot.displayStatus === 'bidding' && (<div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>)}{slot.displayStatus === 'scheduled' && (<div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>)}</div></div></div></div>))}</div></div></div>)}
     </div>
