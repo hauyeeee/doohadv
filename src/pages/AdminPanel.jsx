@@ -74,30 +74,19 @@ const AdminPanel = () => {
   // --- Forms ---
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
- // 1. Auth & Data Fetching (已修復權限漏洞)
+  // 1. Auth & Data Fetching
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // 1. 檢查是否已登入
-      if (!currentUser) {
-        // 未登入 -> 踢回首頁
-        navigate("/"); 
-        return;
-      }
-
-      // 2. 檢查 Email 是否在 ADMIN_EMAILS 名單內
+      if (!currentUser) { navigate("/"); return; }
       if (!ADMIN_EMAILS.includes(currentUser.email)) {
-        // 已登入但不是 Admin -> 顯示警告 + 登出 + 踢回首頁
         alert("⛔ 權限不足：你沒有權限進入後台。");
         signOut(auth);
         navigate("/");
         return;
       }
-
-      // 3. 通過驗證 -> 載入資料
       setUser(currentUser);
       fetchAllData();
     });
-    
     return () => unsubscribe();
   }, [navigate]);
 
@@ -172,14 +161,15 @@ const AdminPanel = () => {
       return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
+  // --- Calendar Logic Fixed ---
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
       
       const days = {}; 
-      // Initialize ALL days in month
+      // Initialize ALL days in month to ensure grid is full
       for(let d = 1; d <= endOfMonth.getDate(); d++) { 
-          // 🔥 FIX: Ensure consistent date format (YYYY-MM-DD)
+          // 🔥 FIX: Date format consistency (YYYY-MM-DD)
           const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; 
           days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 }; 
       }
@@ -188,6 +178,7 @@ const AdminPanel = () => {
           if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
           
           order.detailedSlots.forEach(slot => { 
+              // Check if the slot date is within this month (exists in our initialized days)
               if(days[slot.date]) { 
                   days[slot.date].count++; 
                   if(order.status === 'paid_pending_selection' || order.status === 'partially_outbid') days[slot.date].bidding++; 
@@ -305,16 +296,12 @@ const AdminPanel = () => {
       setLoading(true);
 
       try {
-          // 1. 獲取所有「競價中」的訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
           const snapshot = await getDocs(q);
           const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-          // 2. 建立一個 Map 來記錄每個時段的最高出價
-          // Key: "YYYY-MM-DD-HH-ScreenID", Value: { maxPrice: 0, winnerOrderId: "" }
           const slotWars = {};
 
-          // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
           allOrders.forEach(order => {
               if(!order.detailedSlots) return;
               order.detailedSlots.forEach(slot => {
@@ -324,7 +311,6 @@ const AdminPanel = () => {
                   if (!slotWars[key]) {
                       slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   } else {
-                      // 如果我出價更高，我就是新的 King
                       if (myPrice > slotWars[key].maxPrice) {
                           slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
                       }
@@ -334,7 +320,6 @@ const AdminPanel = () => {
 
           console.log("👑 Slot Winners:", slotWars);
 
-          // 3. 第二輪 Loop：根據結果更新每張訂單
           const batch = writeBatch(db);
           let updateCount = 0;
 
@@ -346,36 +331,33 @@ const AdminPanel = () => {
               let newDetailedSlots = [...order.detailedSlots];
               let hasChange = false;
 
-              // 檢查這張單的每一個 Slot 係贏定輸
               newDetailedSlots = newDetailedSlots.map(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const winner = slotWars[key];
-                  
-                  let newSlotStatus = 'normal';
 
-                  // 如果贏家 ID 不是我，即係我輸左
                   if (winner && winner.winnerOrderId !== order.id) {
                       loseCount++;
-                      newSlotStatus = 'outbid';
+                      if (slot.slotStatus !== 'outbid') {
+                          hasChange = true;
+                          return { ...slot, slotStatus: 'outbid' }; 
+                      }
                   } else {
                       winCount++;
-                      newSlotStatus = 'winning';
+                      if (slot.slotStatus !== 'winning') {
+                          hasChange = true;
+                          return { ...slot, slotStatus: 'winning' };
+                      }
                   }
-                  
-                  if (slot.slotStatus !== newSlotStatus) {
-                      hasChange = true;
-                  }
-                  return { ...slot, slotStatus: newSlotStatus };
+                  return slot;
               });
 
-              // 決定整張單的命運
               let newStatus = order.status;
               if (loseCount > 0 && winCount === 0) {
-                  newStatus = 'outbid_needs_action'; // 全輸
+                  newStatus = 'outbid_needs_action'; 
               } else if (loseCount > 0 && winCount > 0) {
-                  newStatus = 'partially_outbid'; // 輸一半
+                  newStatus = 'partially_outbid'; 
               } else if (loseCount === 0 && winCount > 0) {
-                  newStatus = 'paid_pending_selection'; // 全贏 (保持競價中)
+                  newStatus = 'paid_pending_selection'; 
               }
 
               if (hasChange || newStatus !== order.status) {
@@ -683,7 +665,6 @@ const AdminPanel = () => {
                                             <div className="text-xs text-slate-500 flex items-center gap-1"><MapPin size={10}/> {s.location}</div>
                                         </td>
                                         <td className="p-4">
-                                            {/* 🔥 FIX 3: Bundle Group Compatibility */}
                                             {s.bundleGroup || s.bundlegroup ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-200">{s.bundleGroup || s.bundlegroup}</span> : <span className="text-slate-300">-</span>}
                                         </td>
                                         <td className="p-4 text-center"><button onClick={()=>toggleScreenActive(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?<><Unlock size={12} className="inline"/> 上架中</>:<><Lock size={12} className="inline"/> 已鎖定</>}</button></td>
@@ -713,7 +694,7 @@ const AdminPanel = () => {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div>
                 
-                {/* 🔥🔥🔥 Bundle Rules UI 🔥🔥🔥 */}
+                {/* Bundle Rules UI */}
                 <div className="border-t pt-6 mt-6">
                     <h3 className="font-bold text-lg flex items-center gap-2 mb-4"><Layers size={20}/> 聯播網組合規則 (Bundle Rules)</h3>
                     <div className="space-y-3">
@@ -726,8 +707,7 @@ const AdminPanel = () => {
                         ))}
                     </div>
                     <button onClick={handleAddBundleRule} className="mt-3 text-sm font-bold text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded"><Plus size={16}/> 新增組合規則</button>
-                    {/* 🔥 修復: 轉義 > 為 > */}
-                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID > 相同 Bundle Group > 預設倍率</p>
+                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID &gt; 相同 Bundle Group &gt; 預設倍率</p>
                 </div>
 
                 <div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
@@ -751,7 +731,7 @@ const AdminPanel = () => {
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{newScreenData.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={newScreenData.mapUrl} onChange={e => setNewScreenData({...newScreenData, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://maps.google.com/..."/></div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={newScreenData.specifications} onChange={e => setNewScreenData({...newScreenData, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px, 55 inch, LED..."/></div></div>
-                        {/* 🔥 New Marketing Fields */}
+                        {/* New Marketing Fields */}
                         <div className="col-span-2 border-t pt-4 mt-2">
                             <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據 (Marketing Data)</h4>
                             <div className="grid grid-cols-2 gap-4">
@@ -774,8 +754,51 @@ const AdminPanel = () => {
                 <div className="p-4 border-t bg-slate-50 flex justify-end gap-3"><button onClick={() => setIsAddScreenModalOpen(false)} className="px-4 py-2 rounded text-sm font-bold text-slate-500 hover:bg-slate-200">取消</button><button onClick={saveScreenFull} className="px-6 py-2 rounded text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-2"><Save size={16}/> {editingScreenId ? '儲存變更' : '建立屏幕'}</button></div>
             </div>
         )}
-      {/* ... MultiBid Modal (No Change) ... */}
-      {selectedSlotGroup && selectedSlotGroup.length > 0 && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]"><div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0"><h3 className="font-bold flex items-center gap-2 text-sm"><Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00<span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span></h3><button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button></div><div className="flex-1 overflow-y-auto p-4 space-y-4">{selectedSlotGroup.map((slot, index) => (<div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}><div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">{index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}<div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div></div><div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-2"><div><div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div><div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div></div><StatusBadge status={slot.status} /></div><div className="flex gap-4 mt-3"><div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">{slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}</div><div className="flex-1 flex flex-col justify-center gap-2">{slot.displayStatus === 'review_needed' && (<button onClick={() => handleReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><CheckCircle size={14}/> 審核通過</button>)}{slot.displayStatus === 'action_needed' && (<button onClick={() => handleMarkAsScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><UploadCloud size={14}/> 確認已編排</button>)}{slot.displayStatus === 'bidding' && (<div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>)}{slot.displayStatus === 'scheduled' && (<div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>)}</div></div></div></div>))}</div></div></div>)}
+
+      {/* --- SELECTED SLOT GROUP DETAILS MODAL --- */}
+      {selectedSlotGroup && selectedSlotGroup.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+                <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold flex items-center gap-2 text-sm">
+                        <Clock size={16}/> 時段詳情: {selectedSlotGroup[0].date} {selectedSlotGroup[0].hour}:00
+                        <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{selectedSlotGroup.length} 個出價</span>
+                    </h3>
+                    <button onClick={() => setSelectedSlotGroup(null)} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {selectedSlotGroup.map((slot, index) => (
+                        <div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}>
+                            <div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">
+                                {index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}
+                                <div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                        <div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div>
+                                        <div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div>
+                                    </div>
+                                    <StatusBadge status={slot.status} />
+                                </div>
+                                <div className="flex gap-4 mt-3">
+                                    <div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">
+                                        {slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}
+                                    </div>
+                                    <div className="flex-1 flex flex-col justify-center gap-2">
+                                        {slot.displayStatus === 'review_needed' && (<button onClick={() => handleReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><CheckCircle size={14}/> 審核通過</button>)}
+                                        {slot.displayStatus === 'action_needed' && (<button onClick={() => handleMarkAsScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><UploadCloud size={14}/> 確認已編排</button>)}
+                                        {slot.displayStatus === 'bidding' && (<div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>)}
+                                        {slot.displayStatus === 'scheduled' && (<div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };
