@@ -624,36 +624,62 @@ export const useDoohSystem = () => {
       }
   };
 
-  // 🔥🔥🔥 NEW FUNCTION: Recalculate All Bids (The Fixer) 🔥🔥🔥
+  // 🔥🔥🔥 NEW FUNCTION: Recalculate All Bids (The Fixer) - 加強版：處理同價 🔥🔥🔥
   const recalculateAllBids = async () => {
-      console.log("🔄 開始逐個時段重新計算...");
+      console.log("🔄 開始逐個時段重新計算 (包含同價判定)...");
       setTransactionStep('processing');
 
       try {
+          // 1. 撈取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
-          const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // 轉換數據，並確保有時間戳 (createdAt)
+          const allOrders = snapshot.docs.map(d => {
+              const data = d.data();
+              // 將 Firestore Timestamp 轉為毫秒數，方便比較
+              const timeVal = data.createdAt?.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt).getTime();
+              return { id: d.id, ...data, timeVal: timeVal || Date.now() };
+          });
 
+          // 2. 建立「戰場 (Arena)」
           const arena = {};
 
           allOrders.forEach(order => {
               if (!order.detailedSlots) return;
+              
               order.detailedSlots.forEach(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const myPrice = parseInt(slot.bidPrice);
+                  const myTime = order.timeVal;
 
+                  // 邏輯核心：誰是霸主？
                   if (!arena[key]) {
-                      arena[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      // 沒人佔，我先佔
+                      arena[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   } else {
-                      if (myPrice > arena[key].maxPrice) {
-                          arena[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      const currentKing = arena[key];
+                      
+                      if (myPrice > currentKing.maxPrice) {
+                          // 情況 A: 我出價更高 -> 我贏
+                          arena[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      } 
+                      else if (myPrice === currentKing.maxPrice) {
+                          // 情況 B: 價錢一樣 -> 比較時間 (越小越早)
+                          if (myTime < currentKing.timeVal) {
+                              // 我比現在的霸主更早出價 -> 我贏 (搶回王位)
+                              console.log(`⚖️ 同價 $${myPrice}：${order.userEmail} (早) 贏了 ${currentKing.winnerEmail} (遲)`);
+                              arena[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                          }
                       }
+                      // 情況 C: 我出價低，或者同價但遲過人 -> 我輸 (甚麼都不做)
                   }
               });
           });
 
-          console.log("👑 戰場最高價分佈:", arena);
+          console.log("👑 最終戰場分佈 (已解決同價衝突):", arena);
 
+          // 3. 根據戰場結果，更新每一張訂單 (同之前一樣)
           const batch = writeBatch(db);
           let updatedCount = 0;
 
@@ -687,6 +713,7 @@ export const useDoohSystem = () => {
 
               let newStatus = order.status;
               
+              // 狀態判定邏輯
               if (winCount > 0 && loseCount === 0) {
                   newStatus = 'paid_pending_selection'; 
               } else if (winCount === 0 && loseCount > 0) {
@@ -707,8 +734,7 @@ export const useDoohSystem = () => {
           });
 
           await batch.commit();
-          showToast(`✅ 已重新結算 ${updatedCount} 張訂單！`);
-          console.log("✅ 結算完成");
+          showToast(`✅ 已重新結算 ${updatedCount} 張訂單 (同價者先到先得)！`);
 
       } catch (e) {
           console.error("Recalculate Error:", e);

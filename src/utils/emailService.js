@@ -1,120 +1,189 @@
 import emailjs from '@emailjs/browser';
 
+// 請確保這些環境變數已在 .env 文件中設定，或直接在此處替換字串
+const SERVICE_ID = "service_xxxxxxxx"; // 你的 EmailJS Service ID
+const PUBLIC_KEY = "xxxxxxxxxxxxxx";   // 你的 EmailJS Public Key
+
 // 初始化 EmailJS
 export const initEmailService = () => {
-  emailjs.init("zTr4nyY_nusfPcNZU"); // 🔥 請確保這裡填入你的 Public Key
+  emailjs.init(PUBLIC_KEY);
 };
 
-// 定義 Template IDs (根據你的截圖)
-const TEMPLATES = {
-  BID_RECEIVED: "template_biprpck",      // 收到你的出價
-  BUYOUT_SUCCESS: "template_99moneg",    // 你已成功「買斷」
-  BID_WON: "template_3n90m3u",           // Congrats, 你已中標
-  BID_LOST: "template_1v8p3y8",          // Bid Lost / 競投失敗
-  OUTBID_BY_BUYOUT: "template_9vthu4n",  // 抱歉，你的時段已被買斷
-  VIDEO_APPROVED: "template_409gjoj"     // Video Approved / 影片審核通過
-};
-
-const SERVICE_ID = "service_euz8rzz"; // 🔥 請確保這裡填入你的 Service ID
-
-// 通用發送函數
-const sendEmail = async (templateId, params) => {
+// 通用發送函數 (內部使用)
+const sendEmail = async (templateId, templateParams) => {
   try {
-    const response = await emailjs.send(SERVICE_ID, templateId, params);
-    console.log(`✅ Email sent successfully: ${templateId}`, response);
-    return true;
+    const response = await emailjs.send(SERVICE_ID, templateId, templateParams);
+    console.log(`📧 Email sent successfully (${templateId})`, response.status, response.text);
+    return response;
   } catch (error) {
-    console.error(`❌ Failed to send email (${templateId}):`, error);
-    return false;
+    console.error(`❌ Failed to send email (${templateId})`, error);
+    return null;
   }
 };
 
-// 1. 收到出價 (Bid Received)
-export const sendBidReceivedEmail = async (user, orderData) => {
-  return sendEmail(TEMPLATES.BID_RECEIVED, {
+// ============================================================
+// 1. 下單相關 (Order Placement)
+// ============================================================
+
+/**
+ * 當用戶成功提交競價 (Bid) 時發送
+ * Template: 收到你的出價 (Bid Received)
+ */
+export const sendBidReceivedEmail = async (user, order) => {
+  const params = {
     to_name: user.displayName || 'Customer',
     to_email: user.email,
-    order_id: orderData.id,
-    bid_amount: orderData.amount,
-    slot_summary: orderData.timeSlotSummary, // e.g. "2026-02-14 18:00 @ Screen A"
-    message: "我們已收到你的出價。系統將於時段開始前進行結算。"
-  });
+    order_id: order.id,
+    amount: order.amount,
+    slot_summary: order.timeSlotSummary || 'Selected Slots',
+    order_date: new Date().toLocaleDateString('zh-HK')
+  };
+  // Template ID: template_biprpck
+  return sendEmail("template_biprpck", params);
 };
 
-// 2. 買斷成功 (Buyout Success)
-export const sendBuyoutSuccessEmail = async (user, orderData) => {
-  return sendEmail(TEMPLATES.BUYOUT_SUCCESS, {
+/**
+ * 當用戶成功買斷 (Buyout) 時發送
+ * Template: 你已成功「買斷 (Buyout)」所選的廣告時段
+ */
+export const sendBuyoutSuccessEmail = async (user, order) => {
+  const params = {
     to_name: user.displayName || 'Customer',
     to_email: user.email,
-    order_id: orderData.id,
-    amount: orderData.amount,
-    slot_summary: orderData.timeSlotSummary,
-    message: "恭喜！你已成功買斷所選時段。請盡快上傳廣告素材。"
-  });
+    order_id: order.id,
+    amount: order.amount,
+    slot_summary: order.timeSlotSummary || 'Buyout Slots',
+    order_date: new Date().toLocaleDateString('zh-HK')
+  };
+  // Template ID: template_99moneg
+  return sendEmail("template_99moneg", params);
 };
 
-// 3. 中標通知 (Bid Won) - 通常由 Admin 後台觸發或系統自動結算
-export const sendBidWonEmail = async (user, orderData) => {
-  return sendEmail(TEMPLATES.BID_WON, {
+// ============================================================
+// 2. 競爭與被踢 (Outbid / Conflicts)
+// ============================================================
+
+/**
+ * 當用戶出價被其他人「更高價」超越時發送 (叫佢加價)
+ * Template: ⚠️ Outbid Alert / 出價被超越
+ */
+export const sendStandardOutbidEmail = async (userEmail, userName, slotInfo, currentPrice) => {
+  const params = {
+    to_name: userName || 'Customer',
+    to_email: userEmail,
+    slot_info: slotInfo, // 例如: "2024-02-05 18:00 @ Screen A"
+    new_price: currentPrice // 現時最高價
+  };
+  // Template ID: template_34bea2p
+  return sendEmail("template_34bea2p", params);
+};
+
+/**
+ * 當用戶的時段被其他人「買斷 (Buyout)」踢走時發送 (無得救)
+ * Template: 抱歉，你的時段已被買斷 (Outbid by Buyout)
+ */
+export const sendOutbidByBuyoutEmail = async (userEmail, userName, slotInfo) => {
+  const params = {
+    to_name: userName || 'Customer',
+    to_email: userEmail,
+    slot_info: slotInfo // 被買斷的時段詳情
+  };
+  // Template ID: template_9vthu4n
+  return sendEmail("template_9vthu4n", params);
+};
+
+/**
+ * 當 Bundle 訂單中，只有部分屏幕被踢走，其餘仍在競價
+ * Template: ⚠️ Order Update / 訂單狀態更新
+ */
+export const sendPartialOutbidEmail = async (userEmail, userName, lostSlotsInfo) => {
+  const params = {
+    to_name: userName || 'Customer',
+    to_email: userEmail,
+    slot_info: lostSlotsInfo // 列出哪些時段失效了
+  };
+  // Template ID: template_f4h2lls
+  return sendEmail("template_f4h2lls", params);
+};
+
+// ============================================================
+// 3. 結果通知 (Result Notification)
+// ============================================================
+
+/**
+ * 競價成功 (贏左)
+ * Template: Congrats, 你已中標 (Bid Won)
+ */
+export const sendBidWonEmail = async (user, order) => {
+  const params = {
     to_name: user.displayName || 'Customer',
-    to_email: user.email,
-    order_id: orderData.id,
-    slot_summary: orderData.timeSlotSummary,
-    message: "恭喜！你的競價已勝出。請前往訂單頁面上傳影片。"
-  });
+    to_email: user.email || user.userEmail,
+    order_id: order.id,
+    amount: order.amount,
+    final_slots: order.timeSlotSummary
+  };
+  // Template ID: template_3n90m3u
+  return sendEmail("template_3n90m3u", params);
 };
 
-// 4. 競投失敗 (Bid Lost) - 通常由 Admin 後台觸發或系統自動結算
-export const sendBidLostEmail = async (user, orderData) => {
-  return sendEmail(TEMPLATES.BID_LOST, {
+/**
+ * 競價失敗 (輸左)
+ * Template: Bid Lost / 競投失敗 (未中標)
+ */
+export const sendBidLostEmail = async (user, order) => {
+  const params = {
     to_name: user.displayName || 'Customer',
-    to_email: user.email,
-    order_id: orderData.id,
-    slot_summary: orderData.timeSlotSummary,
-    message: "很遺憾，你的出價未能中標。歡迎嘗試競投其他時段。"
-  });
+    to_email: user.email || user.userEmail,
+    order_id: order.id
+  };
+  // Template ID: template_1v8p3y8
+  return sendEmail("template_1v8p3y8", params);
 };
 
-// 5. 被買斷通知 (Outbid by Buyout) - 🔥 這是你要的 Scenario
-export const sendOutbidByBuyoutEmail = async (loserEmail, loserName, slotInfo) => {
-  return sendEmail(TEMPLATES.OUTBID_BY_BUYOUT, {
-    to_name: loserName || 'Customer',
-    to_email: loserEmail,
-    slot_info: slotInfo, // e.g. "2026-02-14 18:00"
-    message: "抱歉通知你，該時段已被其他客戶直接買斷。你的競價已被取消。"
-  });
-};
+// ============================================================
+// 4. 影片審核 (Video Review)
+// ============================================================
 
-// 6. 影片審核通過 (Video Approved) - 由 Admin 觸發
-export const sendVideoApprovedEmail = async (user, orderData) => {
-  return sendEmail(TEMPLATES.VIDEO_APPROVED, {
+/**
+ * 影片審核通過
+ * Template: Video Approved / 影片審核通過
+ */
+export const sendVideoApprovedEmail = async (user, order) => {
+  const params = {
     to_name: user.displayName || 'Customer',
-    to_email: user.email,
-    order_id: orderData.id,
-    video_name: orderData.videoName,
-    message: "你的影片已通過審核，將按排程播放。"
-  });
+    to_email: user.email || user.userEmail,
+    order_id: order.id,
+    order_id_short: order.id.slice(0, 8)
+  };
+  // Template ID: template_409gjoj
+  return sendEmail("template_409gjoj", params);
 };
 
-// 🔥 新增：普通競價被超越 (Standard Outbid)
-export const sendStandardOutbidEmail = async (loserEmail, loserName, slotInfo, newPrice) => {
-  // 這裡我們可以重用 "Bid Lost" 或者 "Outbid" 的 Template
-  // 建議在 EmailJS 開一個新 Template 或者用 generic 既
-  // 這裡暫時用 TEMPLATES.OUTBID_BY_BUYOUT (template_9vthu4n)，但改改 message
-  
-  return sendEmail("template_9vthu4n", {
-    to_name: loserName || 'Customer',
-    to_email: loserEmail,
-    slot_info: slotInfo, 
-    // 這句是重點：告訴他不是被買斷，而是有人出更高價
-    message: `注意：有其他買家出價 HK$${newPrice} 超越了你！請盡快登入系統加價，否則將失去此時段。` 
-  });
+/**
+ * 影片審核被拒 (需要行動)
+ * Template: 🚫 Action Required / 需要行動
+ */
+export const sendVideoRejectedEmail = async (user, order, reason) => {
+  const params = {
+    to_name: user.displayName || 'Customer',
+    to_email: user.email || user.userEmail,
+    order_id: order.id,
+    order_id_short: order.id.slice(0, 8),
+    reject_reason: reason || "Content policy violation"
+  };
+  // Template ID: template_waqdg9v
+  return sendEmail("template_waqdg9v", params);
 };
 
-// 舊函數兼容 (你可以保留或慢慢替換)
-export const sendBidConfirmation = async (user, data, type) => {
-    if (type === 'bid_submission') return sendBidReceivedEmail(user, data);
-    if (type === 'buyout') return sendBuyoutSuccessEmail(user, data);
-    if (type === 'video_approved') return sendVideoApprovedEmail(user, data);
-    return false;
+// 統一導出接口 (方便 AdminPanel 調用)
+export const sendBidConfirmation = async (user, order, type, extraData = null) => {
+    switch (type) {
+        case 'bid_received': return sendBidReceivedEmail(user, order);
+        case 'buyout_success': return sendBuyoutSuccessEmail(user, order);
+        case 'bid_won': return sendBidWonEmail(user, order);
+        case 'bid_lost': return sendBidLostEmail(user, order);
+        case 'video_approved': return sendVideoApprovedEmail(user, order);
+        case 'video_rejected': return sendVideoRejectedEmail(user, order, extraData);
+        default: console.warn("Unknown email type:", type);
+    }
 };
