@@ -161,7 +161,6 @@ const AdminPanel = () => {
       return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
-  // --- Calendar Logic Fixed ---
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
@@ -665,6 +664,7 @@ const AdminPanel = () => {
                                             <div className="text-xs text-slate-500 flex items-center gap-1"><MapPin size={10}/> {s.location}</div>
                                         </td>
                                         <td className="p-4">
+                                            {/* 🔥 FIX 3: Bundle Group Compatibility */}
                                             {s.bundleGroup || s.bundlegroup ? <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-200">{s.bundleGroup || s.bundlegroup}</span> : <span className="text-slate-300">-</span>}
                                         </td>
                                         <td className="p-4 text-center"><button onClick={()=>toggleScreenActive(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?<><Unlock size={12} className="inline"/> 上架中</>:<><Lock size={12} className="inline"/> 已鎖定</>}</button></td>
@@ -694,7 +694,7 @@ const AdminPanel = () => {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div>
                 
-                {/* Bundle Rules UI */}
+                {/* 🔥🔥🔥 Bundle Rules UI 🔥🔥🔥 */}
                 <div className="border-t pt-6 mt-6">
                     <h3 className="font-bold text-lg flex items-center gap-2 mb-4"><Layers size={20}/> 聯播網組合規則 (Bundle Rules)</h3>
                     <div className="space-y-3">
@@ -707,7 +707,8 @@ const AdminPanel = () => {
                         ))}
                     </div>
                     <button onClick={handleAddBundleRule} className="mt-3 text-sm font-bold text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded"><Plus size={16}/> 新增組合規則</button>
-                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID &gt; 相同 Bundle Group &gt; 預設倍率</p>
+                    {/* 🔥 修復: 轉義 > 為 > */}
+                    <p className="text-xs text-slate-400 mt-2">* 優先級：完全匹配 ID > 相同 Bundle Group > 預設倍率</p>
                 </div>
 
                 <div className="mt-6 flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-200"><div className="text-xs text-slate-500 flex items-center gap-2"><AlertTriangle size={14}/> {selectedConfigTarget === 'global' ? "修改此處將影響所有沒有自定義設定的屏幕。" : `此設定只會影響 ${screens.find(s=>String(s.id)===selectedConfigTarget)?.name}。`}</div><button onClick={savePricingConfig} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"><Save size={18}/> 儲存設定</button></div>
@@ -731,7 +732,7 @@ const AdminPanel = () => {
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{newScreenData.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={newScreenData.mapUrl} onChange={e => setNewScreenData({...newScreenData, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="https://maps.google.com/..."/></div></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格 (Specifications)</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={newScreenData.specifications} onChange={e => setNewScreenData({...newScreenData, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px, 55 inch, LED..."/></div></div>
-                        {/* New Marketing Fields */}
+                        {/* 🔥 New Marketing Fields */}
                         <div className="col-span-2 border-t pt-4 mt-2">
                             <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據 (Marketing Data)</h4>
                             <div className="grid grid-cols-2 gap-4">
@@ -754,7 +755,6 @@ const AdminPanel = () => {
                 <div className="p-4 border-t bg-slate-50 flex justify-end gap-3"><button onClick={() => setIsAddScreenModalOpen(false)} className="px-4 py-2 rounded text-sm font-bold text-slate-500 hover:bg-slate-200">取消</button><button onClick={saveScreenFull} className="px-6 py-2 rounded text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-2"><Save size={16}/> {editingScreenId ? '儲存變更' : '建立屏幕'}</button></div>
             </div>
         )}
-
       {/* --- SELECTED SLOT GROUP DETAILS MODAL --- */}
       {selectedSlotGroup && selectedSlotGroup.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
