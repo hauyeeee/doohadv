@@ -1,38 +1,29 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router-dom'; // 🔥 引入路由工具
-
-// 引入你的頁面
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
-// 請確保你的 AdminPanel 檔案路徑正確，如果是在 src/pages/ 就用下面這句
-import AdminPanel from './pages/AdminPanel'; 
-// 🔥 引入剛剛建立的新日曆組件 (請確保檔案路徑正確)
-import AdminMasterCalendar from './components/admin/AdminMasterCalendar';
-
-// 引入 CSS
-import './index.css'; 
-
+import AdminPanel from './pages/AdminPanel';
+import './index.css';
+// 🔥 引入 LanguageProvider
 import { LanguageProvider } from './context/LanguageContext';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
+    {/* 🔥 1. 開始 LanguageProvider */}
     <LanguageProvider>
-    <BrowserRouter> {/* 🔥 用 BrowserRouter 包住整個 App */}
-      <Routes>
-        
-        {/* 🏠 主頁路徑 (前台) */}
-        <Route path="/" element={<App />} />
-        
-        {/* 👑 Admin 後台主頁 */}
-        <Route path="/admin" element={<AdminPanel />} />
-
-        {/* 🗓️ Admin 排程日曆 (這是新加的一行) */}
-        <Route path="/admin/calendar" element={<AdminMasterCalendar />} />
-        
-        {/* (可選) 404 頁面：如果亂打網址，跳回主頁 */}
-        <Route path="*" element={<App />} />
-
-      </Routes>
-    </BrowserRouter>
+      <BrowserRouter>
+        <Routes>
+          {/* 一般用戶頁面 */}
+          <Route path="/" element={<App />} />
+          
+          {/* 管理員後台 */}
+          <Route path="/admin" element={<AdminPanel />} />
+          
+          {/* 處理其他路徑 (Optional: Redirect to Home) */}
+          <Route path="*" element={<App />} />
+        </Routes>
+      </BrowserRouter>
+    </LanguageProvider> 
+    {/* 🔥 2. 記得要在這裡關閉 LanguageProvider，不能漏！ */}
   </React.StrictMode>,
 );
