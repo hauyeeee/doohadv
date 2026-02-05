@@ -1,11 +1,14 @@
 import React from 'react';
 import { TrendingUp, Clock, Smartphone, ChevronDown, ArrowRight } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext'; // 🔥 引入
 
 const HeroSection = () => {
+  const { t } = useLanguage(); // 🔥 攞翻譯功能
+
   return (
     <div className="relative bg-slate-50 border-b border-slate-200 overflow-hidden">
       
-      {/* 背景裝飾 (Optional: Grid Pattern) */}
+      {/* 背景裝飾 */}
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 via-white to-purple-50/50"></div>
 
@@ -17,11 +20,14 @@ const HeroSection = () => {
         </div>
 
         <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight mb-4 animate-in slide-in-from-bottom-6 duration-700">
-          自己廣告，<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">自己投。</span>
+          {t('hero_title_1')}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+            {t('hero_title_2')}
+          </span>
         </h1>
         
         <p className="text-slate-500 text-sm md:text-lg max-w-xl mx-auto mb-10 font-medium animate-in slide-in-from-bottom-8 duration-700 delay-100">
-          全港地標屏幕，由你掌控。無需經 Agency，價格透明，即時上架。
+          {t('hero_subtitle')}
         </p>
 
         {/* 三大賣點 Cards */}
@@ -32,9 +38,10 @@ const HeroSection = () => {
             <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-green-600 transition-colors">
               <TrendingUp size={20} className="text-green-600 group-hover:text-white transition-colors" />
             </div>
-            <h3 className="font-bold text-slate-800 text-lg">低門檻</h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              <span className="text-green-600 font-bold bg-green-50 px-1 rounded">HK$50 起</span> 登上城市地標。<br/>小預算也能做大廣告。
+            <h3 className="font-bold text-slate-800 text-lg">{t('point_1_title')}</h3>
+            {/* 🔥 whitespace-pre-line 讓 \n 換行生效 */}
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed whitespace-pre-line">
+              {t('point_1_desc')}
             </p>
           </div>
 
@@ -43,9 +50,9 @@ const HeroSection = () => {
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-600 transition-colors">
               <Clock size={20} className="text-blue-600 group-hover:text-white transition-colors" />
             </div>
-            <h3 className="font-bold text-slate-800 text-lg">高彈性</h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              按<span className="text-blue-600 font-bold bg-blue-50 px-1 rounded">小時</span>購買時段。<br/>隨時 Bid，隨時播。
+            <h3 className="font-bold text-slate-800 text-lg">{t('point_2_title')}</h3>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed whitespace-pre-line">
+              {t('point_2_desc')}
             </p>
           </div>
 
@@ -54,9 +61,9 @@ const HeroSection = () => {
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-purple-600 transition-colors">
               <Smartphone size={20} className="text-purple-600 group-hover:text-white transition-colors" />
             </div>
-            <h3 className="font-bold text-slate-800 text-lg">全掌控</h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              手機一按，全港聯播。<br/>成效數據一目了然。
+            <h3 className="font-bold text-slate-800 text-lg">{t('point_3_title')}</h3>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed whitespace-pre-line">
+              {t('point_3_desc')}
             </p>
           </div>
 

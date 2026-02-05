@@ -12,8 +12,11 @@ import AdminMasterCalendar from './components/admin/AdminMasterCalendar';
 // 引入 CSS
 import './index.css'; 
 
+import { LanguageProvider } from './context/LanguageContext';
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
+    <LanguageProvider>
     <BrowserRouter> {/* 🔥 用 BrowserRouter 包住整個 App */}
       <Routes>
         
