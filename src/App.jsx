@@ -4,6 +4,7 @@ import { useDoohSystem } from './hooks/useDoohSystem';
 
 // Components
 import Header from './components/Header';
+import HeroSection from './components/HeroSection'; // 這是新的 Component
 import InfoBox from './components/InfoBox';
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
@@ -73,14 +74,19 @@ const DOOHBiddingSystem = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
+      {/* 1. New Header with Ticker */}
       <Header 
         user={user} 
         onLoginClick={() => setIsLoginModalOpen(true)} 
         onProfileClick={() => setIsProfileModalOpen(true)} 
       />
 
-      <main className="max-w-5xl mx-auto p-3 md:p-4 space-y-4 md:space-y-6">
-        <InfoBox />
+      {/* 2. New Hero Section */}
+<HeroSection />
+      <main className="max-w-5xl mx-auto p-3 md:p-4 space-y-4 md:space-y-6 -mt-6 relative z-10">
+      {/* ... ScreenSelector, DateSelector etc. starts here ... */} 
+       
+     {/* <InfoBox /> */}
 
         <ScreenSelector 
           selectedScreens={selectedScreens}
