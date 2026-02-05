@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, RefreshCw } from 'lucide-react';
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock } from 'lucide-react'; // 🔥 Added Lock icon
 
 const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid }) => {
   const [updatingSlot, setUpdatingSlot] = useState(null); // Track which slot is being updated
@@ -145,6 +145,11 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                 {groupedSlots[date].map((slot) => {
                                                                     const isOutbid = slot.slotStatus === 'outbid';
                                                                     const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
+                                                                    
+                                                                    // 🔥🔥🔥 1. 新增：過期檢查邏輯 🔥🔥🔥
+                                                                    const now = new Date();
+                                                                    const slotTime = new Date(`${slot.date}T${String(slot.hour).padStart(2,'0')}:00:00`);
+                                                                    const isExpired = now >= slotTime;
 
                                                                     return (
                                                                         <div key={slot.originalIndex} className={`flex items-center justify-between p-2 rounded border ${isOutbid ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
@@ -174,13 +179,21 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         <span className={`text-xs font-bold ${isOutbid ? 'text-red-500 line-through' : 'text-slate-600'}`}>
                                                                                             ${slot.bidPrice}
                                                                                         </span>
+                                                                                        
+                                                                                        {/* 🔥🔥🔥 2. 修改：按鈕邏輯 (過期變灰色) 🔥🔥🔥 */}
                                                                                         {isOutbid && (
-                                                                                            <button 
-                                                                                                onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }}
-                                                                                                className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold hover:bg-red-200 flex items-center gap-1"
-                                                                                            >
-                                                                                                <AlertTriangle size={10}/> 加價
-                                                                                            </button>
+                                                                                            isExpired ? (
+                                                                                                <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed">
+                                                                                                    <Lock size={10}/> 已截標
+                                                                                                </span>
+                                                                                            ) : (
+                                                                                                <button 
+                                                                                                    onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }}
+                                                                                                    className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold hover:bg-red-200 flex items-center gap-1 transition-colors"
+                                                                                                >
+                                                                                                    <AlertTriangle size={10}/> 加價
+                                                                                                </button>
+                                                                                            )
                                                                                         )}
                                                                                     </>
                                                                                 )}

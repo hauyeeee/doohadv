@@ -140,44 +140,136 @@ const AdminPanel = () => {
 
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // --- Handlers ---
+// 🔥🔥🔥 強制修復版：確保 Screen ID 類型統一，防止 $1000 輸 $200 🔥🔥🔥
   const handleAutoResolve = async () => {
       if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家 (同價者先到先得)。")) return;
       setLoading(true);
+
       try {
+          // 1. 獲取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
-          const allOrders = snapshot.docs.map(d => { const data = d.data(); let timeVal = data.createdAt?.toMillis ? data.createdAt.toMillis() : Date.now(); return { id: d.id, ...data, timeVal }; });
-          const slotWars = {};
-          allOrders.forEach(order => { if(order.detailedSlots) order.detailedSlots.forEach(slot => { const key = `${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`; const myPrice = parseInt(slot.bidPrice)||0; if(!slotWars[key] || myPrice > slotWars[key].maxPrice || (myPrice===slotWars[key].maxPrice && order.timeVal < slotWars[key].timeVal)) slotWars[key] = { maxPrice: myPrice, timeVal: order.timeVal, winnerOrderId: order.id }; })});
-          const batch = writeBatch(db); let updateCount = 0;
-          allOrders.forEach(order => {
-              if(!order.detailedSlots) return;
-              let win=0, lose=0, hasChange=false;
-              const newSlots = order.detailedSlots.map(slot => { const winner = slotWars[`${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`]; let status = 'normal'; if(winner) { if(winner.winnerOrderId !== order.id) { lose++; status='outbid'; } else { win++; status='winning'; } } if(slot.slotStatus !== status) hasChange=true; return {...slot, slotStatus: status}; });
-              let newStatus = order.status;
-              if(lose>0 && win===0) newStatus='outbid_needs_action'; else if(lose>0 && win>0) newStatus='partially_outbid'; else if(lose===0 && win>0 && newStatus!=='paid' && newStatus!=='completed') newStatus='paid_pending_selection';
-              if(hasChange || newStatus!==order.status) { batch.update(doc(db,"orders",order.id), {detailedSlots: newSlots, status: newStatus}); updateCount++; }
+          
+          const allOrders = snapshot.docs.map(d => {
+              const data = d.data();
+              let timeVal;
+              if (data.createdAt && typeof data.createdAt.toMillis === 'function') timeVal = data.createdAt.toMillis();
+              else if (data.createdAt instanceof Date) timeVal = data.createdAt.getTime();
+              else timeVal = Date.now(); 
+              return { id: d.id, ...data, timeVal };
           });
-          await batch.commit(); alert(`✅ 更新了 ${updateCount} 張單`);
-      } catch(e) { console.error(e); alert("❌ 錯誤"); } finally { setLoading(false); }
-  };
 
-  const handleFinalizeAuction = async () => {
-      if(!confirm("⚠️ 確定過期截標？")) return; setLoading(true);
-      try {
-          const q = query(collection(db, "orders"), where("status", "==", "outbid_needs_action"));
-          const snapshot = await getDocs(q); const batch = writeBatch(db); let count=0; const now=new Date();
-          for(const d of snapshot.docs) {
-              const o = d.data();
-              if(o.detailedSlots?.every(s => now > new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`))) {
-                  batch.update(doc(db,"orders",d.id), {status:'lost', finalizedAt: serverTimestamp()});
-                  await sendBidLostEmail({email:o.userEmail, displayName:o.userName}, {id:d.id});
-                  count++;
+          // 2. 建立「戰場 (Arena)」
+          const slotWars = {};
+
+          allOrders.forEach(order => {
+              if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return;
+              
+              order.detailedSlots.forEach(slot => {
+                  if (!slot.date || !slot.screenId) return;
+
+                  // 🔥 FIX: 強制轉型，確保 key 一致
+                  // "1" (string) 和 1 (number) 在 Object Key 會自動轉 string，但為了保險起見我們手動轉
+                  // hour 也要轉 int 避免 "14" vs 14
+                  const hourInt = parseInt(slot.hour);
+                  const screenIdStr = String(slot.screenId); 
+                  const key = `${slot.date}-${hourInt}-${screenIdStr}`;
+                  
+                  const myPrice = parseInt(slot.bidPrice) || 0;
+                  const myTime = order.timeVal;
+
+                  if (!slotWars[key]) {
+                      slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                  } else {
+                      const currentKing = slotWars[key];
+
+                      if (myPrice > currentKing.maxPrice) {
+                          // 價高者得
+                          slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      } 
+                      else if (myPrice === currentKing.maxPrice) {
+                          // 同價：先到先得
+                          if (myTime < currentKing.timeVal) {
+                              slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                          }
+                      }
+                  }
+              });
+          });
+
+          // Debug: 打印出來睇下邊個贏
+          console.log("👑 Slot Winners (Debug):", slotWars);
+
+          // 3. 更新每一張單
+          const batch = writeBatch(db);
+          let updateCount = 0;
+
+          allOrders.forEach(order => {
+              if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return;
+              
+              let winCount = 0;
+              let loseCount = 0;
+              let newDetailedSlots = [...order.detailedSlots];
+              let hasChange = false;
+
+              newDetailedSlots = newDetailedSlots.map(slot => {
+                  const hourInt = parseInt(slot.hour);
+                  const screenIdStr = String(slot.screenId); // 🔥 FIX: 這裡也要用 String 
+                  const key = `${slot.date}-${hourInt}-${screenIdStr}`;
+                  
+                  const winner = slotWars[key];
+                  
+                  let newSlotStatus = 'normal';
+
+                  if (winner) {
+                      if (winner.winnerOrderId !== order.id) {
+                          loseCount++;
+                          newSlotStatus = 'outbid';
+                      } else {
+                          winCount++;
+                          newSlotStatus = 'winning';
+                      }
+                  }
+                  
+                  if (slot.slotStatus !== newSlotStatus) {
+                      hasChange = true;
+                  }
+                  return { ...slot, slotStatus: newSlotStatus };
+              });
+
+              // 狀態判定
+              let newStatus = order.status;
+              if (loseCount > 0 && winCount === 0) {
+                  newStatus = 'outbid_needs_action';
+              } else if (loseCount > 0 && winCount > 0) {
+                  newStatus = 'partially_outbid';
+              } else if (loseCount === 0 && winCount > 0) {
+                  // 如果全贏，而且之前的狀態唔係 won/paid，就轉番做競價中
+                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
+                      newStatus = 'paid_pending_selection'; 
+                  }
               }
-          }
-          if(count>0) { await batch.commit(); alert(`🏁 ${count} 張過期單已截標`); } else alert("無過期單");
-      } catch(e) { console.error(e); } finally { setLoading(false); }
+
+              if (hasChange || newStatus !== order.status) {
+                  const orderRef = doc(db, "orders", order.id);
+                  batch.update(orderRef, {
+                      detailedSlots: newDetailedSlots,
+                      status: newStatus,
+                      lastUpdated: serverTimestamp()
+                  });
+                  updateCount++;
+              }
+          });
+
+          await batch.commit();
+          alert(`✅ Admin 結算完成！已更新 ${updateCount} 張訂單。`);
+
+      } catch (error) {
+          console.error("Auto Resolve Error:", error);
+          alert(`❌ 結算失敗: ${error.message}`);
+      } finally {
+          setLoading(false);
+      }
   };
 
   const handleReview = async (id, action) => { 
