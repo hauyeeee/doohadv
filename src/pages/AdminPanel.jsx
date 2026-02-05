@@ -1,22 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp
+import {
+  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where // 🔥 Added 'where'
 } from "firebase/firestore";
-import { 
-  BarChart3, TrendingUp, Users, DollarSign, 
-  Search, Video, Monitor, Save, Trash2, 
+import {
+  BarChart3, TrendingUp, Users, DollarSign,
+  Search, Video, Monitor, Save, Trash2,
   LayoutDashboard, List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckSquare, Filter, Play, CheckCircle, XCircle,
   Mail, MessageCircle, ChevronLeft, ChevronRight, UploadCloud, User, AlertCircle, Grid, Maximize, Loader2, Trophy,
-  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy, Gavel
+  Edit, MapPin, Image as ImageIcon, Layers, FileText, Map, Copy, Gavel, Flag // 🔥 Added Flag
 } from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
-import { sendBidConfirmation } from '../utils/emailService';
+import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService'; // 🔥 Added sendBidLostEmail
 
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
@@ -29,35 +29,35 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
   // --- Data States ---
   const [orders, setOrders] = useState([]);
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
-  
+
   // --- Pricing Config ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
-  const [activeConfig, setActiveConfig] = useState({}); 
-  const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
-  const [localBundleRules, setLocalBundleRules] = useState([]); 
+  const [activeConfig, setActiveConfig] = useState({});
+  const [selectedConfigTarget, setSelectedConfigTarget] = useState('global');
+  const [localBundleRules, setLocalBundleRules] = useState([]);
 
   // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [reviewNote, setReviewNote] = useState("");
-  
+
   // --- Advanced Filter States ---
-  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set()); 
-  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set()); 
+  const [selectedStatScreens, setSelectedStatScreens] = useState(new Set());
+  const [selectedAnalyticsHours, setSelectedAnalyticsHours] = useState(new Set());
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());       
   const [editingScreens, setEditingScreens] = useState({});
-  
+
   // --- Screen Management States ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
-  
+
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50,
     images: ['', '', ''], specifications: '', mapUrl: '',
@@ -67,9 +67,9 @@ const AdminPanel = () => {
   });
 
   // --- Calendar States ---
-  const [calendarDate, setCalendarDate] = useState(new Date()); 
-  const [calendarViewMode, setCalendarViewMode] = useState('month'); 
-  const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [calendarViewMode, setCalendarViewMode] = useState('month');
+  const [selectedSlotGroup, setSelectedSlotGroup] = useState(null);
 
   // --- Forms ---
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
@@ -148,7 +148,7 @@ const AdminPanel = () => {
   }, [orders]);
 
   useEffect(() => {
-      if (selectedConfigTarget === 'global') { setActiveConfig(globalPricingConfig); } 
+      if (selectedConfigTarget === 'global') { setActiveConfig(globalPricingConfig); }
       else { const screen = screens.find(s => String(s.id) === selectedConfigTarget); if (screen && screen.customPricing) { setActiveConfig(screen.customPricing); } else { setActiveConfig(globalPricingConfig); } }
   }, [selectedConfigTarget, globalPricingConfig, screens]);
 
@@ -164,82 +164,82 @@ const AdminPanel = () => {
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0);
-      
-      const days = {}; 
-      for(let d = 1; d <= endOfMonth.getDate(); d++) { 
-          const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; 
-          days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 }; 
+
+      const days = {};
+      for(let d = 1; d <= endOfMonth.getDate(); d++) {
+          const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 };
       }
-      
-      orders.forEach(order => { 
-          if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
-          
-          order.detailedSlots.forEach(slot => { 
-              if(days[slot.date]) { 
-                  days[slot.date].count++; 
-                  if(order.status === 'paid_pending_selection' || order.status === 'partially_outbid') days[slot.date].bidding++; 
-                  else if(order.creativeStatus === 'pending_review' || (order.hasVideo && !order.isApproved && !order.isRejected)) days[slot.date].pending++; 
-                  else if(order.isScheduled) days[slot.date].scheduled++; 
-              } 
-          }); 
+
+      orders.forEach(order => {
+          if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return;
+
+          order.detailedSlots.forEach(slot => {
+              if(days[slot.date]) {
+                  days[slot.date].count++;
+                  if(order.status === 'paid_pending_selection' || order.status === 'partially_outbid') days[slot.date].bidding++;
+                  else if(order.creativeStatus === 'pending_review' || (order.hasVideo && !order.isApproved && !order.isRejected)) days[slot.date].pending++;
+                  else if(order.isScheduled) days[slot.date].scheduled++;
+              }
+          });
       });
       return days;
   }, [orders, calendarDate]);
 
   const dayViewGrid = useMemo(() => {
-    const grid = {}; 
+    const grid = {};
     const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
-    
-    orders.forEach(order => { 
-        if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
-        
-        order.detailedSlots.forEach(slot => { 
-            if (slot.date !== targetDateStr) return; 
-            
-            const key = `${slot.hour}-${slot.screenId}`; 
-            let status = 'normal'; 
-            
-            if (order.status === 'paid_pending_selection') status = 'bidding'; 
-            else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed'; 
-            else if (order.isScheduled) status = 'scheduled'; 
-            else if (order.status === 'won' || order.status === 'paid' || order.status === 'partially_won') status = 'action_needed'; 
-            
-            const slotData = { 
-                ...slot, 
-                orderId: order.id, 
-                userEmail: order.userEmail, 
-                videoUrl: order.videoUrl, 
-                status: order.status, 
-                creativeStatus: order.creativeStatus, 
-                isScheduled: order.isScheduled, 
-                displayStatus: status, 
-                price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
-                priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
-            }; 
-            
-            if (!grid[key]) grid[key] = []; 
-            grid[key].push(slotData); 
-        }); 
+
+    orders.forEach(order => {
+        if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return;
+
+        order.detailedSlots.forEach(slot => {
+            if (slot.date !== targetDateStr) return;
+
+            const key = `${slot.hour}-${slot.screenId}`;
+            let status = 'normal';
+
+            if (order.status === 'paid_pending_selection') status = 'bidding';
+            else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed';
+            else if (order.isScheduled) status = 'scheduled';
+            else if (order.status === 'won' || order.status === 'paid' || order.status === 'partially_won') status = 'action_needed';
+
+            const slotData = {
+                ...slot,
+                orderId: order.id,
+                userEmail: order.userEmail,
+                videoUrl: order.videoUrl,
+                status: order.status,
+                creativeStatus: order.creativeStatus,
+                isScheduled: order.isScheduled,
+                displayStatus: status,
+                price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout',
+                priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999
+            };
+
+            if (!grid[key]) grid[key] = [];
+            grid[key].push(slotData);
+        });
     });
-    
+
     Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
     return grid;
   }, [orders, calendarDate]);
 
   const handleConfigChange = (k, v) => setActiveConfig(p => ({ ...p, [k]: parseFloat(v) }));
-  
-  const savePricingConfig = async () => { 
+
+  const savePricingConfig = async () => {
       const formattedRules = localBundleRules.map(r => ({ screens: r.screensStr.split(',').map(s => s.trim()).filter(s => s !== ""), multiplier: parseFloat(r.multiplier) }));
-      if (selectedConfigTarget === 'global') { 
-          await setDoc(doc(db, "system_config", "pricing_rules"), { ...activeConfig, bundleRules: formattedRules }); 
-          setGlobalPricingConfig(activeConfig); 
-          alert("🌍 全局價格公式及 Bundle 規則已更新"); 
-      } else { 
-          const screen = screens.find(s => String(s.id) === selectedConfigTarget); 
-          if (!screen) return; 
-          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig }); 
-          alert(`✅ Screen ${screen.name} 的專屬公式已更新`); 
-      } 
+      if (selectedConfigTarget === 'global') {
+          await setDoc(doc(db, "system_config", "pricing_rules"), { ...activeConfig, bundleRules: formattedRules });
+          setGlobalPricingConfig(activeConfig);
+          alert("🌍 全局價格公式及 Bundle 規則已更新");
+      } else {
+          const screen = screens.find(s => String(s.id) === selectedConfigTarget);
+          if (!screen) return;
+          await updateDoc(doc(db, "screens", screen.firestoreId), { customPricing: activeConfig });
+          alert(`✅ Screen ${screen.name} 的專屬公式已更新`);
+      }
   };
 
   const handleAddBundleRule = () => { setLocalBundleRules([...localBundleRules, { screensStr: "", multiplier: 1.2 }]); };
@@ -258,7 +258,7 @@ const AdminPanel = () => {
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
   const handleEditScreenFull = (screen) => {
-      let initializedRules = {}; 
+      let initializedRules = {};
       const existingRules = screen.tierRules || {};
       if (existingRules.default && !existingRules['0']) {
          for(let i=0; i<7; i++) initializedRules[i] = existingRules.default;
@@ -295,11 +295,11 @@ const AdminPanel = () => {
           // 1. 獲取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
-          
+
           // 轉換數據，並獲取時間戳 (用於同價比較)
           const allOrders = snapshot.docs.map(d => {
               const data = d.data();
-              
+
               // 🔥 FIX: 加強時間戳檢查，防止舊數據導致 Crash
               let timeVal;
               if (data.createdAt && typeof data.createdAt.toMillis === 'function') {
@@ -309,7 +309,7 @@ const AdminPanel = () => {
               } else {
                   // 如果完全沒有時間，就當作是「現在」(最遲)，避免報錯
                   // 或者你可以給它一個固定的舊時間，視乎你想點處理舊單
-                  timeVal = Date.now(); 
+                  timeVal = Date.now();
               }
 
               return { id: d.id, ...data, timeVal };
@@ -321,7 +321,7 @@ const AdminPanel = () => {
           // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
           allOrders.forEach(order => {
               if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return; // 🔥 防止沒有 detailedSlots 的舊單
-              
+
               order.detailedSlots.forEach(slot => {
                   if (!slot.date || !slot.screenId) return; // 🔥 防止資料不全
 
@@ -339,7 +339,7 @@ const AdminPanel = () => {
                       if (myPrice > currentKing.maxPrice) {
                           // 價高者得
                           slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                      } 
+                      }
                       else if (myPrice === currentKing.maxPrice) {
                           // 同價：先到先得 (時間越小越早)
                           if (myTime < currentKing.timeVal) {
@@ -358,7 +358,7 @@ const AdminPanel = () => {
 
           allOrders.forEach(order => {
               if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return;
-              
+
               let winCount = 0;
               let loseCount = 0;
               let newDetailedSlots = [...order.detailedSlots];
@@ -369,7 +369,7 @@ const AdminPanel = () => {
                   const hourInt = parseInt(slot.hour);
                   const key = `${slot.date}-${hourInt}-${slot.screenId}`;
                   const winner = slotWars[key];
-                  
+
                   let newSlotStatus = 'normal';
 
                   // 如果該時段有贏家 (通常都有，除非完全沒人爭)
@@ -383,7 +383,7 @@ const AdminPanel = () => {
                           newSlotStatus = 'winning';
                       }
                   }
-                  
+
                   if (slot.slotStatus !== newSlotStatus) {
                       hasChange = true;
                   }
@@ -399,7 +399,7 @@ const AdminPanel = () => {
               } else if (loseCount === 0 && winCount > 0) {
                   // 全贏
                   if (newStatus !== 'paid' && newStatus !== 'completed') {
-                      newStatus = 'paid_pending_selection'; 
+                      newStatus = 'paid_pending_selection';
                   }
               }
 
@@ -425,47 +425,110 @@ const AdminPanel = () => {
       }
   };
 
+  // 🔥🔥🔥 新增功能：智能截標 (Smart Finalize) - 只處理已過期的時段 🔥🔥🔥
+  const handleFinalizeAuction = async () => {
+    if (!confirm("⚠️ 確定要執行「過期截標」？\n\n系統會掃描所有「出價被超越」的訂單：\n1. 如果該時段【已過期】，將正式標記為 Lost 並發 Email。\n2. 如果該時段【未過期】，則保持不變，容許反價。")) return;
+
+    setLoading(true);
+    try {
+        // 1. 搵出所有「待操作 (Outbid)」的輸家
+        const q = query(collection(db, "orders"), where("status", "==", "outbid_needs_action"));
+        const snapshot = await getDocs(q);
+
+        const batch = writeBatch(db);
+        let count = 0;
+        const now = new Date();
+
+        // 2. 逐個檢查時間
+        for (const docSnap of snapshot.docs) {
+            const order = docSnap.data();
+
+            // 檢查這張單的第一個 Slot 時間 (假設一張單通常係同一個時間段，或者檢查最後一個)
+            // 這裡我們檢查 detailedSlots 裡面的時間
+            if (order.detailedSlots && order.detailedSlots.length > 0) {
+                // 找出這張單最遲的那個 Slot
+                // 邏輯：只要整張單所有 Slot 都過期了，這張單就判死刑
+                const allSlotsExpired = order.detailedSlots.every(slot => {
+                    const slotTime = new Date(`${slot.date} ${String(slot.hour).padStart(2, '0')}:00`);
+                    return now > slotTime;
+                });
+
+                if (allSlotsExpired) {
+                    console.log(`💀 訂單 ${docSnap.id} 已過期，執行 Lost 處決。`);
+
+                    // 更新狀態做 'lost'
+                    const orderRef = doc(db, "orders", docSnap.id);
+                    batch.update(orderRef, {
+                        status: 'lost',
+                        finalizedAt: serverTimestamp()
+                    });
+
+                    // 發送 Email (Bid Lost)
+                    const userInfo = { email: order.userEmail, displayName: order.userName };
+                    await sendBidLostEmail(userInfo, { id: docSnap.id });
+
+                    count++;
+                }
+            }
+        }
+
+        // 3. 執行 Database 更新
+        if (count > 0) {
+            await batch.commit();
+            alert(`🏁 截標完成！\n共 ${count} 張【已過期】訂單已轉為 Lost 並發送通知。`);
+        } else {
+            alert("沒有發現【已過期】的輸家訂單。\n未過期的訂單將保留狀態，容許客戶反價。");
+        }
+
+    } catch (error) {
+        console.error("Finalize Error:", error);
+        alert("截標失敗，請檢查 Console Log");
+    } finally {
+        setLoading(false);
+    }
+  };
+
   const handleAddScreen = () => {
       let initializedRules = {}; for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
       setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: initializedRules });
       setEditingScreenId(null); setIsAddScreenModalOpen(true); setActiveDayTab(1);
   };
   const handleImageChange = (index, value) => { const newImages = [...newScreenData.images]; newImages[index] = value; setNewScreenData({ ...newScreenData, images: newImages }); };
-  
-  const saveScreenFull = async () => { 
-    try { 
-        const cleanedImages = newScreenData.images.filter(url => url.trim() !== ''); 
-        const payload = { 
-            name: newScreenData.name, 
-            location: newScreenData.location, 
-            district: newScreenData.district, 
-            basePrice: parseFloat(newScreenData.basePrice), 
-            images: cleanedImages, 
-            imageUrl: cleanedImages[0] || '', 
-            specifications: newScreenData.specifications, 
-            mapUrl: newScreenData.mapUrl, 
-            bundleGroup: newScreenData.bundleGroup, 
-            footfall: newScreenData.footfall, 
-            audience: newScreenData.audience, 
-            operatingHours: newScreenData.operatingHours, 
+
+  const saveScreenFull = async () => {
+    try {
+        const cleanedImages = newScreenData.images.filter(url => url.trim() !== '');
+        const payload = {
+            name: newScreenData.name,
+            location: newScreenData.location,
+            district: newScreenData.district,
+            basePrice: parseFloat(newScreenData.basePrice),
+            images: cleanedImages,
+            imageUrl: cleanedImages[0] || '',
+            specifications: newScreenData.specifications,
+            mapUrl: newScreenData.mapUrl,
+            bundleGroup: newScreenData.bundleGroup,
+            footfall: newScreenData.footfall,
+            audience: newScreenData.audience,
+            operatingHours: newScreenData.operatingHours,
             resolution: newScreenData.resolution,
-            tierRules: newScreenData.tierRules, 
-            isActive: true, 
-            lastUpdated: new Date() 
+            tierRules: newScreenData.tierRules,
+            isActive: true,
+            lastUpdated: new Date()
         };
-        
-        if (editingScreenId) { 
-            await updateDoc(doc(db, "screens", editingScreenId), payload); 
-            alert("✅ 屏幕資料已更新"); 
-        } else { 
-            const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0); 
-            payload.id = String(maxId + 1); 
-            payload.createdAt = new Date(); 
-            await addDoc(collection(db, "screens"), payload); 
-            alert("✅ 新屏幕已建立"); 
-        } 
-        setIsAddScreenModalOpen(false); 
-    } catch (e) { console.error(e); alert("❌ 儲存失敗"); } 
+
+        if (editingScreenId) {
+            await updateDoc(doc(db, "screens", editingScreenId), payload);
+            alert("✅ 屏幕資料已更新");
+        } else {
+            const maxId = screens.reduce((max, s) => Math.max(max, Number(s.id) || 0), 0);
+            payload.id = String(maxId + 1);
+            payload.createdAt = new Date();
+            await addDoc(collection(db, "screens"), payload);
+            alert("✅ 新屏幕已建立");
+        }
+        setIsAddScreenModalOpen(false);
+    } catch (e) { console.error(e); alert("❌ 儲存失敗"); }
   };
 
   const toggleTierHour = (type, hour) => { setNewScreenData(prev => { const currentRules = { ...prev.tierRules }; const dayKey = String(activeDayTab); if (!currentRules[dayKey]) currentRules[dayKey] = { prime: [], gold: [] }; let list = currentRules[dayKey][type] || []; if (list.includes(hour)) { list = list.filter(h => h !== hour); } else { const otherType = type === 'prime' ? 'gold' : 'prime'; currentRules[dayKey][otherType] = (currentRules[dayKey][otherType] || []).filter(h => h !== hour); list.push(hour); } currentRules[dayKey][type] = list.sort((a,b) => a-b); return { ...prev, tierRules: currentRules }; }); };
@@ -483,11 +546,18 @@ const AdminPanel = () => {
             <div className="flex gap-2">
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">返回首頁</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
-                <button 
-                    onClick={handleAutoResolve} 
+                <button
+                    onClick={handleAutoResolve}
                     className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"
                 >
                     <Gavel size={16}/> 智能結算 (按Slot比價)
+                </button>
+                {/* 🔥 新增：正式截標按鈕 */}
+                <button
+                    onClick={handleFinalizeAuction}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"
+                >
+                    <Flag size={16}/> 正式截標 (只殺過期)
                 </button>
             </div>
         </div>
@@ -567,7 +637,7 @@ const AdminPanel = () => {
                             <div key={h} className="flex h-12 border-b border-slate-100 hover:bg-slate-50/50">
                                 <div className="w-12 shrink-0 border-r border-slate-200 flex items-center justify-center text-[10px] font-mono text-slate-400 bg-slate-50 sticky left-0 z-10">{String(h).padStart(2,'0')}:00</div>
                                 {screens.map(s => {
-                                    const key = `${h}-${s.id}`; const slotGroup = dayViewGrid[key]; const bidCount = slotGroup?.length || 0; const topSlot = slotGroup ? slotGroup[0] : null; 
+                                    const key = `${h}-${s.id}`; const slotGroup = dayViewGrid[key]; const bidCount = slotGroup?.length || 0; const topSlot = slotGroup ? slotGroup[0] : null;
                                     let colorClass = 'bg-white'; if(topSlot) { if(topSlot.displayStatus==='scheduled') colorClass='bg-emerald-100 text-emerald-700 border-emerald-200'; else if(topSlot.displayStatus==='action_needed') colorClass='bg-blue-100 text-blue-700 border-blue-200'; else if(topSlot.displayStatus==='review_needed') colorClass='bg-red-100 text-red-700 border-red-200 font-bold'; else if(topSlot.displayStatus==='bidding') colorClass='bg-yellow-50 text-yellow-600 border-yellow-200'; }
                                     return (
                                         <div key={key} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${colorClass}`} onClick={()=>slotGroup && setSelectedSlotGroup(slotGroup)}>
@@ -628,7 +698,7 @@ const AdminPanel = () => {
         {/* --- REVIEW --- */}
         {activeTab === 'review' && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in">
-                {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> : 
+                {filteredOrders.length === 0 ? <div className="col-span-full text-center p-10 text-slate-400">✅ 暫無待審核影片</div> :
                 filteredOrders.map(order => (
                     <div key={order.id} className="bg-white rounded-xl shadow-md border border-orange-200 overflow-hidden flex flex-col">
                         <div className="bg-orange-50 p-3 border-b border-orange-100 flex justify-between items-center"><span className="text-xs font-bold text-orange-700 flex items-center gap-1"><Video size={14}/> 待審核</span><span className="text-[10px] text-slate-500">{order.createdAtDate ? order.createdAtDate.toLocaleDateString() : 'N/A'}</span></div>
@@ -736,7 +806,7 @@ const AdminPanel = () => {
         {activeTab === 'config' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl mx-auto animate-in fade-in">
                 <div className="flex justify-between items-center mb-6 border-b pb-4"><div><h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20}/> 價格公式設定</h3><p className="text-xs text-slate-500 mt-1">您可以設定全局預設值，或針對個別屏幕設定不同的倍率。</p></div><div className="flex items-center gap-2"><span className="text-sm font-bold text-slate-600">編輯對象:</span><select value={selectedConfigTarget} onChange={e => setSelectedConfigTarget(e.target.value)} className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-1.5 text-sm font-bold text-blue-800 outline-none focus:border-blue-500"><option value="global">🌍 Global System Default (全局)</option><option disabled>──────────</option>{screens.map(s => <option key={s.id} value={String(s.id)}>🖥️ {s.name}</option>)}</select></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><ConfigSection title="時段倍率 (Time Multipliers)"><ConfigInput label="Prime Hour (18:00-23:00)" val={activeConfig.primeMultiplier} onChange={v=>handleConfigChange('primeMultiplier',v)} desc="預設 3.5x"/><ConfigInput label="Gold Hour (12:00-14:00)" val={activeConfig.goldMultiplier} onChange={v=>handleConfigChange('goldMultiplier',v)} desc="預設 1.8x"/><ConfigInput label="週末倍率 (Fri/Sat)" val={activeConfig.weekendMultiplier} onChange={v=>handleConfigChange('weekendMultiplier',v)} desc="預設 1.5x"/></ConfigSection><ConfigSection title="附加費率 (Surcharges)"><ConfigInput label="聯播網 (Bundle)" val={activeConfig.bundleMultiplier} onChange={v=>handleConfigChange('bundleMultiplier',v)} desc="預設 1.25x"/><ConfigInput label="急單 (24h內)" val={activeConfig.urgentFee24h} onChange={v=>handleConfigChange('urgentFee24h',v)} desc="預設 1.5x (+50%)"/><ConfigInput label="極速 (1h內)" val={activeConfig.urgentFee1h} onChange={v=>handleConfigChange('urgentFee1h',v)} desc="預設 2.0x (+100%)"/></ConfigSection></div>
-                
+
                 {/* Bundle Rules UI */}
                 <div className="border-t pt-6 mt-6">
                     <h3 className="font-bold text-lg flex items-center gap-2 mb-4"><Layers size={20}/> 聯播網組合規則 (Bundle Rules)</h3>

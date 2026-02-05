@@ -607,6 +607,18 @@ export const useDoohSystem = () => {
       const orderData = orderSnap.data();
       const oldSlots = [...orderData.detailedSlots];
       const targetSlot = oldSlots[slotIndex];
+
+      // --- 🕒 新增：時間檢查 (Time Check) ---
+      // 組合出該 Slot 的準確時間 (YYYY-MM-DD + Hour)
+      const slotDateTimeStr = `${targetSlot.date} ${String(targetSlot.hour).padStart(2, '0')}:00`;
+      const slotDateObj = new Date(slotDateTimeStr);
+      const now = new Date();
+
+      // 如果現在時間已經遲過 Slot 時間，就禁止改價
+      if (now >= slotDateObj) {
+          return alert(`❌ 截標失敗：\n該時段 (${slotDateTimeStr}) 已經過期，不能再出價！`);
+      }
+      // -------------------------------------
       
       if (newPrice <= parseInt(targetSlot.bidPrice)) {
           return alert("新出價必須高於舊出價！");
