@@ -4,17 +4,18 @@ import { translations } from '../utils/translations';
 const LanguageContext = createContext();
 
 export const LanguageProvider = ({ children }) => {
-  // 預設中文 'zh'
-  const [lang, setLang] = useState('zh');
+  const [lang, setLang] = useState('zh'); // 預設中文
 
-  // 切換語言功能
   const toggleLanguage = () => {
     setLang((prev) => (prev === 'zh' ? 'en' : 'zh'));
   };
 
-  // 翻譯函數: t('hero_title_1') -> 會自動出中文或英文
   const t = (key) => {
-    return translations[lang][key] || key; // 如果搵唔到，就出番 key 原名
+    // 安全檢查：防止找不到 key 時報錯
+    if (translations[lang] && translations[lang][key]) {
+      return translations[lang][key];
+    }
+    return key; // 如果找不到，回傳 key 原名
   };
 
   return (
@@ -24,5 +25,4 @@ export const LanguageProvider = ({ children }) => {
   );
 };
 
-// 自訂 Hook，方便在其他頁面用
 export const useLanguage = () => useContext(LanguageContext);
