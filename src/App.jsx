@@ -210,16 +210,7 @@ const DOOHBiddingSystem = () => {
         </div>
       )}
 
-      {/* Debug Button */}
-      <div className="fixed bottom-4 right-4 z-[9999]">
-          <button 
-              onClick={recalculateAllBids} 
-              className="bg-purple-600 text-white px-4 py-2 rounded-full shadow-lg font-bold text-xs hover:bg-purple-700 transition-all flex items-center gap-2"
-          >
-              <Loader2 size={12} className={transactionStep === 'processing' ? 'animate-spin' : ''}/>
-              🔄 強制全局比價
-          </button>
-      </div>
+
     </div>
   );
 };
