@@ -1,8 +1,8 @@
 import emailjs from '@emailjs/browser';
 
 // 請確保這些環境變數已在 .env 文件中設定，或直接在此處替換字串
-const SERVICE_ID = "service_xxxxxxxx"; // 你的 EmailJS Service ID
-const PUBLIC_KEY = "xxxxxxxxxxxxxx";   // 你的 EmailJS Public Key
+const SERVICE_ID = "service_euz8rzz"; // 你的 EmailJS Service ID
+const PUBLIC_KEY = "zTr4nyY_nusfPcNZU";   // 你的 EmailJS Public Key
 
 // 初始化 EmailJS
 export const initEmailService = () => {
