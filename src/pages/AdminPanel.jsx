@@ -286,36 +286,57 @@ const AdminPanel = () => {
       setActiveDayTab(1);
   };
 
-  // 🔥🔥🔥 自動結算競價 (Smart Auction Resolve) 🔥🔥🔥
+  // 🔥🔥🔥 自動結算競價 (Smart Auction Resolve) - 升級版：支援同價先到先得 🔥🔥🔥
   const handleAutoResolve = async () => {
-      if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家。")) return;
+      if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家 (同價者先到先得)。")) return;
       setLoading(true);
 
       try {
-          const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
+          // 1. 獲取所有相關訂單
+          const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
-          const allOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // 轉換數據，並獲取時間戳 (用於同價比較)
+          const allOrders = snapshot.docs.map(d => {
+              const data = d.data();
+              // 將 Firestore Timestamp 轉為毫秒數
+              const timeVal = data.createdAt?.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt).getTime();
+              return { id: d.id, ...data, timeVal: timeVal || Date.now() };
+          });
 
+          // 2. 建立「戰場 (Arena)」
           const slotWars = {};
 
+          // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
           allOrders.forEach(order => {
               if(!order.detailedSlots) return;
               order.detailedSlots.forEach(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const myPrice = parseInt(slot.bidPrice);
+                  const myTime = order.timeVal;
 
                   if (!slotWars[key]) {
-                      slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   } else {
-                      if (myPrice > slotWars[key].maxPrice) {
-                          slotWars[key] = { maxPrice: myPrice, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      const currentKing = slotWars[key];
+
+                      if (myPrice > currentKing.maxPrice) {
+                          // 價高者得
+                          slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                      } 
+                      else if (myPrice === currentKing.maxPrice) {
+                          // 同價：先到先得 (時間越小越早)
+                          if (myTime < currentKing.timeVal) {
+                              slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
+                          }
                       }
                   }
               });
           });
 
-          console.log("👑 Slot Winners:", slotWars);
+          console.log("👑 Slot Winners (Admin):", slotWars);
 
+          // 3. 第二輪 Loop：根據結果更新每張訂單
           const batch = writeBatch(db);
           let updateCount = 0;
 
@@ -327,33 +348,39 @@ const AdminPanel = () => {
               let newDetailedSlots = [...order.detailedSlots];
               let hasChange = false;
 
+              // 檢查這張單的每一個 Slot 係贏定輸
               newDetailedSlots = newDetailedSlots.map(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   const winner = slotWars[key];
+                  
+                  let newSlotStatus = 'normal';
 
+                  // 如果贏家 ID 不是我，即係我輸左
                   if (winner && winner.winnerOrderId !== order.id) {
                       loseCount++;
-                      if (slot.slotStatus !== 'outbid') {
-                          hasChange = true;
-                          return { ...slot, slotStatus: 'outbid' }; 
-                      }
+                      newSlotStatus = 'outbid';
                   } else {
                       winCount++;
-                      if (slot.slotStatus !== 'winning') {
-                          hasChange = true;
-                          return { ...slot, slotStatus: 'winning' };
-                      }
+                      newSlotStatus = 'winning';
                   }
-                  return slot;
+                  
+                  if (slot.slotStatus !== newSlotStatus) {
+                      hasChange = true;
+                  }
+                  return { ...slot, slotStatus: newSlotStatus };
               });
 
+              // 決定整張單的命運
               let newStatus = order.status;
               if (loseCount > 0 && winCount === 0) {
-                  newStatus = 'outbid_needs_action'; 
+                  newStatus = 'outbid_needs_action'; // 全輸
               } else if (loseCount > 0 && winCount > 0) {
-                  newStatus = 'partially_outbid'; 
+                  newStatus = 'partially_outbid'; // 輸一半
               } else if (loseCount === 0 && winCount > 0) {
-                  newStatus = 'paid_pending_selection'; 
+                  // 全贏保持狀態，或者你可以改為 'won'
+                  if (newStatus !== 'paid' && newStatus !== 'completed') {
+                      newStatus = 'paid_pending_selection'; 
+                  }
               }
 
               if (hasChange || newStatus !== order.status) {
@@ -368,7 +395,7 @@ const AdminPanel = () => {
           });
 
           await batch.commit();
-          alert(`✅ 結算完成！已更新 ${updateCount} 張訂單的狀態。`);
+          alert(`✅ Admin 結算完成！已更新 ${updateCount} 張訂單 (同價者先到先得)。`);
 
       } catch (error) {
           console.error("Auto Resolve Error:", error);
@@ -377,7 +404,7 @@ const AdminPanel = () => {
           setLoading(false);
       }
   };
-
+  
   const handleAddScreen = () => {
       let initializedRules = {}; for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
       setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: initializedRules });
