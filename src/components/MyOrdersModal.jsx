@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock } from 'lucide-react'; // 🔥 Added Lock icon
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, RefreshCw, Lock } from 'lucide-react'; // Added Lock
 
 const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid }) => {
   const [updatingSlot, setUpdatingSlot] = useState(null); // Track which slot is being updated
@@ -72,7 +72,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             // 搵出最早個個 Slot 用黎計公佈時間
                             if (order.detailedSlots.length > 0) {
                                 const first = order.detailedSlots[0];
-                                firstSlotDate = new Date(`${first.date}T${String(first.hour).padStart(2,'0')}:00:00`);
+                                // 安全的日期轉換
+                                const d = new Date(first.date); 
+                                d.setHours(parseInt(first.hour), 0, 0, 0);
+                                firstSlotDate = d;
                             }
                         }
                         
@@ -146,9 +149,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                     const isOutbid = slot.slotStatus === 'outbid';
                                                                     const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                     
-                                                                    // 🔥🔥🔥 1. 新增：過期檢查邏輯 🔥🔥🔥
+                                                                    // 🔥🔥🔥 1. 新增：安全的過期檢查邏輯 🔥🔥🔥
                                                                     const now = new Date();
-                                                                    const slotTime = new Date(`${slot.date}T${String(slot.hour).padStart(2,'0')}:00:00`);
+                                                                    const slotTime = new Date(slot.date); // 先轉 Date 對象 (預設 00:00)
+                                                                    slotTime.setHours(parseInt(slot.hour), 0, 0, 0); // 再設定小時
                                                                     const isExpired = now >= slotTime;
 
                                                                     return (
@@ -183,13 +187,13 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         {/* 🔥🔥🔥 2. 修改：按鈕邏輯 (過期變灰色) 🔥🔥🔥 */}
                                                                                         {isOutbid && (
                                                                                             isExpired ? (
-                                                                                                <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed">
+                                                                                                <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200">
                                                                                                     <Lock size={10}/> 已截標
                                                                                                 </span>
                                                                                             ) : (
                                                                                                 <button 
                                                                                                     onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }}
-                                                                                                    className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold hover:bg-red-200 flex items-center gap-1 transition-colors"
+                                                                                                    className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold hover:bg-red-200 flex items-center gap-1 transition-colors border border-red-200"
                                                                                                 >
                                                                                                     <AlertTriangle size={10}/> 加價
                                                                                                 </button>

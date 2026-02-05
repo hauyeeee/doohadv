@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
+  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
 import { 
   LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag 
@@ -10,7 +10,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 
-// 🔥 引入拆分後的組件
+// 引入拆分後的 UI 組件
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
@@ -97,7 +97,6 @@ const AdminPanel = () => {
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // --- Logic Helpers ---
   const customerHistory = useMemo(() => { const h = {}; orders.forEach(o => { if(!h[o.userEmail]) h[o.userEmail]=0; h[o.userEmail]++; }); return h; }, [orders]);
   
   const stats = useMemo(() => {
@@ -140,13 +139,14 @@ const AdminPanel = () => {
 
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
-// 🔥🔥🔥 強制修復版：確保 Screen ID 類型統一，防止 $1000 輸 $200 🔥🔥🔥
+  // --- Handlers ---
+  
+  // 🔥🔥🔥 強制修復版：確保 Screen ID 類型統一，防止 $1000 輸 $200 🔥🔥🔥
   const handleAutoResolve = async () => {
       if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家 (同價者先到先得)。")) return;
       setLoading(true);
 
       try {
-          // 1. 獲取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
           
@@ -169,8 +169,6 @@ const AdminPanel = () => {
                   if (!slot.date || !slot.screenId) return;
 
                   // 🔥 FIX: 強制轉型，確保 key 一致
-                  // "1" (string) 和 1 (number) 在 Object Key 會自動轉 string，但為了保險起見我們手動轉
-                  // hour 也要轉 int 避免 "14" vs 14
                   const hourInt = parseInt(slot.hour);
                   const screenIdStr = String(slot.screenId); 
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
@@ -244,7 +242,6 @@ const AdminPanel = () => {
               } else if (loseCount > 0 && winCount > 0) {
                   newStatus = 'partially_outbid';
               } else if (loseCount === 0 && winCount > 0) {
-                  // 如果全贏，而且之前的狀態唔係 won/paid，就轉番做競價中
                   if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
                       newStatus = 'paid_pending_selection'; 
                   }
@@ -270,6 +267,37 @@ const AdminPanel = () => {
       } finally {
           setLoading(false);
       }
+  };
+
+  // 🔥🔥🔥 必須包含這個函數，之前就是因為缺少它才報錯 🔥🔥🔥
+  const handleFinalizeAuction = async () => {
+      if(!confirm("⚠️ 確定過期截標？\n系統只會處理【已過期】的時段，未過期的會保留。")) return; 
+      setLoading(true);
+      try {
+          const q = query(collection(db, "orders"), where("status", "==", "outbid_needs_action"));
+          const snapshot = await getDocs(q); 
+          const batch = writeBatch(db); 
+          let count=0; 
+          const now=new Date();
+          
+          for(const d of snapshot.docs) {
+              const o = d.data();
+              if(o.detailedSlots && o.detailedSlots.length > 0) {
+                  const allSlotsExpired = o.detailedSlots.every(s => {
+                      const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`);
+                      return now > slotTime;
+                  });
+
+                  if (allSlotsExpired) {
+                      batch.update(doc(db,"orders",d.id), {status:'lost', finalizedAt: serverTimestamp()});
+                      await sendBidLostEmail({email:o.userEmail, displayName:o.userName}, {id:d.id});
+                      count++;
+                  }
+              }
+          }
+          if(count>0) { await batch.commit(); alert(`🏁 ${count} 張過期單已截標`); } 
+          else alert("沒有發現【已過期】的輸家訂單。");
+      } catch(e) { console.error(e); alert("截標失敗"); } finally { setLoading(false); }
   };
 
   const handleReview = async (id, action) => { 
@@ -325,7 +353,7 @@ const AdminPanel = () => {
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">前台</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
                 <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> 智能結算</button>
-                <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> 截標</button>
+                <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> 正式截標</button>
             </div>
         </div>
 
