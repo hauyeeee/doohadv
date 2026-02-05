@@ -1,11 +1,11 @@
-import React, { useState } from 'react'; // 🔥 Add useState for local override if needed
+import React, { useState, useEffect } from 'react'; 
 import { Loader2, UploadCloud } from 'lucide-react';
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // Components
 import Header from './components/Header';
-import HeroSection from './components/HeroSection'; // 這是新的 Component
-import InfoBox from './components/InfoBox';
+// import InfoBox from './components/InfoBox'; // ❌ 移除這個
+import TutorialModal from './components/TutorialModal'; // ✅ 加入這個
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
@@ -21,7 +21,6 @@ import UrgentUploadModal from './components/UrgentUploadModal';
 
 const DOOHBiddingSystem = () => {
   const {
-    // State
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
     isScreensLoading, filteredScreens,
     currentDate, previewDate, mode, selectedWeekdays, weekCount, selectedSpecificDates,
@@ -29,65 +28,54 @@ const DOOHBiddingSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    
-    // Setters
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted,
-    setCurrentOrderId, // 🔥 Ensure this is exported from hook
-    
-    // Handlers
+    setCurrentOrderId, 
     handleGoogleLogin, handleLogout,
     toggleScreen, toggleHour, toggleWeekday, toggleDate,
     handleBatchBid, handleSlotBidChange,
     handleBidClick, handleBuyoutClick,
     initiateTransaction, processPayment, handleRealUpload, closeTransaction,
     viewingScreen,
-    handleUpdateBid, // 🔥🔥🔥 1. Imported from Hook
-    
-    // UI Helpers & Constants
+    handleUpdateBid,
+    recalculateAllBids, // 🔥 Admin Tool
     HOURS, getHourTier,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
-    
-    // Modal Specific
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     occupiedSlots
   } = useDoohSystem();
 
+  // 🔥 [新狀態] 控制教學 Modal
+  const [isTutorialOpen, setIsTutorialOpen] = useState(true); // 預設為 true，一入黎就彈
+
   // 🔥 關鍵修正：處理「立即上傳」點擊
   const handleUploadClick = (orderId) => {
-    // 1. 設定 Hook 狀態
     if (setCurrentOrderId) setCurrentOrderId(orderId);
-    
-    // 2. 設定 LocalStorage 作為備份 (Hook reload 時用)
     localStorage.setItem('temp_order_id', orderId);
-    
-    // 3. 觸發隱藏的 File Input
     const fileInput = document.getElementById('hidden-file-input');
     if (fileInput) {
-        fileInput.value = ''; // Reset
+        fileInput.value = ''; 
         fileInput.click();
-    } else {
-        console.error("File input not found!");
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-8">
-      {/* 1. New Header with Ticker */}
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-0">
+      
+      {/* Header 包含了「玩法說明」按鈕 */}
       <Header 
         user={user} 
         onLoginClick={() => setIsLoginModalOpen(true)} 
         onProfileClick={() => setIsProfileModalOpen(true)} 
+        onHelpClick={() => setIsTutorialOpen(true)} // 按下 header 幫助按鈕時打開
       />
 
-      {/* 2. New Hero Section */}
-<HeroSection />
-      <main className="max-w-5xl mx-auto p-3 md:p-4 space-y-4 md:space-y-6 -mt-6 relative z-10">
-      {/* ... ScreenSelector, DateSelector etc. starts here ... */} 
-       
-     {/* <InfoBox /> */}
-
+      <main className="max-w-5xl mx-auto p-3 md:p-6 space-y-4 md:space-y-8 mt-4">
+        
+        {/* ❌ 移除了 InfoBox，因為現在用 Modal */}
+        
+        {/* 直接顯示 Screen Selector，因為這就是主菜 */}
         <ScreenSelector 
           selectedScreens={selectedScreens}
           screenSearchTerm={screenSearchTerm}
@@ -136,7 +124,7 @@ const DOOHBiddingSystem = () => {
         />
       </main>
 
-      {/* 🔥 隱藏的 File Input (必須存在於 DOM) */}
+      {/* 🔥 隱藏的 File Input */}
       <input 
         type="file" 
         id="hidden-file-input" 
@@ -146,6 +134,13 @@ const DOOHBiddingSystem = () => {
       />
 
       {/* --- Modals Section --- */}
+      
+      {/* 🔥 新增：教學 Modal */}
+      <TutorialModal 
+        isOpen={isTutorialOpen} 
+        onClose={() => setIsTutorialOpen(false)} 
+      />
+
       <LoginModal 
         isOpen={isLoginModalOpen} 
         onClose={() => setIsLoginModalOpen(false)} 
@@ -156,19 +151,15 @@ const DOOHBiddingSystem = () => {
         screen={viewingScreen} 
         onClose={() => setViewingScreen(null)} 
       />
-      
-      {/* 🔥 修復後的 MyOrdersModal */}
       <MyOrdersModal 
         isOpen={isProfileModalOpen} 
         user={user} 
         myOrders={myOrders} 
         onClose={() => setIsProfileModalOpen(false)} 
         onLogout={handleLogout} 
-        // 這裡傳入我們新定義的 handleUploadClick
         onUploadClick={handleUploadClick} 
-        handleUpdateBid={handleUpdateBid} // 🔥🔥🔥 2. Passed to Modal
+        handleUpdateBid={handleUpdateBid} 
       />
-
       <BuyoutModal 
         isOpen={isBuyoutModalOpen} 
         onClose={() => setIsBuyoutModalOpen(false)} 
@@ -218,6 +209,17 @@ const DOOHBiddingSystem = () => {
           </div>
         </div>
       )}
+
+      {/* Debug Button */}
+      <div className="fixed bottom-4 right-4 z-[9999]">
+          <button 
+              onClick={recalculateAllBids} 
+              className="bg-purple-600 text-white px-4 py-2 rounded-full shadow-lg font-bold text-xs hover:bg-purple-700 transition-all flex items-center gap-2"
+          >
+              <Loader2 size={12} className={transactionStep === 'processing' ? 'animate-spin' : ''}/>
+              🔄 強制全局比價
+          </button>
+      </div>
     </div>
   );
 };
