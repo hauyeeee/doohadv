@@ -47,7 +47,7 @@ const DOOHBiddingSystem = () => {
   } = useDoohSystem();
 
   // 🔥 [新狀態] 控制教學 Modal
-  const [isTutorialOpen, setIsTutorialOpen] = useState(true); // 預設為 true，一入黎就彈
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false); // 預設為 true，一入黎就彈
 
   // 🔥 關鍵修正：處理「立即上傳」點擊
   const handleUploadClick = (orderId) => {

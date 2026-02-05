@@ -231,7 +231,7 @@ export const useDoohSystem = () => {
               const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
                   const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
                   if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
-                      lostSlotsInfo.push(`${slot.date} ${slot.hour}:00`);
+                      lostSlotsInfo.push(`${slot.date} ${String(slot.hour).padStart(2,'0')}:00 @ ${slot.screenName || 'Unknown Screen'}`);
                       return { ...slot, slotStatus: 'outbid' }; 
                   }
                   return slot; 
@@ -302,7 +302,7 @@ export const useDoohSystem = () => {
 
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ User ${oldOrder.userEmail} ($${oldPrice}) outbid by $${newPrice}`);
-                      outbidInfo.push(`${oldSlot.date} ${oldSlot.hour}:00 (現價 $${newPrice})`);
+                      outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName} (現價 $${newPrice})`);
                       hasChange = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
@@ -564,7 +564,23 @@ export const useDoohSystem = () => {
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
-    let slotSummary = mode === 'specific' ? `日期: [${Array.from(selectedSpecificDates).join(', ')}]` : `週期: 逢星期[${Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',')}] x ${weekCount}週`;
+   
+    // --- 🛠️ FIX START: 更詳細的摘要 (包含 Screen & Time) ---
+    const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
+    const screenNamesStr = Array.from(selectedScreens).map(id => {
+        const s = screens.find(sc => sc.id === id);
+        return s ? s.name : `Screen ${id}`;
+    }).join(', ');
+
+    let slotSummary = "";
+    if (mode === 'specific') {
+        const datesStr = Array.from(selectedSpecificDates).join(', ');
+        slotSummary = `日期: [${datesStr}] | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`;
+    } else {
+        const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(',');
+        slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`;
+    }
+    // --- 🛠️ FIX END ---
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
     setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
     try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }

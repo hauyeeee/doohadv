@@ -286,7 +286,7 @@ const AdminPanel = () => {
       setActiveDayTab(1);
   };
 
-  // 🔥🔥🔥 自動結算競價 (Smart Auction Resolve) - 升級版：支援同價先到先得 🔥🔥🔥
+ // 🔥🔥🔥 自動結算競價 (防彈版) - 修復 createdAt 導致的崩潰 🔥🔥🔥
   const handleAutoResolve = async () => {
       if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家 (同價者先到先得)。")) return;
       setLoading(true);
@@ -299,9 +299,20 @@ const AdminPanel = () => {
           // 轉換數據，並獲取時間戳 (用於同價比較)
           const allOrders = snapshot.docs.map(d => {
               const data = d.data();
-              // 將 Firestore Timestamp 轉為毫秒數
-              const timeVal = data.createdAt?.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt).getTime();
-              return { id: d.id, ...data, timeVal: timeVal || Date.now() };
+              
+              // 🔥 FIX: 加強時間戳檢查，防止舊數據導致 Crash
+              let timeVal;
+              if (data.createdAt && typeof data.createdAt.toMillis === 'function') {
+                  timeVal = data.createdAt.toMillis();
+              } else if (data.createdAt instanceof Date) {
+                  timeVal = data.createdAt.getTime();
+              } else {
+                  // 如果完全沒有時間，就當作是「現在」(最遲)，避免報錯
+                  // 或者你可以給它一個固定的舊時間，視乎你想點處理舊單
+                  timeVal = Date.now(); 
+              }
+
+              return { id: d.id, ...data, timeVal };
           });
 
           // 2. 建立「戰場 (Arena)」
@@ -309,10 +320,15 @@ const AdminPanel = () => {
 
           // 第一輪 Loop：找出每個時段的最高價 (King of the Hill)
           allOrders.forEach(order => {
-              if(!order.detailedSlots) return;
+              if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return; // 🔥 防止沒有 detailedSlots 的舊單
+              
               order.detailedSlots.forEach(slot => {
-                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
-                  const myPrice = parseInt(slot.bidPrice);
+                  if (!slot.date || !slot.screenId) return; // 🔥 防止資料不全
+
+                  // 確保 hour 是統一格式 (數字)
+                  const hourInt = parseInt(slot.hour);
+                  const key = `${slot.date}-${hourInt}-${slot.screenId}`;
+                  const myPrice = parseInt(slot.bidPrice) || 0; // 🔥 防止 NaN
                   const myTime = order.timeVal;
 
                   if (!slotWars[key]) {
@@ -341,7 +357,7 @@ const AdminPanel = () => {
           let updateCount = 0;
 
           allOrders.forEach(order => {
-              if(!order.detailedSlots) return;
+              if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return;
               
               let winCount = 0;
               let loseCount = 0;
@@ -350,18 +366,22 @@ const AdminPanel = () => {
 
               // 檢查這張單的每一個 Slot 係贏定輸
               newDetailedSlots = newDetailedSlots.map(slot => {
-                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const hourInt = parseInt(slot.hour);
+                  const key = `${slot.date}-${hourInt}-${slot.screenId}`;
                   const winner = slotWars[key];
                   
                   let newSlotStatus = 'normal';
 
-                  // 如果贏家 ID 不是我，即係我輸左
-                  if (winner && winner.winnerOrderId !== order.id) {
-                      loseCount++;
-                      newSlotStatus = 'outbid';
-                  } else {
-                      winCount++;
-                      newSlotStatus = 'winning';
+                  // 如果該時段有贏家 (通常都有，除非完全沒人爭)
+                  if (winner) {
+                      // 如果贏家 ID 不是我，即係我輸左
+                      if (winner.winnerOrderId !== order.id) {
+                          loseCount++;
+                          newSlotStatus = 'outbid';
+                      } else {
+                          winCount++;
+                          newSlotStatus = 'winning';
+                      }
                   }
                   
                   if (slot.slotStatus !== newSlotStatus) {
@@ -377,7 +397,7 @@ const AdminPanel = () => {
               } else if (loseCount > 0 && winCount > 0) {
                   newStatus = 'partially_outbid'; // 輸一半
               } else if (loseCount === 0 && winCount > 0) {
-                  // 全贏保持狀態，或者你可以改為 'won'
+                  // 全贏
                   if (newStatus !== 'paid' && newStatus !== 'completed') {
                       newStatus = 'paid_pending_selection'; 
                   }
@@ -395,16 +415,16 @@ const AdminPanel = () => {
           });
 
           await batch.commit();
-          alert(`✅ Admin 結算完成！已更新 ${updateCount} 張訂單 (同價者先到先得)。`);
+          alert(`✅ Admin 結算完成！已更新 ${updateCount} 張訂單。`);
 
       } catch (error) {
           console.error("Auto Resolve Error:", error);
-          alert("❌ 結算失敗");
+          alert(`❌ 結算失敗: ${error.message}`); // 🔥 顯示具體錯誤訊息
       } finally {
           setLoading(false);
       }
   };
-  
+
   const handleAddScreen = () => {
       let initializedRules = {}; for(let i=0; i<7; i++) initializedRules[i] = { prime: [], gold: [] };
       setNewScreenData({ name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: initializedRules });
