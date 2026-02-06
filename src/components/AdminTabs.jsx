@@ -27,8 +27,8 @@ export const DashboardView = ({ stats, COLORS }) => (
     </div>
 );
 
-// --- 2. Orders View ---
-export const OrdersView = ({ orders, selectedIds, onSelect, onBulkAction, customerHistory, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => (
+// --- 2. Orders View (Fix for Blank Page) ---
+export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAction, customerHistory = {}, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
         <div className="p-4 border-b border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-slate-50">
             <div className="flex items-center gap-2 flex-1">
@@ -43,11 +43,13 @@ export const OrdersView = ({ orders, selectedIds, onSelect, onBulkAction, custom
                 <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold"><tr><th className="p-4 w-10 text-center">#</th><th className="p-4">時間</th><th className="p-4 w-1/3">訂單詳情 / 聯絡</th><th className="p-4 text-right">金額</th><th className="p-4 text-center">狀態</th><th className="p-4 text-right">操作</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                     {orders.map(order => {
+                        // Safe check for ID and Email
+                        if (!order || !order.id) return null;
                         const isRepeat = customerHistory[order.userEmail] > 1;
                         return (
                             <tr key={order.id} className={`hover:bg-slate-50 ${selectedIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
                                 <td className="p-4 text-center"><input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => { const n = new Set(selectedIds); n.has(order.id)?n.delete(order.id):n.add(order.id); onSelect(n); }} /></td>
-                                <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate ? order.createdAtDate.toLocaleString('zh-HK') : 'N/A'}</td>
+                                <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate?.toLocaleString ? order.createdAtDate.toLocaleString('zh-HK') : 'N/A'}</td>
                                 <td className="p-4 align-top">
                                     <div className="font-mono text-xs font-bold text-slate-700">#{order.id.slice(0,8)}</div>
                                     <div className="my-2 p-2 bg-slate-50 border border-slate-200 rounded">
@@ -80,6 +82,7 @@ export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => (
                 <div className="relative bg-black aspect-video w-full">{order.videoUrl ? <video controls src={order.videoUrl} className="w-full h-full object-contain" /> : <div className="flex items-center justify-center h-full text-white/50 text-xs">No Video File</div>}</div>
                 <div className="p-4 space-y-3 flex-1 flex flex-col">
                     <div><p className="text-xs text-slate-400">客戶</p><p className="font-bold text-sm">{order.userEmail}</p></div>
+                    <div className="text-xs text-slate-500">檔案: {order.videoName || 'Unknown'}</div>
                     <div className="mt-auto pt-3 border-t border-slate-100 flex flex-col gap-2">
                         <button onClick={() => onReview(order.id, 'approve')} className="w-full bg-green-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-green-700 shadow-sm flex items-center justify-center gap-2"><CheckCircle size={16}/> 通過</button>
                         <div className="flex gap-2"><input type="text" placeholder="拒絕原因" className="flex-1 border rounded px-3 py-1.5 text-xs bg-slate-50" onChange={e => setReviewNote(e.target.value)} /><button onClick={() => onReview(order.id, 'reject')} className="bg-white text-red-600 border border-red-200 px-3 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center gap-1">拒絕</button></div>

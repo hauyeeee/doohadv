@@ -55,9 +55,10 @@ export const StatCard = ({ title, value, icon, bg, border }) => (
   </div>
 );
 
+// 🔥 防彈版 StatusBadge：防止 undefined 導致的錯誤
 export const StatusBadge = ({ status }) => {
-    // 獲取對應語言的文字，如果找不到就用 key
-  const label = translations[lang][`status_${status}`] || status;
+  const safeStatus = status || 'unknown'; // 預設值
+  
   const map = {
     paid_pending_selection: { label: '競價中', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
     won: { label: '競價成功', cls: 'bg-green-100 text-green-700 border-green-200' },
@@ -67,8 +68,14 @@ export const StatusBadge = ({ status }) => {
     partially_outbid: { label: '部分被超越', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
     cancelled: { label: '已取消', cls: 'bg-red-50 text-red-500 border-red-100 line-through' }
   };
-const cls = map[status] || 'bg-gray-100 text-gray-600';
-  return <span className={`text-[10px] px-2 py-1 rounded border font-bold ${s.cls}`}>{s.label}</span>;
+  
+  const s = map[safeStatus] || { label: safeStatus, cls: 'bg-gray-100 text-gray-600' };
+  
+  return (
+    <span className={`text-[10px] px-2 py-1 rounded border font-bold whitespace-nowrap ${s.cls}`}>
+      {s.label}
+    </span>
+  );
 };
 
 // --- 彈出視窗 (Modals) ---
