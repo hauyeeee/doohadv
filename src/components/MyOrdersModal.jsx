@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock } from 'lucide-react';
-import { useLanguage } from '../context/LanguageContext'; // 🔥 引入語言 Hook
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, RefreshCw, Lock } from 'lucide-react'; // 🔥 Added Lock
+import { useLanguage } from '../context/LanguageContext'; // 🔥 Added Language Hook
 
 const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid }) => {
-  const { t, lang } = useLanguage(); // 🔥 獲取當前語言設定
+  const { t, lang } = useLanguage(); // 🔥 Get Translation function
   const [updatingSlot, setUpdatingSlot] = useState(null); // Track which slot is being updated
   const [newBidPrice, setNewBidPrice] = useState('');
 
@@ -191,7 +191,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         </span>
                                                                                         
                                                                                         {/* 🔥🔥🔥 2. 修改：按鈕邏輯 (過期變灰色) 🔥🔥🔥 */}
-                                                                                        {isOutbid && (
+                                                                                        {isOutbid && order.status !== 'lost' && (
                                                                                             isExpired ? (
                                                                                                 <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200">
                                                                                                     <Lock size={10}/> {t('bid_closed')}

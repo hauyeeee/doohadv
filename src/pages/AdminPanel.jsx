@@ -168,23 +168,26 @@ const AdminPanel = () => {
               order.detailedSlots.forEach(slot => {
                   if (!slot.date || !slot.screenId) return;
 
-                  // 🔥 FIX: 強制轉型，確保 key 一致
+                // 🔥 FIX 1: 強制將 ID 和 Hour 轉為統一格式，防止 "1" vs 1 導致比對失敗
                   const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId); 
+                  const screenIdStr = String(slot.screenId); // 強制轉 String
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
+                // 🔥 FIX 2: 這裡的 bidPrice 是單個 slot 的價錢，絕對不是整張單的價錢
                   const myPrice = parseInt(slot.bidPrice) || 0;
                   const myTime = order.timeVal;
 
+                  // 開始比武
                   if (!slotWars[key]) {
+                      // 如果沒人佔領，我佔領
                       slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   } else {
                       const currentKing = slotWars[key];
 
                       if (myPrice > currentKing.maxPrice) {
-                          // 價高者得
+                          // 價高者得 (單價比拼)
                           slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                      } 
+                      }
                       else if (myPrice === currentKing.maxPrice) {
                           // 同價：先到先得
                           if (myTime < currentKing.timeVal) {
@@ -210,20 +213,24 @@ const AdminPanel = () => {
               let newDetailedSlots = [...order.detailedSlots];
               let hasChange = false;
 
+              // 檢查這張單的每一個 Slot 係贏定輸
               newDetailedSlots = newDetailedSlots.map(slot => {
                   const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId); // 🔥 FIX: 這裡也要用 String 
+                  const screenIdStr = String(slot.screenId); // 確保這裡也一樣
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
                   const winner = slotWars[key];
                   
                   let newSlotStatus = 'normal';
 
+                  // 如果該時段有人贏 (通常都有)
                   if (winner) {
                       if (winner.winnerOrderId !== order.id) {
+                          // 贏家不是我 -> 我輸了
                           loseCount++;
                           newSlotStatus = 'outbid';
                       } else {
+                          // 贏家是我 -> 我贏了
                           winCount++;
                           newSlotStatus = 'winning';
                       }
@@ -232,16 +239,19 @@ const AdminPanel = () => {
                   if (slot.slotStatus !== newSlotStatus) {
                       hasChange = true;
                   }
+                  // 將狀態寫回 slot，這樣 MyOrdersModal 才能顯示綠色/紅色
                   return { ...slot, slotStatus: newSlotStatus };
               });
 
-              // 狀態判定
+              // 決定整張單的狀態 (Order Level Status)
               let newStatus = order.status;
+              
               if (loseCount > 0 && winCount === 0) {
-                  newStatus = 'outbid_needs_action';
+                  newStatus = 'outbid_needs_action'; // 全輸
               } else if (loseCount > 0 && winCount > 0) {
-                  newStatus = 'partially_outbid';
+                  newStatus = 'partially_outbid'; // 輸一半
               } else if (loseCount === 0 && winCount > 0) {
+                  // 全贏
                   if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
                       newStatus = 'paid_pending_selection'; 
                   }
@@ -259,7 +269,7 @@ const AdminPanel = () => {
           });
 
           await batch.commit();
-          alert(`✅ Admin 結算完成！已更新 ${updateCount} 張訂單。`);
+          alert(`✅ Admin 結算完成！已按【單個時段出價】更新 ${updateCount} 張訂單。`);
 
       } catch (error) {
           console.error("Auto Resolve Error:", error);
