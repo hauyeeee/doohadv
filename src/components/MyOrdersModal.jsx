@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, RefreshCw, Lock } from 'lucide-react'; // 🔥 Added Lock
-import { useLanguage } from '../context/LanguageContext'; // 🔥 Added Language Hook
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid }) => {
-  const { t, lang } = useLanguage(); // 🔥 Get Translation function
-  const [updatingSlot, setUpdatingSlot] = useState(null); // Track which slot is being updated
+  const { t, lang } = useLanguage();
+  const [updatingSlot, setUpdatingSlot] = useState(null);
   const [newBidPrice, setNewBidPrice] = useState('');
 
   if (!isOpen || !user) return null;
@@ -59,32 +59,29 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                     </div>
                 ) : (
                     myOrders.map((order) => {
-                        // 整理時段顯示 (Grouping) & 搵出最早時間
+                        // Grouping Logic
                         const groupedSlots = {};
                         let firstSlotDate = null;
 
                         if (order.detailedSlots) { 
                             order.detailedSlots.forEach((slot, index) => { 
-                                // Attach original index for updating
                                 const slotWithIndex = { ...slot, originalIndex: index };
                                 if (!groupedSlots[slot.date]) groupedSlots[slot.date] = []; 
                                 groupedSlots[slot.date].push(slotWithIndex); 
                             }); 
 
-                            // 搵出最早個個 Slot 用黎計公佈時間
                             if (order.detailedSlots.length > 0) {
                                 const first = order.detailedSlots[0];
-                                // 安全的日期轉換
                                 const d = new Date(first.date); 
                                 d.setHours(parseInt(first.hour), 0, 0, 0);
                                 firstSlotDate = d;
                             }
                         }
                         
-                        // 核心狀態顯示邏輯 (Status Config) - 🔥 使用 t() 翻譯
+                        // Status Logic - Using translations
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-600', label: t('loading') };
                         
-                        if (order.status === 'won' || order.status === 'paid' || order.status === 'completed') {
+                        if (['won', 'paid', 'completed'].includes(order.status)) {
                             statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'paid_pending_selection') {
                             statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
@@ -100,7 +97,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             statusConfig = { bg: 'bg-slate-100', text: 'text-slate-400', label: t('status_cancelled') };
                         }
 
-                        // 計算公佈時間 (播放時間 - 24小時)
+                        // Reveal Time Logic
                         let revealTimeStr = "---";
                         if (firstSlotDate) {
                             const revealDate = new Date(firstSlotDate);
@@ -128,7 +125,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                     {/* Details Column */}
                                     <div className="md:col-span-2 space-y-4">
                                         <div>
-                                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{lang==='en'?'Type':'購買類型'}</p>
+                                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">
+                                                {lang === 'en' ? 'Type' : '購買類型'}
+                                            </p>
                                             <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
                                                 {order.type === 'buyout' ? <ShoppingBag size={16} className="text-emerald-500"/> : <Gavel size={16} className="text-blue-500"/>}
                                                 {order.type === 'buyout' ? t('order_type_buyout') : t('order_type_bid')}
@@ -136,7 +135,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                             </div>
                                         </div>
 
-                                        {/* 公佈結果時間 (只在 Bid 單顯示) */}
+                                        {/* Reveal Time Info */}
                                         {order.type === 'bid' && (order.status === 'paid_pending_selection' || order.status === 'partially_outbid') && (
                                             <div className="bg-blue-50/50 border border-blue-100 rounded px-3 py-2 text-xs text-blue-800 flex items-center gap-2">
                                                 <Info size={14}/> <span>{t('reveal_time')}：<strong>{revealTimeStr}</strong> {t('before_24h')}</span>
@@ -155,10 +154,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                     const isOutbid = slot.slotStatus === 'outbid';
                                                                     const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                     
-                                                                    // 🔥🔥🔥 1. 新增：安全的過期檢查邏輯 🔥🔥🔥
+                                                                    // Time Check
                                                                     const now = new Date();
-                                                                    const slotTime = new Date(slot.date); // 先轉 Date 對象 (預設 00:00)
-                                                                    slotTime.setHours(parseInt(slot.hour), 0, 0, 0); // 再設定小時
+                                                                    const slotTime = new Date(slot.date); 
+                                                                    slotTime.setHours(parseInt(slot.hour), 0, 0, 0); 
                                                                     const isExpired = now >= slotTime;
 
                                                                     return (
@@ -190,7 +189,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                             ${slot.bidPrice}
                                                                                         </span>
                                                                                         
-                                                                                        {/* 🔥🔥🔥 2. 修改：按鈕邏輯 (過期變灰色) 🔥🔥🔥 */}
                                                                                         {isOutbid && order.status !== 'lost' && (
                                                                                             isExpired ? (
                                                                                                 <span className="text-[10px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200">
@@ -216,7 +214,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                     ))}
                                                 </div>
                                             ) : (
-                                                <div className="text-sm text-slate-500 bg-slate-50 p-2 rounded">{order.timeSlotSummary || '沒有詳細時段資料'}</div>
+                                                <div className="text-sm text-slate-500 bg-slate-50 p-2 rounded">{order.timeSlotSummary || (lang === 'en' ? 'No slot details' : '沒有詳細時段資料')}</div>
                                             )}
                                         </div>
                                     </div>
@@ -227,15 +225,15 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{t('amount_paid')}</p>
                                             <p className="text-2xl font-bold text-slate-800">HK$ {order.amount?.toLocaleString()}</p>
                                             <p className="text-xs text-slate-400 mt-1">
-                                                {order.status === 'won' || order.status === 'paid' ? (lang==='en'?'Paid successfully':'已成功扣款') : 
-                                                 (order.status === 'paid_pending_selection' || order.status === 'partially_outbid') ? (lang==='en'?'Pre-auth held':'預授權已凍結 (未扣款)') : 
-                                                 order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
-                                                 (lang==='en'?'Processing...':'等待處理...')}
+                                                {['won', 'paid'].includes(order.status) ? (lang === 'en' ? 'Paid successfully' : '已成功扣款') : 
+                                                 ['paid_pending_selection', 'partially_outbid'].includes(order.status) ? (lang === 'en' ? 'Pre-auth held' : '預授權已凍結 (未扣款)') : 
+                                                 order.status === 'lost' ? (lang === 'en' ? 'Auth released' : '已取消授權') : 
+                                                 (lang === 'en' ? 'Processing...' : '等待處理...')}
                                             </p>
                                         </div>
                                         
                                         <div className="mt-6 pt-6 border-t border-slate-100">
-                                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">{lang==='en'?'Creative':'廣告素材'}</p>
+                                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">{lang === 'en' ? 'Creative' : '廣告素材'}</p>
                                             {order.hasVideo ? (
                                                 <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
                                                     <CheckCircle size={24} className="text-green-500 mx-auto mb-1"/>
@@ -243,7 +241,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                     <p className="text-[10px] text-green-600 truncate px-1">{order.videoName}</p>
                                                 </div>
                                             ) : (
-                                                // 只要不是 Lost，都允許上傳 (讓用戶可以提早準備)
                                                 (order.status !== 'lost' && order.status !== 'cancelled') ? (
                                                     <button 
                                                         onClick={() => onUploadClick(order.id)} 

@@ -1,17 +1,22 @@
 import React from 'react';
 import { Clock } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext'; // 🔥 1. Hook
 
 const TimeSlotSelector = ({ HOURS, previewDate, selectedScreens, occupiedSlots, getHourTier, selectedHours, toggleHour }) => {
+  const { t } = useLanguage(); // 🔥 2. t()
   
-  // Need to recreate formatDateKey here or pass it as prop, but simpler to recreate since it's utility
+  // Recreate formatDateKey locally
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
   return (
     <section className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col">
-      <h2 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2"><Clock size={16}/> 3. 選擇時段</h2>
+      {/* 🔥 3. Title */}
+      <h2 className="text-sm font-bold text-slate-500 mb-3 flex items-center gap-2"><Clock size={16}/> {t('time_selector_title')}</h2>
+      
+      {/* 🔥 4. Legend Labels */}
       <div className="flex gap-3 text-[10px] mb-3">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> Prime</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400"></span> Gold</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> {t('label_prime')}</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400"></span> {t('label_gold')}</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300"></span> Normal</span>
       </div>
       <div className="grid grid-cols-4 gap-1.5 overflow-y-auto max-h-[300px]">
@@ -47,7 +52,7 @@ const TimeSlotSelector = ({ HOURS, previewDate, selectedScreens, occupiedSlots, 
               className={`text-xs py-2 rounded border transition-all ${tierClass}`}
             >
               {h.label}
-              {isSoldOut && <span className="block text-[8px] font-normal">已售</span>}
+              {isSoldOut && <span className="block text-[8px] font-normal">{t('legend_occupied')}</span>}
             </button>
           );
         })}
