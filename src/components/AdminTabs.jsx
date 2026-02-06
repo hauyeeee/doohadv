@@ -2,13 +2,13 @@ import React from 'react';
 import { 
   BarChart3, TrendingUp, Users, DollarSign, Search, Video, Monitor, Save, Trash2, 
   List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers 
+  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy 
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { StatCard, StatusBadge, ConfigSection, ConfigInput } from './AdminUI';
-import { useLanguage } from '../context/LanguageContext'; // 🔥 引入 Hook
+import { useLanguage } from '../context/LanguageContext';
 
 const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -32,7 +32,7 @@ export const DashboardView = ({ stats, COLORS }) => {
     );
 };
 
-// --- 2. Orders View ---
+// --- 2. Orders View (🔥 重點升級：顯示詳細時段資料) ---
 export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAction, customerHistory = {}, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => {
     const { t, lang } = useLanguage();
     return (
@@ -54,12 +54,43 @@ export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAc
                             const isRepeat = customerHistory[order.userEmail] > 1;
                             return (
                                 <tr key={order.id} className={`hover:bg-slate-50 ${selectedIds.has(order.id) ? 'bg-blue-50/50' : ''}`}>
-                                    <td className="p-4 text-center"><input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => { const n = new Set(selectedIds); n.has(order.id)?n.delete(order.id):n.add(order.id); onSelect(n); }} /></td>
+                                    <td className="p-4 text-center align-top"><input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => { const n = new Set(selectedIds); n.has(order.id)?n.delete(order.id):n.add(order.id); onSelect(n); }} /></td>
                                     <td className="p-4 text-slate-500 whitespace-nowrap align-top">{order.createdAtDate?.toLocaleString ? order.createdAtDate.toLocaleString(lang==='en'?'en-US':'zh-HK') : 'N/A'}</td>
                                     <td className="p-4 align-top">
                                         <div className="font-bold text-slate-700">{order.userEmail}{isRepeat && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded">VIP</span>}</div>
-                                        <div className="text-xs text-slate-500 font-mono mb-1">#{order.id.slice(0,8)}</div>
-                                        <div className="text-xs text-slate-500">Video: {order.hasVideo ? t('video_uploaded') : t('video_missing')}</div>
+                                        <div className="text-xs text-slate-500 font-mono mb-2">#{order.id.slice(0,8)}</div>
+                                        
+                                        {/* 🔥🔥🔥 新增：詳細時段列表 (Slot Details) 🔥🔥🔥 */}
+                                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                                            {order.detailedSlots && order.detailedSlots.length > 0 ? (
+                                                order.detailedSlots.map((slot, idx) => {
+                                                    // 判斷狀態 (Win / Outbid / Normal)
+                                                    const isWinning = slot.slotStatus === 'winning';
+                                                    const isOutbid = slot.slotStatus === 'outbid';
+                                                    let statusIcon = null;
+                                                    let rowClass = 'text-slate-600';
+
+                                                    if (isWinning) { statusIcon = <Trophy size={10} className="text-green-600"/>; rowClass = 'text-green-700 font-bold bg-green-50/50 rounded px-1'; }
+                                                    if (isOutbid) { statusIcon = <AlertTriangle size={10} className="text-red-500"/>; rowClass = 'text-red-600 bg-red-50/50 rounded px-1'; }
+
+                                                    return (
+                                                        <div key={idx} className={`flex justify-between items-center ${rowClass}`}>
+                                                            <div className="flex items-center gap-2">
+                                                                {statusIcon}
+                                                                <span className="font-mono">{slot.date}</span>
+                                                                <span>{String(slot.hour).padStart(2,'0')}:00</span>
+                                                                <span className="text-[10px] opacity-80">@{slot.screenId}</span>
+                                                            </div>
+                                                            <div>${slot.bidPrice}</div>
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <span className="text-slate-400 italic">No slot details available</span>
+                                            )}
+                                        </div>
+
+                                        <div className="text-xs text-slate-500 mt-2">Video: {order.hasVideo ? t('video_uploaded') : t('video_missing')}</div>
                                     </td>
                                     <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
                                     <td className="p-4 text-center align-top"><StatusBadge status={order.status} lang={lang} /></td>
@@ -149,7 +180,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                     <div className="flex items-center gap-1 bg-white border p-1 rounded-lg"><button onClick={onPrev} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft size={16}/></button><span className="px-3 font-mono font-bold text-sm min-w-[100px] text-center">{mode==='month'?date.toLocaleDateString():date.toLocaleDateString()}</span><button onClick={onNext} className="p-1 hover:bg-slate-100 rounded"><ChevronRight size={16}/></button></div>
                 </div>
             </div>
-            {/* Calendar Grids (Simplified for brevity, similar translation logic applied) */}
             {mode === 'month' && (
                 <div className="flex-1 p-4 overflow-auto">
                     <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -158,7 +188,12 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                     </div>
                 </div>
             )}
-            {/* Day View Logic ... */}
+            {mode === 'day' && (
+                <div className="flex-1 overflow-auto flex flex-col min-h-0">
+                    <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10"><div className="w-12 shrink-0 border-r border-slate-200 p-2 text-[10px] font-bold text-slate-400">Time</div>{screens.map(s=>(<div key={s.id} className="flex-1 min-w-[120px] border-r border-slate-200 p-2 text-center text-xs font-bold truncate">{s.name}</div>))}</div>
+                    {Array.from({length: 24},(_,i)=>i).map(h=>(<div key={h} className="flex h-12 border-b border-slate-100 hover:bg-slate-50/50"><div className="w-12 shrink-0 border-r border-slate-200 flex items-center justify-center text-[10px] text-slate-400">{String(h).padStart(2,'0')}:00</div>{screens.map(s=>{const k=`${h}-${s.id}`;const g=dayGrid[k];const top=g?g[0]:null;let cls='bg-white';if(top){if(top.displayStatus==='scheduled')cls='bg-emerald-100 text-emerald-700';else if(top.displayStatus==='action_needed')cls='bg-blue-100 text-blue-700';else if(top.displayStatus==='review_needed')cls='bg-red-100 text-red-700';else if(top.displayStatus==='bidding')cls='bg-yellow-50 text-yellow-600';}return(<div key={k} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${cls}`} onClick={()=>g&&onSelectSlot(g)}>{top&&(<div className="w-full h-full flex flex-col justify-center px-1 text-[10px] leading-tight relative">{g.length>1&&<span className="absolute -top-1 -right-1 bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center">{g.length}</span>}<div className="font-bold truncate">{top.userEmail}</div><div className="opacity-80">${top.price}</div></div>)}</div>)})}</div>))}
+                </div>
+            )}
         </div>
     );
 };
