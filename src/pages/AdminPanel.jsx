@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, deleteDoc, addDoc, serverTimestamp, where 
+  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
 import { 
-  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag 
+  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe 
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
+import { useLanguage } from '../context/LanguageContext';
 
 // 引入拆分後的 UI 組件
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
@@ -17,11 +18,11 @@ import {
 } from '../components/AdminTabs';
 
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 const AdminPanel = () => {
+  const { t, lang, toggleLanguage } = useLanguage(); 
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +69,7 @@ const AdminPanel = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) { navigate("/"); return; }
-      if (!ADMIN_EMAILS.includes(currentUser.email)) { alert("⛔ 權限不足"); signOut(auth); navigate("/"); return; }
+      if (!ADMIN_EMAILS.includes(currentUser.email)) { alert("⛔"); signOut(auth); navigate("/"); return; }
       setUser(currentUser);
       fetchAllData();
     });
@@ -97,20 +98,36 @@ const AdminPanel = () => {
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  const customerHistory = useMemo(() => { const h = {}; orders.forEach(o => { if(!h[o.userEmail]) h[o.userEmail]=0; h[o.userEmail]++; }); return h; }, [orders]);
+  // --- Logic Helpers ---
+  const customerHistory = useMemo(() => { 
+      const h = {}; 
+      if (orders) {
+          orders.forEach(o => { 
+              if (o.userEmail) {
+                  if(!h[o.userEmail]) h[o.userEmail]=0; 
+                  h[o.userEmail]++; 
+              }
+          }); 
+      }
+      return h; 
+  }, [orders]);
   
   const stats = useMemo(() => {
     let totalRevenue = 0, validOrders = 0, pendingReview = 0, dailyRevenue = {}, statusCount = {};
-    orders.forEach(order => {
-        statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
-        const needsReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
-        if (needsReview) pendingReview++;
-        if (['paid', 'won', 'completed', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status)) {
-            totalRevenue += Number(order.amount) || 0; validOrders++;
-            const dateKey = order.createdAtDate.toISOString().split('T')[0];
-            dailyRevenue[dateKey] = (dailyRevenue[dateKey] || 0) + Number(order.amount);
-        }
-    });
+    if (orders) {
+        orders.forEach(order => {
+            statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
+            const needsReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
+            if (needsReview) pendingReview++;
+            if (['paid', 'won', 'completed', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status)) {
+                totalRevenue += Number(order.amount) || 0; validOrders++;
+                if (order.createdAtDate) {
+                    const dateKey = order.createdAtDate.toISOString().split('T')[0];
+                    dailyRevenue[dateKey] = (dailyRevenue[dateKey] || 0) + Number(order.amount);
+                }
+            }
+        });
+    }
     return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
   }, [orders]);
 
@@ -143,10 +160,11 @@ const AdminPanel = () => {
   
   // 🔥🔥🔥 強制修復版：確保 Screen ID 類型統一，防止 $1000 輸 $200 🔥🔥🔥
   const handleAutoResolve = async () => {
-      if (!confirm("確定要進行「智能結算」？系統將會逐個時段比較出價，判定贏家與輸家 (同價者先到先得)。")) return;
+      if (!confirm(t('alert_confirm_resolve'))) return;
       setLoading(true);
 
       try {
+          // 1. 獲取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
           
@@ -168,12 +186,12 @@ const AdminPanel = () => {
               order.detailedSlots.forEach(slot => {
                   if (!slot.date || !slot.screenId) return;
 
-                // 🔥 FIX 1: 強制將 ID 和 Hour 轉為統一格式，防止 "1" vs 1 導致比對失敗
+                  // 🔥 FIX 1: 強制將 ID 和 Hour 轉為統一格式，防止 "1" vs 1 導致比對失敗
                   const hourInt = parseInt(slot.hour);
                   const screenIdStr = String(slot.screenId); // 強制轉 String
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
-                // 🔥 FIX 2: 這裡的 bidPrice 是單個 slot 的價錢，絕對不是整張單的價錢
+                  // 🔥 FIX 2: 這裡的 bidPrice 是單個 slot 的價錢，絕對不是整張單的價錢
                   const myPrice = parseInt(slot.bidPrice) || 0;
                   const myTime = order.timeVal;
 
@@ -187,7 +205,7 @@ const AdminPanel = () => {
                       if (myPrice > currentKing.maxPrice) {
                           // 價高者得 (單價比拼)
                           slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                      }
+                      } 
                       else if (myPrice === currentKing.maxPrice) {
                           // 同價：先到先得
                           if (myTime < currentKing.timeVal) {
@@ -239,7 +257,6 @@ const AdminPanel = () => {
                   if (slot.slotStatus !== newSlotStatus) {
                       hasChange = true;
                   }
-                  // 將狀態寫回 slot，這樣 MyOrdersModal 才能顯示綠色/紅色
                   return { ...slot, slotStatus: newSlotStatus };
               });
 
@@ -269,11 +286,11 @@ const AdminPanel = () => {
           });
 
           await batch.commit();
-          alert(`✅ Admin 結算完成！已按【單個時段出價】更新 ${updateCount} 張訂單。`);
+          alert(t('alert_resolve_success'));
 
       } catch (error) {
           console.error("Auto Resolve Error:", error);
-          alert(`❌ 結算失敗: ${error.message}`);
+          alert(`Error: ${error.message}`);
       } finally {
           setLoading(false);
       }
@@ -281,7 +298,7 @@ const AdminPanel = () => {
 
   // 🔥🔥🔥 必須包含這個函數，之前就是因為缺少它才報錯 🔥🔥🔥
   const handleFinalizeAuction = async () => {
-      if(!confirm("⚠️ 確定過期截標？\n系統只會處理【已過期】的時段，未過期的會保留。")) return; 
+      if(!confirm(t('alert_confirm_finalize'))) return; 
       setLoading(true);
       try {
           const q = query(collection(db, "orders"), where("status", "==", "outbid_needs_action"));
@@ -305,9 +322,9 @@ const AdminPanel = () => {
                   }
               }
           }
-          if(count>0) { await batch.commit(); alert(`🏁 ${count} 張過期單已截標`); } 
-          else alert("沒有發現【已過期】的輸家訂單。");
-      } catch(e) { console.error(e); alert("截標失敗"); } finally { setLoading(false); }
+          if(count>0) { await batch.commit(); alert(t('alert_finalize_success')); } 
+          else alert(t('alert_no_expired'));
+      } catch(e) { console.error(e); alert("Failed"); } finally { setLoading(false); }
   };
 
   const handleReview = async (id, action) => { 
@@ -328,7 +345,7 @@ const AdminPanel = () => {
   const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db,"special_rules",id)); };
 
   // Screens & Config
-  const savePricingConfig = async () => { const rules=localBundleRules.map(r=>({screens:r.screensStr.split(','), multiplier:parseFloat(r.multiplier)})); if(selectedConfigTarget==='global'){await setDoc(doc(db,"system_config","pricing_rules"),{...activeConfig, bundleRules:rules}); setGlobalPricingConfig(activeConfig);} else {const s=screens.find(x=>String(x.id)===selectedConfigTarget); await updateDoc(doc(db,"screens",s.firestoreId),{customPricing:activeConfig});} alert("Saved"); };
+  const savePricingConfig = async () => { const rules=localBundleRules.map(r=>({screens:r.screensStr.split(','), multiplier:parseFloat(r.multiplier)})); if(selectedConfigTarget==='global'){await setDoc(doc(db,"system_config","pricing_rules"),{...activeConfig, bundleRules:rules}); setGlobalPricingConfig(activeConfig);} else {const s=screens.find(x=>String(x.id)===selectedConfigTarget); await updateDoc(doc(db,"screens",s.firestoreId),{customPricing:activeConfig});} alert(t('alert_saved')); };
   const handleAddBundleRule = () => setLocalBundleRules([...localBundleRules, {screensStr:"", multiplier:1.2}]);
   const handleBundleRuleChange = (i,f,v) => { const n=[...localBundleRules]; n[i][f]=v; setLocalBundleRules(n); };
   const handleRemoveBundleRule = (i) => { const n=[...localBundleRules]; n.splice(i,1); setLocalBundleRules(n); };
@@ -344,11 +361,11 @@ const AdminPanel = () => {
       const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), images: newScreenData.images.filter(x=>x), lastUpdated: new Date() };
       if(editingScreenId) await updateDoc(doc(db,"screens",editingScreenId), p);
       else { const maxId = screens.reduce((m,s)=>Math.max(m,Number(s.id)||0),0); await addDoc(collection(db,"screens"),{...p, id:String(maxId+1), createdAt:new Date(), isActive:true}); }
-      alert("Saved"); setIsAddScreenModalOpen(false); 
+      alert(t('alert_saved')); setIsAddScreenModalOpen(false); 
   };
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db,"screens",s.firestoreId),{isActive:!s.isActive}); };
   const handleScreenChange = (fid,f,v) => setEditingScreens(p=>({...p, [fid]:{...p[fid], [f]:v}}));
-  const saveScreenSimple = async (s) => { const d=editingScreens[s.firestoreId]; if(d){ if(d.basePrice) d.basePrice=parseFloat(d.basePrice); await updateDoc(doc(db,"screens",s.firestoreId), d); alert("Saved"); setEditingScreens(p=>{const n={...p}; delete n[s.firestoreId]; return n;}); }};
+  const saveScreenSimple = async (s) => { const d=editingScreens[s.firestoreId]; if(d){ if(d.basePrice) d.basePrice=parseFloat(d.basePrice); await updateDoc(doc(db,"screens",s.firestoreId), d); alert(t('alert_saved')); setEditingScreens(p=>{const n={...p}; delete n[s.firestoreId]; return n;}); }};
 
   if (loading) return <LoadingScreen />;
 
@@ -358,18 +375,26 @@ const AdminPanel = () => {
         
         {/* Header */}
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH V5.3</h1>
+            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> {t('admin_title')}</h1>
             <div className="flex gap-2">
-                <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">前台</button>
-                <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">登出</button>
-                <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> 智能結算</button>
-                <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> 正式截標</button>
+                {/* 🔥 語言切換按鈕 */}
+                <button 
+                    onClick={toggleLanguage} 
+                    className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"
+                >
+                    <Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}
+                </button>
+
+                <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">{t('back_home')}</button>
+                <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">{t('logout')}</button>
+                <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> {t('btn_smart_resolve')}</button>
+                <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> {t('btn_finalize')}</button>
             </div>
         </div>
 
         {/* Tab Nav */}
         <div className="flex flex-wrap gap-2">
-            {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:'數據'}, {id:'calendar',icon:<Calendar size={16}/>,label:'排程'}, {id:'orders',icon:<List size={16}/>,label:'訂單'}, {id:'review',icon:<Video size={16}/>,label:`審核 (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:'規則'}, {id:'screens',icon:<Monitor size={16}/>,label:'屏幕'}, {id:'analytics',icon:<TrendingUp size={16}/>,label:'分析'}, {id:'config',icon:<Settings size={16}/>,label:'公式'} ].map(t => (
+            {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:t('tab_dashboard')}, {id:'calendar',icon:<Calendar size={16}/>,label:t('tab_calendar')}, {id:'orders',icon:<List size={16}/>,label:t('tab_orders')}, {id:'review',icon:<Video size={16}/>,label:`${t('tab_review')} (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:t('tab_rules')}, {id:'screens',icon:<Monitor size={16}/>,label:t('tab_screens')}, {id:'analytics',icon:<TrendingUp size={16}/>,label:t('tab_analytics')}, {id:'config',icon:<Settings size={16}/>,label:t('tab_config')} ].map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
                     {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                 </button>

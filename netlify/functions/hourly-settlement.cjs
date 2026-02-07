@@ -3,7 +3,7 @@ const https = require('https');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 
-// 1. 初始化 Firebase Admin (保持不變)
+// 1. 初始化 Firebase (保持不變)
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
@@ -15,27 +15,23 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// 2. EmailJS Config (根據你的截圖更新 ID)
+// 2. Email Config
 const EMAIL_CFG = {
-    service_id: process.env.VITE_EMAILJS_SERVICE_ID || "service_xxxxxxxx", // 請確保 Env Var 存在
-    user_id: process.env.VITE_EMAILJS_PUBLIC_KEY || "user_xxxxxxxx",
-    private_key: process.env.EMAILJS_PRIVATE_KEY, // 必須在 Netlify Env 設定
-    
+    service_id: process.env.VITE_EMAILJS_SERVICE_ID,
+    user_id: process.env.VITE_EMAILJS_PUBLIC_KEY,
+    private_key: process.env.EMAILJS_PRIVATE_KEY,
     admin_email: "hauyeeee@gmail.com",
-
     templates: {
-        WON_BID: "template_3n90m3u", // Congrats, 你已中標
-        LOST_BID: "template_1v8p3y8"  // Bid Lost / 競投失敗
+        WON_BID: "template_3n90m3u",
+        LOST_BID: "template_1v8p3y8",
+        PARTIAL_BID: "template_3n90m3u" // 可選：專門的 Partial Email Template
     }
 };
 
-// 3. Helper: 發送 Email (保持不變，略作精簡)
-const sendEmail = (templateId, params, label = "User") => {
-    return new Promise((resolve, reject) => {
-        if (!EMAIL_CFG.service_id || !EMAIL_CFG.user_id || !EMAIL_CFG.private_key) {
-            console.log("⚠️ Email Config Missing - Skipping Email");
-            return resolve("Config Missing");
-        }
+// 3. Send Email Helper
+const sendEmail = (templateId, params) => {
+    return new Promise((resolve) => {
+        if (!EMAIL_CFG.service_id) return resolve("No Config");
         const postData = JSON.stringify({
             service_id: EMAIL_CFG.service_id,
             template_id: templateId,
@@ -43,169 +39,166 @@ const sendEmail = (templateId, params, label = "User") => {
             accessToken: EMAIL_CFG.private_key,
             template_params: params
         });
-        const options = {
+        const req = https.request({
             hostname: 'api.emailjs.com', port: 443, path: '/api/v1.0/email/send', method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
-        };
-        const req = https.request(options, (res) => {
-            if (res.statusCode === 200 || res.statusCode === 201) resolve("Success");
-            else resolve("Failed"); // 不拋錯，避免中斷 Loop
-        });
-        req.on('error', () => resolve("Network Error"));
+        }, (res) => resolve(res.statusCode));
+        req.on('error', () => resolve("Error"));
         req.write(postData);
         req.end();
     });
 };
 
-// 4. Main Handler
+// 4. Main Logic
 const settlementHandler = async (event, context) => {
-    console.log("⏰ Auto Settlement Started... (v2.0)");
+    console.log("⏰ Settlement Run (Partial Win Logic)...");
     const now = new Date();
 
     try {
-        const ordersRef = db.collection('orders');
-        
-        // 🔥 關鍵修正 1: 抓取所有「未完結」的狀態
-        // 包含：競價中、被超越(輸家)、部分被超越
-        const snapshot = await ordersRef.where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid']).get();
+        // A. 抓取所有潛在訂單
+        const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid']).get();
+        if (snapshot.empty) return { statusCode: 200, body: "No orders" };
 
-        if (snapshot.empty) {
-            console.log("😴 No active orders to settle.");
-            return { statusCode: 200, body: "No orders" };
-        }
+        const slotsMap = {};      // 用來比武的戰場: { "date-hour-screen": [bids...] }
+        const orderResults = {};  // 用來記帳: { "orderId": { totalWon: 0, originalAmount: 0, winCount: 0, totalCount: 0, ... } }
 
-        const slotsMap = {};
-        
-        // --- 步驟 A: 篩選出「即將播放」的時段 ---
+        // B. 準備數據 (Grouping)
         snapshot.forEach(doc => {
             const data = doc.data();
             const orderId = doc.id;
 
+            // 初始化記帳本
+            if (!orderResults[orderId]) {
+                orderResults[orderId] = {
+                    id: orderId,
+                    userEmail: data.userEmail,
+                    userName: data.userName,
+                    paymentIntentId: data.paymentIntentId,
+                    originalAmount: data.amount || 0, // 這是整張單的預授權金額 (e.g. 3000)
+                    wonAmount: 0,                     // 這是最後贏的金額 (e.g. 1000)
+                    winCount: 0,
+                    loseCount: 0,
+                    totalSlots: 0,
+                    wonSlotsList: [],
+                    status: data.status
+                };
+            }
+
             if (data.detailedSlots) {
                 data.detailedSlots.forEach(slot => {
-                    // 組合播放時間 (假設 slot.date 係 "2024-02-05", slot.hour 係 14)
-                    const hourStr = String(slot.hour).padStart(2, '0');
-                    // 注意：這裡假設 Server 是 UTC，需要根據香港時間 (+8) 調整，或者直接比較 Timestamp
-                    // 簡單做法：將 date 和 hour 轉成 Date Object
-                    const slotDateTimeStr = `${slot.date}T${hourStr}:00:00`; 
-                    const playbackTime = new Date(slotDateTimeStr);
-                    
-                    // 🔥 關鍵修正 2: 設定截標時間 (例如：播放前 1 小時截標)
-                    // 如果現在時間 (now) 已經過了 (playbackTime - 1 hour)，代表這張單要結算了
-                    const cutOffTime = new Date(playbackTime.getTime() - (60 * 60 * 1000)); // 1小時前截標
+                    orderResults[orderId].totalSlots++; // 統計這張單共有幾個 Slot
 
-                    // 如果現在已經過了截標時間 (或者你想測試，暫時用 true)
-                    // if (now >= cutOffTime) { 
-                    if (true) { // ⚠️ DEV MODE: 強制全部結算 (上線前記得改回上面那行！)
-                        const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                    // 判斷是否到期 (播放前 1 小時)
+                    const slotTime = new Date(`${slot.date}T${String(slot.hour).padStart(2,'0')}:00:00`);
+                    const cutOffTime = new Date(slotTime.getTime() - (60 * 60 * 1000)); 
+
+                    // if (now >= cutOffTime) { // 正式上線用這行
+                    if (true) { // 測試用
+                        // 🔥 關鍵修正：確保 Key 統一為 String
+                        const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                         
-                        // 初始化
                         if (!slotsMap[key]) slotsMap[key] = [];
                         
-                        // 將這個 Bid 加入戰場
-                        slotsMap[key].push({ 
-                            orderId, 
-                            amount: parseInt(slot.bidPrice) || 0, // 確保係數字
-                            userEmail: data.userEmail,
-                            userName: data.userName,
-                            paymentIntentId: data.paymentIntentId, // 假設你有存這個
-                            type: data.type, // bid or buyout
-                            ...data 
+                        slotsMap[key].push({
+                            orderId: orderId,
+                            bidPrice: parseInt(slot.bidPrice) || 0,
+                            slotInfo: `${slot.date} ${slot.hour}:00 @ ${slot.screenId}`
                         });
                     }
                 });
             }
         });
 
-        // --- 步驟 B: 逐個時段判定輸贏 ---
-        for (const [slotKey, bids] of Object.entries(slotsMap)) {
-            // 排序：價高者得 (Desc) -> 時間早者得 (Asc)
-            // 這裡簡化用價錢排，如果同價，原本的 Array 順序通常係讀取順序
-            bids.sort((a, b) => b.amount - a.amount);
+        // C. 比武大會 (Resolving Winners)
+        for (const [key, bids] of Object.entries(slotsMap)) {
+            // 排序：價高者得
+            bids.sort((a, b) => b.bidPrice - a.bidPrice);
+            
+            const winner = bids[0]; // 第一名
+            const losers = bids.slice(1); // 其他人
 
-            const winner = bids[0];
-            const losers = bids.slice(1);
+            // 1. 贏家記帳
+            if (orderResults[winner.orderId]) {
+                orderResults[winner.orderId].wonAmount += winner.bidPrice; // 累加贏得的金額
+                orderResults[winner.orderId].winCount++;
+                orderResults[winner.orderId].wonSlotsList.push(winner.slotInfo);
+            }
 
-            console.log(`⚔️ Resolving ${slotKey}: Winner -> ${winner.userEmail} ($${winner.amount})`);
+            // 2. 輸家記帳
+            losers.forEach(loser => {
+                if (orderResults[loser.orderId]) {
+                    orderResults[loser.orderId].loseCount++;
+                }
+            });
+        }
 
-            // --- 處理贏家 (Winner) ---
-            try {
-                const winnerRef = db.collection('orders').doc(winner.orderId);
-                // 只有當狀態未變成 won/paid 時才執行 (防止重複扣款)
-                const wDoc = await winnerRef.get();
-                if (wDoc.exists && wDoc.data().status !== 'won' && wDoc.data().status !== 'paid') {
+        // D. 最終結算 (Stripe Capture & DB Update)
+        for (const [orderId, res] of Object.entries(orderResults)) {
+            const orderRef = db.collection('orders').doc(orderId);
+            
+            // 情況 1: 全輸 (Lost)
+            if (res.winCount === 0) {
+                if (res.status !== 'lost') {
+                    console.log(`❌ Order ${orderId} Lost All. Releasing ${res.originalAmount}...`);
+                    if (res.paymentIntentId) {
+                        try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) { console.log("Cancel Error", e.message); }
+                    }
+                    await orderRef.update({ status: 'lost', lostAt: admin.firestore.FieldValue.serverTimestamp() });
+                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { to_email: res.userEmail, order_id: orderId });
+                }
+            }
+            
+            // 情況 2: 贏 (包含 Partial Win 和 Full Win)
+            else if (res.winCount > 0) {
+                // 檢查是否已經 Capture 過 (防止重複扣款)
+                if (res.status !== 'won' && res.status !== 'paid' && res.status !== 'partially_won') {
                     
-                    // 1. Stripe Capture (正式收錢)
-                    // 注意：如果是 Buyout (automatic capture)，這裡會報錯，所以要 try-catch
-                    if (winner.type !== 'buyout' && winner.paymentIntentId) {
+                    console.log(`🎉 Order ${orderId} Won ${res.winCount}/${res.totalSlots} slots. Capture: $${res.wonAmount} (Auth: $${res.originalAmount})`);
+                    
+                    if (res.paymentIntentId) {
                         try {
-                            await stripe.paymentIntents.capture(winner.paymentIntentId);
-                            console.log(`💰 Captured payment for ${winner.orderId}`);
+                            // 🔥 關鍵核心：Capture Amount (部分扣款)
+                            // Stripe 允許 capture 的金額 < authorized 金額。
+                            // 剩餘的金額 ($3000 - $1000 = $2000) 會自動退還 (Release)。
+                            await stripe.paymentIntents.capture(res.paymentIntentId, {
+                                amount_to_capture: res.wonAmount * 100 // 轉成 cents
+                            });
                         } catch (e) {
-                            console.log(`⚠️ Capture skipped/failed (Order might be buyout or already captured): ${e.message}`);
+                            console.error(`⚠️ Capture Failed for ${orderId}:`, e.message);
+                            // 如果 Capture 失敗 (例如過期)，可能需要人工介入，這裡暫不更新狀態
+                            continue; 
                         }
                     }
 
-                    // 2. Update DB
-                    await winnerRef.update({ 
-                        status: 'won', 
-                        wonAt: admin.firestore.FieldValue.serverTimestamp() 
+                    // 判斷最終狀態
+                    const finalStatus = (res.winCount === res.totalSlots) ? 'won' : 'partially_won';
+
+                    await orderRef.update({ 
+                        status: finalStatus, 
+                        amount: res.wonAmount, // 更新為實際成交金額
+                        wonAt: admin.firestore.FieldValue.serverTimestamp(),
+                        finalWinCount: res.winCount,
+                        finalLostCount: res.loseCount
                     });
 
-                    // 3. Send Email
+                    // 發送中標 Email
                     await sendEmail(EMAIL_CFG.templates.WON_BID, {
-                        to_name: winner.userName,
-                        to_email: winner.userEmail,
-                        amount: winner.amount,
-                        order_id: winner.orderId,
-                        final_slots: slotKey // 簡單顯示
-                    }, "Winner");
+                        to_email: res.userEmail,
+                        to_name: res.userName,
+                        amount: res.wonAmount,
+                        order_id: orderId,
+                        slot_info: res.wonSlotsList.join('\n') // 列出贏得的時段
+                    });
                 }
-            } catch (e) { console.error("Winner Error:", e); }
-
-            // --- 處理輸家 (Losers) ---
-            for (const loser of losers) {
-                try {
-                    const loserRef = db.collection('orders').doc(loser.orderId);
-                    const lDoc = await loserRef.get();
-                    
-                    // 只有未 Lost 的才處理
-                    if (lDoc.exists && lDoc.data().status !== 'lost') {
-                        
-                        // 1. Stripe Cancel (退款/釋放額度)
-                        if (loser.paymentIntentId) {
-                            try {
-                                await stripe.paymentIntents.cancel(loser.paymentIntentId);
-                                console.log(`💸 Released funds for ${loser.orderId}`);
-                            } catch (e) {
-                                console.log(`⚠️ Refund skipped (Might differ for partial loss): ${e.message}`);
-                            }
-                        }
-
-                        // 2. Update DB
-                        await loserRef.update({ 
-                            status: 'lost', 
-                            lostAt: admin.firestore.FieldValue.serverTimestamp() 
-                        });
-
-                        // 3. Send Email
-                        await sendEmail(EMAIL_CFG.templates.LOST_BID, {
-                            to_name: loser.userName,
-                            to_email: loser.userEmail,
-                            order_id: loser.orderId
-                        }, "Loser");
-                    }
-                } catch (e) { console.error("Loser Error:", e); }
             }
         }
 
-        return { statusCode: 200, body: "Auto Settlement Complete" };
+        return { statusCode: 200, body: "Settlement Done" };
 
-    } catch (error) {
-        console.error("Handler Error:", error);
-        return { statusCode: 500, body: error.toString() };
+    } catch (e) {
+        console.error("Settlement Error:", e);
+        return { statusCode: 500, body: e.message };
     }
 };
 
-// 設定排程：每小時的第 0 分鐘執行 (e.g. 14:00, 15:00)
 module.exports.handler = schedule('0 * * * *', settlementHandler);
