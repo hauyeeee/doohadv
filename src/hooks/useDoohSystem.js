@@ -244,7 +244,6 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 核心修復：Outbid Check (含 Debug Log & 防呆) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -252,6 +251,7 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
 
+      // 🔥 Added 'outbid_needs_action' to query
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
       
       let snapshot;
@@ -268,7 +268,6 @@ export const useDoohSystem = () => {
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          // Skip self
           if (oldOrder.userId === newOrder.userId) return;
 
           let outbidInfo = [];
@@ -289,7 +288,6 @@ export const useDoohSystem = () => {
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
                       
-                      // HTML Format for Email
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
 
@@ -314,21 +312,12 @@ export const useDoohSystem = () => {
                   const infoStr = outbidInfo.join('<br/>');
                   const targetEmail = oldOrder.userEmail;
                   
-                  // 🔥 DEBUG LOG: 檢查參數是否正確 🔥
-                  console.log(`📧 Preparing to send email to: ${targetEmail}`);
-                  console.log(`   Template: template_34bea2p`);
-                  console.log(`   Slot Info: ${infoStr}`);
-                  console.log(`   New Price: ${maxNewPrice}`);
-
-                  if (!targetEmail) {
-                      console.error("❌ Email sending failed: Target email is missing!");
-                  } else {
-                      // 🔥 FIX: 傳入正確參數，並加上預設值防呆
+                  if (targetEmail) {
                       sendStandardOutbidEmail(
                           targetEmail, 
                           oldOrder.userName || 'Customer', 
-                          infoStr || 'Unknown Slot', 
-                          maxNewPrice || '---'
+                          infoStr, 
+                          maxNewPrice
                       );
                   }
               }
@@ -341,8 +330,6 @@ export const useDoohSystem = () => {
       if (outbidFound) {
           await batch.commit();
           console.log("✅ Outbid updates committed to DB.");
-      } else {
-          console.log("✅ No new outbids found.");
       }
   };
 
@@ -362,7 +349,13 @@ export const useDoohSystem = () => {
                          if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
                          await updateDoc(orderRef, { emailSent: true });
                     }
-                    if (data.type === 'buyout') checkAndNotifyLosers(data); else checkAndNotifyStandardOutbid(data);
+                    
+                    // 🔥 Important: Run check logic here!
+                    if (data.type === 'buyout') {
+                        checkAndNotifyLosers(data);
+                    } else {
+                        checkAndNotifyStandardOutbid(data);
+                    }
                 }
             } catch(e) { console.error(e); } 
         }, 1500); 
@@ -609,11 +602,8 @@ export const useDoohSystem = () => {
       oldSlots[slotIndex] = { ...targetSlot, bidPrice: newPrice, slotStatus: 'normal' };
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
-          
-          // 🔥 構造臨時訂單對象，傳入 checkAndNotifyStandardOutbid
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           checkAndNotifyStandardOutbid(tempOrder);
-
       } catch (e) { console.error("Update DB Error", e); return alert("更新失敗"); }
       setCurrentOrderId(orderId);
       localStorage.setItem('temp_order_id', orderId);

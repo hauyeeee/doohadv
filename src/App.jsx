@@ -42,13 +42,13 @@ const DOOHBiddingSystem = () => {
     HOURS, getHourTier,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    occupiedSlots,
+    occupiedSlots, existingBids, // 🔥 獲取市場實時出價
     
     // New Props
     restrictionModalData, 
     setRestrictionModalData, 
     handleProceedAfterRestriction,
-    resumePayment // 🔥 引入救單函數
+    resumePayment 
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
@@ -189,11 +189,12 @@ const DOOHBiddingSystem = () => {
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
       <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
       
-      {/* 🔥 連接 onResumePayment 🔥 */}
+      {/* 🔥 傳入 existingBids 進行即時比價 🔥 */}
       <MyOrdersModal 
         isOpen={isProfileModalOpen} 
         user={user} 
         myOrders={myOrders} 
+        existingBids={existingBids} 
         onClose={() => setIsProfileModalOpen(false)} 
         onLogout={handleLogout} 
         onUploadClick={handleUploadClick} 
