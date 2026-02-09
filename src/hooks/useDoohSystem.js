@@ -244,7 +244,9 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 核心修復：Outbid Check (包含已贏的對手) 🔥🔥🔥
+// ... (前段代碼保持不變，請從 checkAndNotifyStandardOutbid 開始覆蓋)
+
+  // 🔥🔥🔥 核心修復：Outbid Check (包含已贏的對手 + 修正比較類型) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -252,9 +254,8 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
 
-      // 🔥 關鍵修改 1：加入 'won' 和 'partially_won'
-      // 這是最重要的一步！即使對手已經顯示「已中標」，如果有新高價出現，系統必須重新將他拉出來比較。
-      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won"]));
+      // 🔥 擴大搜尋範圍：加入 'paid' (有些未結算但已付款的單)
+      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid"]));
       
       let snapshot;
       try {
@@ -277,7 +278,7 @@ export const useDoohSystem = () => {
           let maxNewPrice = 0;
 
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-              // 比對日期、時間、屏幕ID
+              // 🔥 這裡做強制轉型，確保比較正確 (String vs Number)
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
                   parseInt(ns.hour) === parseInt(oldSlot.hour) && 
@@ -288,17 +289,14 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
                   
-                  // 🔥 比價邏輯：新價 > 舊價 && 舊單未被標記為 Outbid
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
                       
-                      // 使用 HTML <br/> 換行，確保 Email 顯示正常
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
-                      
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
 
                       hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記舊單為被超越
+                      return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
               }
               return oldSlot;
@@ -307,23 +305,20 @@ export const useDoohSystem = () => {
           if (hasChange) {
               outbidFound = true;
               
-              // 計算舊單的新狀態
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               
               let newStatus = oldOrder.status; 
               
-              // 狀態邏輯：如果有 Slot 被超越，狀態必須改變
-              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; // 全輸
-              else if (outbidCount > 0) newStatus = 'partially_outbid';        // 輸一半
+              // 強制更新狀態
+              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action';
+              else if (outbidCount > 0) newStatus = 'partially_outbid';
               
-              // 🔥 關鍵修改 2：強制更新狀態 (即使之前係 Won)
-              // 如果之前係 won，現在被人踢走，必須變番做 partial 或者 needs_action
-              if (oldOrder.status === 'won' || oldOrder.status === 'partially_won' || oldOrder.status === 'paid_pending_selection') {
+              // 特別處理 'won' / 'paid' 狀態
+              if (['won', 'partially_won', 'paid', 'paid_pending_selection'].includes(oldOrder.status)) {
                    newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
               }
 
-              // 發送 Email
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('<br/>');
                   const targetEmail = oldOrder.userEmail;
@@ -347,10 +342,9 @@ export const useDoohSystem = () => {
       if (outbidFound) {
           await batch.commit();
           console.log("✅ Outbid updates committed to DB.");
-      } else {
-          console.log("✅ No outbids found this time.");
       }
   };
+
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;

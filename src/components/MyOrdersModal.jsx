@@ -63,7 +63,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                         // Calculate Actual Won Amount (exclude Lost/Outbid)
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
-                            // If settled, exclude lost. If pending auth, show full.
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
                                 return isLost ? sum : sum + (parseInt(s.bidPrice)||0);
                             }
@@ -154,16 +153,17 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <div className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono w-fit">{date}</div>
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                             {groupedSlots[date].map((slot) => {
-                                                                const isOutbid = slot.slotStatus === 'outbid' || slot.slotStatus === 'lost';
+                                                                // 🔥🔥🔥 核心修正：正確判斷 Outbid 🔥🔥🔥
+                                                                const isOutbid = slot.slotStatus === 'outbid'; 
+                                                                const isLost = slot.slotStatus === 'lost';
                                                                 const isWon = slot.slotStatus === 'winning' || slot.slotStatus === 'won';
                                                                 
-                                                                // Logic: Only show Win/Lost if status is explicit. 
-                                                                // If order is settled (Partial Win), non-outbid slots are implicitly won.
-                                                                const finalWin = (isSettled && !isOutbid) || isWon;
-                                                                const showLost = isOutbid && (isOrderExpired || isSettled);
+                                                                // 如果狀態是 outbid，即使 isSettled 也要顯示被超越！
+                                                                const finalWin = (isSettled && !isOutbid && !isLost) || isWon;
                                                                 
-                                                                // Show warning if outbid AND order is still active
-                                                                const showOutbidWarning = isOutbid && !isOrderExpired && !isSettled;
+                                                                // 只要是 Outbid 且未過期，就一定要顯示警告！
+                                                                const showOutbidWarning = isOutbid && !isOrderExpired;
+                                                                const showLost = isLost || (isOutbid && isOrderExpired);
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
@@ -172,8 +172,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                 if(finalWin) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
                                                                 if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
-                                                                if(order.status === 'lost') { borderClass = "border-slate-100"; bgClass = "bg-slate-50 opacity-60"; }
-
+                                                                
                                                                 return (
                                                                     <div key={slot.originalIndex} className={`flex items-center justify-between p-2 rounded border ${borderClass} ${bgClass}`}>
                                                                         <div className="flex items-center gap-2">
@@ -183,9 +182,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
                                                                                     
-                                                                                    {finalWin ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
-                                                                                     showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : 
-                                                                                     showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200"><AlertTriangle size={8}/> 被超越</span> : null
+                                                                                    {showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
+                                                                                     finalWin ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
+                                                                                     showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : null
                                                                                     }
                                                                                 </div>
                                                                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}</span>
@@ -232,7 +231,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                  (lang==='en'?'Processing...':'等待處理...')}
                                             </p>
                                             
-                                            {/* 🔥🔥🔥 新增：救單按鈕 (如果還在授權中) 🔥🔥🔥 */}
                                             {order.status === 'pending_auth' && (
                                                 <button onClick={() => onResumePayment(order)} className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm animate-pulse">
                                                     <CreditCard size={14}/> {lang==='en'?'Complete Payment':'立即付款'}
