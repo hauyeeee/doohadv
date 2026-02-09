@@ -317,6 +317,19 @@ export const useDoohSystem = () => {
 
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
+    
+    // 🔥🔥🔥 New Logic: Check for QR Code screen_id 🔥🔥🔥
+    const qrScreenId = queryParams.get('screen_id');
+    if (qrScreenId) {
+        const id = parseInt(qrScreenId);
+        if (!isNaN(id)) {
+            // 自動選擇該屏幕
+            setSelectedScreens(new Set([id]));
+            // 提示用戶 (可選)
+            showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
+        }
+    }
+
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
     const isCanceled = queryParams.get('canceled') === 'true'; 
