@@ -244,7 +244,7 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 核心修復：Outbid Check (加強版) 🔥🔥🔥
+  // 🔥🔥🔥 核心修復：Outbid Check (含 Debug Log & 防呆) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -252,7 +252,6 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
 
-      // 🔥 擴大搜尋範圍：加入 outbid_needs_action 防止漏網之魚
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
       
       let snapshot;
@@ -260,7 +259,7 @@ export const useDoohSystem = () => {
           snapshot = await getDocs(q);
           console.log(`🔍 [Check Outbid] Found ${snapshot.size} active orders to check.`);
       } catch (error) {
-          console.error("❌ [Check Outbid] Permission Denied or Error reading orders. Check Firestore Rules.", error);
+          console.error("❌ [Check Outbid] Error reading orders:", error);
           return;
       }
 
@@ -277,7 +276,6 @@ export const useDoohSystem = () => {
           let maxNewPrice = 0;
 
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-              // 尋找是否是同一個時段和屏幕
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
                   parseInt(ns.hour) === parseInt(oldSlot.hour) && 
@@ -288,11 +286,10 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
                   
-                  // 🔥 核心比價邏輯 🔥
-                  // 如果新價高過舊價，且舊單尚未標記為 outbid
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
                       
+                      // HTML Format for Email
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
 
@@ -313,12 +310,27 @@ export const useDoohSystem = () => {
               if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
               else if (outbidCount > 0) newStatus = 'partially_outbid'; 
 
-              // 發送 Email 通知
               if (outbidInfo.length > 0) {
-                  const infoStr = outbidInfo.join('<br/>'); // HTML 換行
-                  // 🔥 修正：傳入 maxNewPrice 作為 currentPrice
-                  sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName, infoStr, maxNewPrice);
-                  console.log(`📧 Outbid email TRIGGERED for ${oldOrder.userEmail}`);
+                  const infoStr = outbidInfo.join('<br/>');
+                  const targetEmail = oldOrder.userEmail;
+                  
+                  // 🔥 DEBUG LOG: 檢查參數是否正確 🔥
+                  console.log(`📧 Preparing to send email to: ${targetEmail}`);
+                  console.log(`   Template: template_34bea2p`);
+                  console.log(`   Slot Info: ${infoStr}`);
+                  console.log(`   New Price: ${maxNewPrice}`);
+
+                  if (!targetEmail) {
+                      console.error("❌ Email sending failed: Target email is missing!");
+                  } else {
+                      // 🔥 FIX: 傳入正確參數，並加上預設值防呆
+                      sendStandardOutbidEmail(
+                          targetEmail, 
+                          oldOrder.userName || 'Customer', 
+                          infoStr || 'Unknown Slot', 
+                          maxNewPrice || '---'
+                      );
+                  }
               }
 
               const oldOrderRef = doc(db, "orders", docSnap.id);
@@ -583,7 +595,6 @@ export const useDoohSystem = () => {
     try { const response = await fetch('/.netlify/functions/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), }); const data = await response.json(); if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); } } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
 
-  // 🔥🔥🔥 在此處修正了 handleUpdateBid，確保它會觸發 checkAndNotifyStandardOutbid 🔥🔥🔥
   const handleUpdateBid = async (orderId, slotIndex, newPrice, newTotalAmount) => {
       if (!user) return alert("請先登入");
       const orderRef = doc(db, "orders", orderId);
@@ -599,8 +610,7 @@ export const useDoohSystem = () => {
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
-          // 🔥 這裡觸發 Outbid Check，通知被超越的用戶
-          // 我們構造一個臨時的 updated order object 傳入去
+          // 🔥 構造臨時訂單對象，傳入 checkAndNotifyStandardOutbid
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           checkAndNotifyStandardOutbid(tempOrder);
 
