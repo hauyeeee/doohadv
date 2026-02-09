@@ -77,6 +77,21 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                         // 計算目前訂單總出價 (用於加價時計算 otherSlotsSum)
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
 
+                        // 🔥 關鍵修正：計算實際「贏得」的金額 (UI Display Only)
+                        // 如果狀態是 Lost/Outbid，就不算入總金額
+                        const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
+                            const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
+                            return isLost ? sum : sum + (parseInt(s.bidPrice)||0);
+                        }, 0) : 0;
+
+                        // 判斷是否「已結算」 (Won, Paid, Partially Won, Lost, Completed)
+                        const isSettled = ['won', 'paid', 'completed', 'partially_won', 'lost'].includes(order.status);
+                        
+                        // 決定顯示哪個價錢：
+                        // - 如果已結算：顯示 actualWinningAmount (扣除輸掉的，如果是 Lost 則為 0)
+                        // - 如果未結算：顯示 order.amount (預授權總額)
+                        const displayAmount = isSettled ? actualWinningAmount : (order.amount || 0);
+
                         if (order.detailedSlots) { 
                             order.detailedSlots.forEach((slot, index) => { 
                                 const slotWithIndex = { ...slot, originalIndex: index };
@@ -278,10 +293,13 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                     <div className="md:col-span-1 border-l border-slate-100 pl-0 md:pl-6 flex flex-col justify-between">
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{t('amount_paid')}</p>
-                                            <p className="text-2xl font-bold text-slate-800">HK$ {order.amount?.toLocaleString()}</p>
+                                            
+                                            {/* 🔥 顯示動態計算的金額 */}
+                                            <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
+                                            
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {['won', 'paid', 'partially_won'].includes(order.status) ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
-                                                 ['paid_pending_selection', 'partially_outbid', 'pending_reauth', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held':'預授權已凍結 (未扣款)') : 
+                                                 ['paid_pending_selection', 'partially_outbid', 'pending_reauth', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
                                                  order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
                                                  (lang==='en'?'Processing...':'等待處理...')}
                                             </p>
@@ -304,7 +322,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <UploadCloud size={20} className="mb-1 group-hover:scale-110 transition-transform"/>
                                                         <span className="text-xs font-bold">{t('upload_video')}</span>
                                                     </button>
-                                                ) : <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center text-slate-400 text-xs">{t('no_upload_needed')}</div>
+                                                ) : (
+                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center text-slate-400 text-xs">{t('no_upload_needed')}</div>
+                                                )
                                             )}
                                         </div>
                                     </div>
