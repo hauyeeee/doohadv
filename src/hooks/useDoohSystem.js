@@ -244,6 +244,7 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
+  // 🔥🔥🔥 核心修復：Outbid Check (包含已贏的對手) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -251,13 +252,14 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
 
-      // 🔥 Added 'outbid_needs_action' to query
-      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action"]));
+      // 🔥 關鍵修改：加入 'won' 和 'partially_won'
+      // 這樣即使對手之前被誤判為贏，現在有人出更高價，系統也會抓出來通知他「你被超越了」
+      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won"]));
       
       let snapshot;
       try {
           snapshot = await getDocs(q);
-          console.log(`🔍 [Check Outbid] Found ${snapshot.size} active orders to check.`);
+          console.log(`🔍 [Check Outbid] Found ${snapshot.size} active/won orders to check.`);
       } catch (error) {
           console.error("❌ [Check Outbid] Error reading orders:", error);
           return;
@@ -274,6 +276,9 @@ export const useDoohSystem = () => {
           let hasChange = false;
           let maxNewPrice = 0;
 
+          // 這裡我們只更新 detailedSlots 狀態，暫時不改動 'won' 這種大狀態 (交給 Hourly Settlement 改)
+          // 我們的主要目的是：1. 標記 slotStatus = 'outbid'  2. 發 Email
+          
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
@@ -287,12 +292,10 @@ export const useDoohSystem = () => {
                   
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
-                      
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
-
                       hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; 
+                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記被超越
                   }
               }
               return oldSlot;
@@ -301,12 +304,21 @@ export const useDoohSystem = () => {
           if (hasChange) {
               outbidFound = true;
               
+              // 計算新狀態
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               
-              let newStatus = 'paid_pending_selection'; 
+              let newStatus = oldOrder.status; // 預設保持原狀
+              
+              // 如果之前係 won，現在有 slot 被超越，狀態應該轉變
               if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
               else if (outbidCount > 0) newStatus = 'partially_outbid'; 
+              
+              // 如果之前係 pending，就保持 pending 或 partial
+              if (oldOrder.status === 'paid_pending_selection') {
+                   if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
+                   else if (outbidCount > 0) newStatus = 'partially_outbid';
+              }
 
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('<br/>');
@@ -319,6 +331,7 @@ export const useDoohSystem = () => {
                           infoStr, 
                           maxNewPrice
                       );
+                      console.log(`📧 Outbid email SENT to ${targetEmail}`);
                   }
               }
 
