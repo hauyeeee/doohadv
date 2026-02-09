@@ -3,7 +3,7 @@ const https = require('https');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 
-// 1. 初始化 Firebase (保持不變)
+// 1. 初始化 Firebase
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
@@ -22,9 +22,8 @@ const EMAIL_CFG = {
     private_key: process.env.EMAILJS_PRIVATE_KEY,
     admin_email: "hauyeeee@gmail.com",
     templates: {
-        WON_BID: "template_3n90m3u",
+        WON_BID: "template_3n90m3u", // 通用結算通知 (包含贏/輸詳情)
         LOST_BID: "template_1v8p3y8",
-        PARTIAL_BID: "template_3n90m3u" // 可選：專門的 Partial Email Template
     }
 };
 
@@ -51,143 +50,147 @@ const sendEmail = (templateId, params) => {
 
 // 4. Main Logic
 const settlementHandler = async (event, context) => {
-    console.log("⏰ Settlement Run (Partial Win Logic)...");
-    const now = new Date();
-
+    console.log("⏰ Settlement Run (Detailed Email Version)...");
+    
     try {
-        // A. 抓取所有潛在訂單
         const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid']).get();
         if (snapshot.empty) return { statusCode: 200, body: "No orders" };
 
-        const slotsMap = {};      // 用來比武的戰場: { "date-hour-screen": [bids...] }
-        const orderResults = {};  // 用來記帳: { "orderId": { totalWon: 0, originalAmount: 0, winCount: 0, totalCount: 0, ... } }
+        const slotsMap = {};      
+        const orderResults = {};  
 
-        // B. 準備數據 (Grouping)
+        // B. 準備數據
         snapshot.forEach(doc => {
             const data = doc.data();
             const orderId = doc.id;
 
-            // 初始化記帳本
             if (!orderResults[orderId]) {
                 orderResults[orderId] = {
                     id: orderId,
                     userEmail: data.userEmail,
                     userName: data.userName,
                     paymentIntentId: data.paymentIntentId,
-                    originalAmount: data.amount || 0, // 這是整張單的預授權金額 (e.g. 3000)
-                    wonAmount: 0,                     // 這是最後贏的金額 (e.g. 1000)
+                    originalAmount: data.amount || 0, 
+                    wonAmount: 0,                     
                     winCount: 0,
                     loseCount: 0,
                     totalSlots: 0,
-                    wonSlotsList: [],
+                    wonSlotsList: [], // 儲存贏的詳情
+                    lostSlotsList: [], // 儲存輸的詳情
                     status: data.status
                 };
             }
 
             if (data.detailedSlots) {
                 data.detailedSlots.forEach(slot => {
-                    orderResults[orderId].totalSlots++; // 統計這張單共有幾個 Slot
-
-                    // 判斷是否到期 (播放前 1 小時)
-                    const slotTime = new Date(`${slot.date}T${String(slot.hour).padStart(2,'0')}:00:00`);
-                    const cutOffTime = new Date(slotTime.getTime() - (60 * 60 * 1000)); 
-
-                    // if (now >= cutOffTime) { // 正式上線用這行
-                    if (true) { // 測試用
-                        // 🔥 關鍵修正：確保 Key 統一為 String
+                    orderResults[orderId].totalSlots++; 
+                    const slotDateTimeStr = `${slot.date} ${String(slot.hour).padStart(2,'0')}:00`;
+                    
+                    // 這裡暫時全部結算 (正式版應檢查 cutOffTime)
+                    if (true) { 
                         const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
-                        
                         if (!slotsMap[key]) slotsMap[key] = [];
                         
                         slotsMap[key].push({
                             orderId: orderId,
                             bidPrice: parseInt(slot.bidPrice) || 0,
-                            slotInfo: `${slot.date} ${slot.hour}:00 @ ${slot.screenId}`
+                            slotInfo: `${slotDateTimeStr} @ ${slot.screenName || slot.screenId}`
                         });
                     }
                 });
             }
         });
 
-        // C. 比武大會 (Resolving Winners)
+        // C. 比武大會
         for (const [key, bids] of Object.entries(slotsMap)) {
-            // 排序：價高者得
             bids.sort((a, b) => b.bidPrice - a.bidPrice);
             
-            const winner = bids[0]; // 第一名
-            const losers = bids.slice(1); // 其他人
+            const winner = bids[0]; 
+            const losers = bids.slice(1); 
 
-            // 1. 贏家記帳
+            // 贏家
             if (orderResults[winner.orderId]) {
-                orderResults[winner.orderId].wonAmount += winner.bidPrice; // 累加贏得的金額
+                orderResults[winner.orderId].wonAmount += winner.bidPrice; 
                 orderResults[winner.orderId].winCount++;
-                orderResults[winner.orderId].wonSlotsList.push(winner.slotInfo);
+                orderResults[winner.orderId].wonSlotsList.push(`${winner.slotInfo} ($${winner.bidPrice})`);
             }
 
-            // 2. 輸家記帳
+            // 輸家
             losers.forEach(loser => {
                 if (orderResults[loser.orderId]) {
                     orderResults[loser.orderId].loseCount++;
+                    orderResults[loser.orderId].lostSlotsList.push(`${loser.slotInfo} (Bid: $${loser.bidPrice})`);
                 }
             });
         }
 
-        // D. 最終結算 (Stripe Capture & DB Update)
+        // D. 最終結算 & 發送詳細 Email
         for (const [orderId, res] of Object.entries(orderResults)) {
             const orderRef = db.collection('orders').doc(orderId);
             
-            // 情況 1: 全輸 (Lost)
+            // 情況 1: 全輸
             if (res.winCount === 0) {
                 if (res.status !== 'lost') {
-                    console.log(`❌ Order ${orderId} Lost All. Releasing ${res.originalAmount}...`);
                     if (res.paymentIntentId) {
-                        try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) { console.log("Cancel Error", e.message); }
+                        try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) {}
                     }
-                    await orderRef.update({ status: 'lost', lostAt: admin.firestore.FieldValue.serverTimestamp() });
-                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { to_email: res.userEmail, order_id: orderId });
+                    
+                    // 更新 DB
+                    await orderRef.update({ 
+                        status: 'lost', 
+                        lostAt: admin.firestore.FieldValue.serverTimestamp(),
+                        // 將詳細輸贏寫入 DB 方便前端顯示 (Optional)
+                    });
+
+                    // 🔥 詳細的 Lost Email
+                    const lostDetails = res.lostSlotsList.join('\n');
+                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { 
+                        to_email: res.userEmail, 
+                        to_name: res.userName,
+                        order_id: orderId,
+                        lost_details: lostDetails // 確保你的 Email Template 有這個變數 {{lost_details}}
+                    });
                 }
             }
             
-            // 情況 2: 贏 (包含 Partial Win 和 Full Win)
+            // 情況 2: 贏 (部分或全部)
             else if (res.winCount > 0) {
-                // 檢查是否已經 Capture 過 (防止重複扣款)
                 if (res.status !== 'won' && res.status !== 'paid' && res.status !== 'partially_won') {
-                    
-                    console.log(`🎉 Order ${orderId} Won ${res.winCount}/${res.totalSlots} slots. Capture: $${res.wonAmount} (Auth: $${res.originalAmount})`);
                     
                     if (res.paymentIntentId) {
                         try {
-                            // 🔥 關鍵核心：Capture Amount (部分扣款)
-                            // Stripe 允許 capture 的金額 < authorized 金額。
-                            // 剩餘的金額 ($3000 - $1000 = $2000) 會自動退還 (Release)。
                             await stripe.paymentIntents.capture(res.paymentIntentId, {
-                                amount_to_capture: res.wonAmount * 100 // 轉成 cents
+                                amount_to_capture: res.wonAmount * 100 
                             });
-                        } catch (e) {
-                            console.error(`⚠️ Capture Failed for ${orderId}:`, e.message);
-                            // 如果 Capture 失敗 (例如過期)，可能需要人工介入，這裡暫不更新狀態
-                            continue; 
-                        }
+                        } catch (e) { continue; }
                     }
 
-                    // 判斷最終狀態
                     const finalStatus = (res.winCount === res.totalSlots) ? 'won' : 'partially_won';
 
                     await orderRef.update({ 
                         status: finalStatus, 
-                        amount: res.wonAmount, // 更新為實際成交金額
+                        amount: res.wonAmount, 
                         wonAt: admin.firestore.FieldValue.serverTimestamp(),
                         finalWinCount: res.winCount,
                         finalLostCount: res.loseCount
                     });
 
-                    // 發送中標 Email
+                    // 🔥 生成詳細的 Win/Lost 報告字串
+                    let emailBody = "🎉 恭喜！你已成功投得以下時段：\n";
+                    emailBody += res.wonSlotsList.join('\n');
+                    
+                    if (res.loseCount > 0) {
+                        emailBody += "\n\n⚠️ 以下時段因出價被超越而未能中標 (不會收費)：\n";
+                        emailBody += res.lostSlotsList.join('\n');
+                    }
+
+                    // 發送中標 Email (使用 WON_BID 模板，將詳情塞入 slot_info 變數)
                     await sendEmail(EMAIL_CFG.templates.WON_BID, {
                         to_email: res.userEmail,
                         to_name: res.userName,
                         amount: res.wonAmount,
                         order_id: orderId,
-                        slot_info: res.wonSlotsList.join('\n') // 列出贏得的時段
+                        slot_info: emailBody // 🔥 這裡包含了贏和輸的所有細節
                     });
                 }
             }
@@ -196,7 +199,7 @@ const settlementHandler = async (event, context) => {
         return { statusCode: 200, body: "Settlement Done" };
 
     } catch (e) {
-        console.error("Settlement Error:", e);
+        console.error(e);
         return { statusCode: 500, body: e.message };
     }
 };
