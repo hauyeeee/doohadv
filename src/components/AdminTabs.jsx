@@ -32,7 +32,7 @@ export const DashboardView = ({ stats, COLORS }) => {
     );
 };
 
-// --- 2. Orders View (🔥 重點升級：顯示詳細時段資料) ---
+// --- 2. Orders View (詳細版) ---
 export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAction, customerHistory = {}, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => {
     const { t, lang } = useLanguage();
     return (
@@ -59,37 +59,24 @@ export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAc
                                     <td className="p-4 align-top">
                                         <div className="font-bold text-slate-700">{order.userEmail}{isRepeat && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded">VIP</span>}</div>
                                         <div className="text-xs text-slate-500 font-mono mb-2">#{order.id.slice(0,8)}</div>
-                                        
-                                        {/* 🔥🔥🔥 新增：詳細時段列表 (Slot Details) 🔥🔥🔥 */}
                                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
                                             {order.detailedSlots && order.detailedSlots.length > 0 ? (
                                                 order.detailedSlots.map((slot, idx) => {
-                                                    // 判斷狀態 (Win / Outbid / Normal)
                                                     const isWinning = slot.slotStatus === 'winning';
                                                     const isOutbid = slot.slotStatus === 'outbid';
                                                     let statusIcon = null;
                                                     let rowClass = 'text-slate-600';
-
                                                     if (isWinning) { statusIcon = <Trophy size={10} className="text-green-600"/>; rowClass = 'text-green-700 font-bold bg-green-50/50 rounded px-1'; }
                                                     if (isOutbid) { statusIcon = <AlertTriangle size={10} className="text-red-500"/>; rowClass = 'text-red-600 bg-red-50/50 rounded px-1'; }
-
                                                     return (
                                                         <div key={idx} className={`flex justify-between items-center ${rowClass}`}>
-                                                            <div className="flex items-center gap-2">
-                                                                {statusIcon}
-                                                                <span className="font-mono">{slot.date}</span>
-                                                                <span>{String(slot.hour).padStart(2,'0')}:00</span>
-                                                                <span className="text-[10px] opacity-80">@{slot.screenId}</span>
-                                                            </div>
+                                                            <div className="flex items-center gap-2">{statusIcon}<span className="font-mono">{slot.date}</span><span>{String(slot.hour).padStart(2,'0')}:00</span><span className="text-[10px] opacity-80">@{slot.screenId}</span></div>
                                                             <div>${slot.bidPrice}</div>
                                                         </div>
                                                     );
                                                 })
-                                            ) : (
-                                                <span className="text-slate-400 italic">No slot details available</span>
-                                            )}
+                                            ) : <span className="text-slate-400 italic">No slot details available</span>}
                                         </div>
-
                                         <div className="text-xs text-slate-500 mt-2">Video: {order.hasVideo ? t('video_uploaded') : t('video_missing')}</div>
                                     </td>
                                     <td className="p-4 text-right font-bold align-top">HK$ {order.amount?.toLocaleString()}</td>
@@ -168,7 +155,7 @@ export const ConfigView = ({ config, setConfig, globalConfig, setGlobal, target,
     );
 };
 
-// --- 6. Calendar View ---
+// --- 6. Calendar View (🔥 重點升級：顯示所有工作細節) ---
 export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid, screens, onSelectSlot, onPrev, onNext }) => {
     const { t } = useLanguage();
     return (
@@ -180,18 +167,67 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                     <div className="flex items-center gap-1 bg-white border p-1 rounded-lg"><button onClick={onPrev} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft size={16}/></button><span className="px-3 font-mono font-bold text-sm min-w-[100px] text-center">{mode==='month'?date.toLocaleDateString():date.toLocaleDateString()}</span><button onClick={onNext} className="p-1 hover:bg-slate-100 rounded"><ChevronRight size={16}/></button></div>
                 </div>
             </div>
+            
+            {/* 🔥🔥🔥 月視圖：顯示所有標籤 (待辦/審核/已排/競價) 🔥🔥🔥 */}
             {mode === 'month' && (
                 <div className="flex-1 p-4 overflow-auto">
                     <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
                         {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><div key={d} className="bg-slate-50 p-2 text-center text-xs font-bold text-slate-500">{d}</div>)}
-                        {Object.entries(monthData).map(([dStr, d]) => (<div key={dStr} onClick={()=>{setDate(new Date(dStr)); setMode('day');}} className="bg-white min-h-[100px] p-2 hover:bg-blue-50 cursor-pointer relative group"><div className="text-xs font-bold text-slate-700 mb-2">{dStr.split('-')[2]}</div><div className="space-y-1">{d.bidding>0 && <div className="text-[10px] bg-yellow-50 text-yellow-600 px-1 rounded flex justify-between"><span>Bid</span><span>{d.bidding}</span></div>}</div></div>))}
+                        {Object.entries(monthData).map(([dStr, d]) => (
+                            <div key={dStr} onClick={()=>{setDate(new Date(dStr)); setMode('day');}} className="bg-white min-h-[100px] p-2 hover:bg-blue-50 cursor-pointer relative group flex flex-col">
+                                <div className="text-xs font-bold text-slate-700 mb-1">{dStr.split('-')[2]}</div>
+                                <div className="space-y-0.5 mt-auto">
+                                    {d.action > 0 && <div className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded flex justify-between font-bold mb-0.5"><span>待辦</span><span>{d.action}</span></div>}
+                                    {d.pending > 0 && <div className="text-[10px] bg-red-100 text-red-700 px-1 rounded flex justify-between font-bold mb-0.5"><span>審核</span><span>{d.pending}</span></div>}
+                                    {d.scheduled > 0 && <div className="text-[10px] bg-green-100 text-green-700 px-1 rounded flex justify-between font-bold mb-0.5"><span>已排</span><span>{d.scheduled}</span></div>}
+                                    {d.bidding > 0 && <div className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded flex justify-between font-bold mb-0.5"><span>競價</span><span>{d.bidding}</span></div>}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
+
+            {/* 🔥🔥🔥 日視圖：顯示詳細工作卡 (Job Card) 🔥🔥🔥 */}
             {mode === 'day' && (
                 <div className="flex-1 overflow-auto flex flex-col min-h-0">
-                    <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10"><div className="w-12 shrink-0 border-r border-slate-200 p-2 text-[10px] font-bold text-slate-400">Time</div>{screens.map(s=>(<div key={s.id} className="flex-1 min-w-[120px] border-r border-slate-200 p-2 text-center text-xs font-bold truncate">{s.name}</div>))}</div>
-                    {Array.from({length: 24},(_,i)=>i).map(h=>(<div key={h} className="flex h-12 border-b border-slate-100 hover:bg-slate-50/50"><div className="w-12 shrink-0 border-r border-slate-200 flex items-center justify-center text-[10px] text-slate-400">{String(h).padStart(2,'0')}:00</div>{screens.map(s=>{const k=`${h}-${s.id}`;const g=dayGrid[k];const top=g?g[0]:null;let cls='bg-white';if(top){if(top.displayStatus==='scheduled')cls='bg-emerald-100 text-emerald-700';else if(top.displayStatus==='action_needed')cls='bg-blue-100 text-blue-700';else if(top.displayStatus==='review_needed')cls='bg-red-100 text-red-700';else if(top.displayStatus==='bidding')cls='bg-yellow-50 text-yellow-600';}return(<div key={k} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${cls}`} onClick={()=>g&&onSelectSlot(g)}>{top&&(<div className="w-full h-full flex flex-col justify-center px-1 text-[10px] leading-tight relative">{g.length>1&&<span className="absolute -top-1 -right-1 bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center">{g.length}</span>}<div className="font-bold truncate">{top.userEmail}</div><div className="opacity-80">${top.price}</div></div>)}</div>)})}</div>))}
+                    <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
+                        <div className="w-12 shrink-0 border-r border-slate-200 p-2 text-[10px] font-bold text-slate-400">Time</div>
+                        {screens.map(s=>(<div key={s.id} className="flex-1 min-w-[120px] border-r border-slate-200 p-2 text-center text-xs font-bold truncate">{s.name}</div>))}
+                    </div>
+                    {Array.from({length: 24},(_,i)=>i).map(h=>(
+                        <div key={h} className="flex h-12 border-b border-slate-100 hover:bg-slate-50/50">
+                            <div className="w-12 shrink-0 border-r border-slate-200 flex items-center justify-center text-[10px] text-slate-400">{String(h).padStart(2,'0')}:00</div>
+                            {screens.map(s=>{
+                                const k=`${h}-${s.id}`;
+                                const g=dayGrid[k];
+                                const top=g?g[0]:null;
+                                
+                                let cls='bg-white';
+                                let icon=null;
+                                let statusText = '';
+
+                                if(top){
+                                    if(top.displayStatus==='scheduled') { cls='bg-emerald-100 text-emerald-700 border-emerald-200'; icon=<CheckCircle size={10}/>; statusText='已排程'; }
+                                    else if(top.displayStatus==='action_needed') { cls='bg-blue-100 text-blue-700 border-blue-200'; icon=<AlertCircle size={10}/>; statusText='待處理'; }
+                                    else if(top.displayStatus==='review_needed') { cls='bg-red-100 text-red-700 border-red-200'; icon=<Video size={10}/>; statusText='待審核'; }
+                                    else if(top.displayStatus==='bidding') { cls='bg-yellow-50 text-yellow-700 border-yellow-200'; icon=<Clock size={10}/>; statusText='競價中'; }
+                                }
+
+                                return(
+                                    <div key={k} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${top ? 'hover:shadow-md' : ''}`} onClick={()=>g&&onSelectSlot(g)}>
+                                        {top && (
+                                            <div className={`w-full h-full flex flex-col justify-center px-1.5 py-0.5 text-[10px] leading-tight relative rounded border ${cls}`}>
+                                                {g.length>1 && <span className="absolute -top-1 -right-1 bg-red-600 text-white w-4 h-4 rounded-full flex items-center justify-center font-bold shadow-sm">{g.length}</span>}
+                                                <div className="font-bold truncate flex items-center gap-1">{icon} {statusText}</div>
+                                                <div className="truncate opacity-80">{top.userEmail}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    ))}
                 </div>
             )}
         </div>

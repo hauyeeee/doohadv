@@ -140,10 +140,36 @@ const AdminPanel = () => {
       return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
+  // 🔥🔥🔥 修正版 Month View Data (加入 Action Count) 🔥🔥🔥
   const monthViewData = useMemo(() => {
-      const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1); const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0); const days = {}; 
-      for(let d = 1; d <= endOfMonth.getDate(); d++) { const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0 }; }
-      orders.forEach(order => { if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; order.detailedSlots.forEach(slot => { if(days[slot.date]) { days[slot.date].count++; if(order.status === 'paid_pending_selection' || order.status === 'partially_outbid') days[slot.date].bidding++; else if(order.creativeStatus === 'pending_review' || (order.hasVideo && !order.isApproved && !order.isRejected)) days[slot.date].pending++; else if(order.isScheduled) days[slot.date].scheduled++; } }); });
+      const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1); 
+      const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0); 
+      const days = {}; 
+      
+      for(let d = 1; d <= endOfMonth.getDate(); d++) { 
+          const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; 
+          days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0, action: 0 }; 
+      }
+      
+      orders.forEach(order => { 
+          if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
+          
+          order.detailedSlots.forEach(slot => { 
+              if(days[slot.date]) { 
+                  days[slot.date].count++; 
+                  
+                  const isBidding = ['paid_pending_selection', 'partially_outbid'].includes(order.status);
+                  const isReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
+                  const isScheduled = order.isScheduled;
+                  const isWon = ['won', 'paid', 'partially_won'].includes(order.status);
+
+                  if (isBidding) days[slot.date].bidding++;
+                  else if (isReview) days[slot.date].pending++;
+                  else if (isScheduled) days[slot.date].scheduled++;
+                  else if (isWon) days[slot.date].action++; // 🔥 加上這個：待辦事項
+              } 
+          }); 
+      });
       return days;
   }, [orders, calendarDate]);
 
@@ -164,10 +190,8 @@ const AdminPanel = () => {
       setLoading(true);
 
       try {
-          // 1. 獲取所有相關訂單
           const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "lost"]));
           const snapshot = await getDocs(q);
-          
           const allOrders = snapshot.docs.map(d => {
               const data = d.data();
               let timeVal;
@@ -177,7 +201,6 @@ const AdminPanel = () => {
               return { id: d.id, ...data, timeVal };
           });
 
-          // 2. 建立「戰場 (Arena)」
           const slotWars = {};
 
           allOrders.forEach(order => {
@@ -186,28 +209,21 @@ const AdminPanel = () => {
               order.detailedSlots.forEach(slot => {
                   if (!slot.date || !slot.screenId) return;
 
-                  // 🔥 FIX 1: 強制將 ID 和 Hour 轉為統一格式，防止 "1" vs 1 導致比對失敗
                   const hourInt = parseInt(slot.hour);
                   const screenIdStr = String(slot.screenId); // 強制轉 String
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
-                  // 🔥 FIX 2: 這裡的 bidPrice 是單個 slot 的價錢，絕對不是整張單的價錢
                   const myPrice = parseInt(slot.bidPrice) || 0;
                   const myTime = order.timeVal;
 
-                  // 開始比武
                   if (!slotWars[key]) {
-                      // 如果沒人佔領，我佔領
                       slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   } else {
                       const currentKing = slotWars[key];
-
                       if (myPrice > currentKing.maxPrice) {
-                          // 價高者得 (單價比拼)
                           slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                       } 
                       else if (myPrice === currentKing.maxPrice) {
-                          // 同價：先到先得
                           if (myTime < currentKing.timeVal) {
                               slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
                           }
@@ -216,10 +232,8 @@ const AdminPanel = () => {
               });
           });
 
-          // Debug: 打印出來睇下邊個贏
           console.log("👑 Slot Winners (Debug):", slotWars);
 
-          // 3. 更新每一張單
           const batch = writeBatch(db);
           let updateCount = 0;
 
@@ -231,56 +245,32 @@ const AdminPanel = () => {
               let newDetailedSlots = [...order.detailedSlots];
               let hasChange = false;
 
-              // 檢查這張單的每一個 Slot 係贏定輸
               newDetailedSlots = newDetailedSlots.map(slot => {
                   const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId); // 確保這裡也一樣
+                  const screenIdStr = String(slot.screenId);
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
                   const winner = slotWars[key];
-                  
                   let newSlotStatus = 'normal';
 
-                  // 如果該時段有人贏 (通常都有)
                   if (winner) {
-                      if (winner.winnerOrderId !== order.id) {
-                          // 贏家不是我 -> 我輸了
-                          loseCount++;
-                          newSlotStatus = 'outbid';
-                      } else {
-                          // 贏家是我 -> 我贏了
-                          winCount++;
-                          newSlotStatus = 'winning';
-                      }
+                      if (winner.winnerOrderId !== order.id) { loseCount++; newSlotStatus = 'outbid'; } 
+                      else { winCount++; newSlotStatus = 'winning'; }
                   }
-                  
-                  if (slot.slotStatus !== newSlotStatus) {
-                      hasChange = true;
-                  }
+                  if (slot.slotStatus !== newSlotStatus) { hasChange = true; }
                   return { ...slot, slotStatus: newSlotStatus };
               });
 
-              // 決定整張單的狀態 (Order Level Status)
               let newStatus = order.status;
-              
-              if (loseCount > 0 && winCount === 0) {
-                  newStatus = 'outbid_needs_action'; // 全輸
-              } else if (loseCount > 0 && winCount > 0) {
-                  newStatus = 'partially_outbid'; // 輸一半
-              } else if (loseCount === 0 && winCount > 0) {
-                  // 全贏
-                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
-                      newStatus = 'paid_pending_selection'; 
-                  }
+              if (loseCount > 0 && winCount === 0) newStatus = 'outbid_needs_action'; 
+              else if (loseCount > 0 && winCount > 0) newStatus = 'partially_outbid'; 
+              else if (loseCount === 0 && winCount > 0) {
+                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') newStatus = 'paid_pending_selection'; 
               }
 
               if (hasChange || newStatus !== order.status) {
                   const orderRef = doc(db, "orders", order.id);
-                  batch.update(orderRef, {
-                      detailedSlots: newDetailedSlots,
-                      status: newStatus,
-                      lastUpdated: serverTimestamp()
-                  });
+                  batch.update(orderRef, { detailedSlots: newDetailedSlots, status: newStatus, lastUpdated: serverTimestamp() });
                   updateCount++;
               }
           });
@@ -288,15 +278,9 @@ const AdminPanel = () => {
           await batch.commit();
           alert(t('alert_resolve_success'));
 
-      } catch (error) {
-          console.error("Auto Resolve Error:", error);
-          alert(`Error: ${error.message}`);
-      } finally {
-          setLoading(false);
-      }
+      } catch (error) { console.error("Auto Resolve Error:", error); alert(`Error: ${error.message}`); } finally { setLoading(false); }
   };
 
-  // 🔥🔥🔥 必須包含這個函數，之前就是因為缺少它才報錯 🔥🔥🔥
   const handleFinalizeAuction = async () => {
       if(!confirm(t('alert_confirm_finalize'))) return; 
       setLoading(true);
@@ -306,15 +290,10 @@ const AdminPanel = () => {
           const batch = writeBatch(db); 
           let count=0; 
           const now=new Date();
-          
           for(const d of snapshot.docs) {
               const o = d.data();
               if(o.detailedSlots && o.detailedSlots.length > 0) {
-                  const allSlotsExpired = o.detailedSlots.every(s => {
-                      const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`);
-                      return now > slotTime;
-                  });
-
+                  const allSlotsExpired = o.detailedSlots.every(s => { const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`); return now > slotTime; });
                   if (allSlotsExpired) {
                       batch.update(doc(db,"orders",d.id), {status:'lost', finalizedAt: serverTimestamp()});
                       await sendBidLostEmail({email:o.userEmail, displayName:o.userName}, {id:d.id});
@@ -377,14 +356,7 @@ const AdminPanel = () => {
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
             <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> {t('admin_title')}</h1>
             <div className="flex gap-2">
-                {/* 🔥 語言切換按鈕 */}
-                <button 
-                    onClick={toggleLanguage} 
-                    className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"
-                >
-                    <Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}
-                </button>
-
+                <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"><Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}</button>
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">{t('back_home')}</button>
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">{t('logout')}</button>
                 <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> {t('btn_smart_resolve')}</button>
