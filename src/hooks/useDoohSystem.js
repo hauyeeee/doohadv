@@ -1,4 +1,3 @@
-// ... (imports 保持不變，與你提供的檔案一致)
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   signInWithPopup, signOut, onAuthStateChanged 
@@ -15,12 +14,12 @@ import {
     sendBidReceivedEmail, 
     sendBuyoutSuccessEmail, 
     sendOutbidByBuyoutEmail,
-    sendStandardOutbidEmail // 確保這裡有 import
+    sendStandardOutbidEmail 
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
-  // ... (States 保持不變 ...)
+  // --- States ---
   const [user, setUser] = useState(null); 
   const [isAuthReady, setIsAuthReady] = useState(false); 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -74,11 +73,11 @@ export const useDoohSystem = () => {
 
   const emailSentRef = useRef(false);
 
+  // --- Constants ---
   const HOURS = Array.from({ length: 24 }, (_, i) => ({ val: i, label: `${String(i).padStart(2, '0')}:00` }));
   const WEEKDAYS_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 
-  // ... (Helpers, Effects 保持不變 ...)
-  // (為了節省篇幅，這部分不變，請直接使用原有的代碼)
+  // --- Helpers ---
   const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -107,6 +106,7 @@ export const useDoohSystem = () => {
       if (hasPrime) return 'prime'; if (hasGold) return 'gold'; return 'normal';
   };
 
+  // --- Effects ---
   useEffect(() => {
     initEmailService(); 
     const fetchScreens = async () => {
@@ -238,81 +238,48 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 標準競價被超越通知 (修復版) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
       if (!newSlots || newSlots.length === 0) return;
-
-      console.log("🔍 [Check Outbid] Checking for standard outbids...");
-
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
       let outbidFound = false;
-
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          if (oldOrder.userId === newOrder.userId) return; // 不要通知自己
-
+          if (oldOrder.userId === newOrder.userId) return;
           let outbidInfo = [];
           let hasChange = false;
-
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
               const matchNewSlot = newSlots.find(ns => ns.date === oldSlot.date && ns.hour == oldSlot.hour && String(ns.screenId) === String(oldSlot.screenId));
               if (matchNewSlot) {
                   const oldPrice = parseInt(oldSlot.bidPrice);
                   const newPrice = parseInt(matchNewSlot.bidPrice);
-                  
-                  // 如果新價高過舊價，且舊單尚未標記為 outbid
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
-                      console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
-                      
-                      // 準備 Email 內容
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName} (New Bid: HK$${newPrice})`);
-                      
                       hasChange = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
               }
               return oldSlot;
           });
-
           if (hasChange) {
               outbidFound = true;
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
-              
               let newStatus = 'paid_pending_selection'; 
-              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
-              else if (outbidCount > 0) newStatus = 'partially_outbid'; 
-
-              // 🔥 發送 Email (確保這裡有執行)
+              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; else if (outbidCount > 0) newStatus = 'partially_outbid'; 
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('\n');
-                  // 這裡我們假設 sendStandardOutbidEmail 內部會使用 template_34bea2p
-                  // 如果 emailService.js 裡面的 Template ID 錯了，請去 emailService.js 改
-                  // 但我們這裡確保有 Call 到
                   sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName, infoStr, "Higher Bid Placed");
-                  console.log(`📧 Email sent to ${oldOrder.userEmail}`);
               }
-
               const oldOrderRef = doc(db, "orders", docSnap.id);
               batch.update(oldOrderRef, { detailedSlots: updatedOldSlots, status: newStatus, lastUpdated: serverTimestamp() });
           }
       });
-
-      if (outbidFound) {
-          await batch.commit();
-          console.log("✅ Outbid updates committed to DB.");
-      } else {
-          console.log("✅ No outbids found.");
-      }
+      if (outbidFound) await batch.commit();
   };
-
-  // ... (其餘的 fetchAndFinalizeOrder, useEffect, handleRealUpload, closeTransaction... 保持不變)
-  // ... (請直接複製你原本的代碼，或者如果需要我提供完整檔案，請告知。這裡只顯示修改的部分)
-  // 為了確保完整性，以下是接續的標準代碼：
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
@@ -501,12 +468,15 @@ export const useDoohSystem = () => {
       return true; 
   };
 
-  const initiateTransaction = async (type = 'bid') => {
+  // 🔥🔥🔥 Refactored: Make initiateTransaction re-usable with FORCE flag 🔥🔥🔥
+  const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
-    if (!checkOrderRestrictions(type)) return;
+
+    // 🔥 如果沒有強制執行，就檢查限制
+    if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
     const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
@@ -517,8 +487,25 @@ export const useDoohSystem = () => {
     else { const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(','); slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; }
     
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
-    setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
-    try { setTransactionStep('processing'); const docRef = await addDoc(collection(db, "orders"), txnData); localStorage.setItem('temp_order_id', docRef.id); localStorage.setItem('temp_txn_time', new Date().getTime().toString()); setPendingTransaction({ ...txnData, id: docRef.id }); setCurrentOrderId(docRef.id); setTransactionStep('summary'); } catch (error) { console.error("❌ AddDoc Error:", error); showToast("建立訂單失敗"); setTransactionStep('idle'); }
+    
+    // Close modals and Proceed
+    setIsBidModalOpen(false); 
+    setIsBuyoutModalOpen(false);
+    setRestrictionModalData(null); // Ensure this is closed
+    setTransactionStep('processing');
+    
+    try { 
+        const docRef = await addDoc(collection(db, "orders"), txnData); 
+        localStorage.setItem('temp_order_id', docRef.id); 
+        localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
+        setPendingTransaction({ ...txnData, id: docRef.id }); 
+        setCurrentOrderId(docRef.id); 
+        setTransactionStep('summary'); 
+    } catch (error) { 
+        console.error("❌ AddDoc Error:", error); 
+        showToast("建立訂單失敗"); 
+        setTransactionStep('idle'); 
+    }
   };
 
   const processPayment = async () => {
@@ -545,8 +532,7 @@ export const useDoohSystem = () => {
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
-          // 🔥 Update: 這裡必須手動觸發一次 Outbid Check，確保其他買家收到通知
-          // 由於 checkAndNotifyStandardOutbid 需要一個 "newOrder" 物件，我們構造一個臨時的
+          // 🔥 保留：通知被超越者
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           checkAndNotifyStandardOutbid(tempOrder);
 
@@ -563,32 +549,10 @@ export const useDoohSystem = () => {
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
+  // 🔥🔥🔥 Simplified Handle Proceed 🔥🔥🔥
   const handleProceedAfterRestriction = () => {
-      setRestrictionModalData(null); 
       const type = restrictionModalData?.type || 'bid';
-      const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-      const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
-      const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
-      const screenNamesStr = Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : `Screen ${id}`; }).join(', ');
-      let slotSummary = "";
-      if (mode === 'specific') { const datesStr = Array.from(selectedSpecificDates).join(', '); slotSummary = `日期: [${datesStr}] | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; } 
-      else { const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(','); slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; }
-      
-      const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
-      
-      setIsBidModalOpen(false); setIsBuyoutModalOpen(false);
-      setTransactionStep('processing');
-      addDoc(collection(db, "orders"), txnData).then(docRef => {
-          localStorage.setItem('temp_order_id', docRef.id);
-          localStorage.setItem('temp_txn_time', new Date().getTime().toString());
-          setPendingTransaction({ ...txnData, id: docRef.id });
-          setCurrentOrderId(docRef.id);
-          setTransactionStep('summary');
-      }).catch(err => {
-          console.error("AddDoc Error", err);
-          showToast("建立訂單失敗");
-          setTransactionStep('idle');
-      });
+      initiateTransaction(type, true); // Force Proceed!
   };
 
   return {
