@@ -107,9 +107,17 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                         }
                         
                         // --- 2. 判斷是否過期 (已截標) ---
+                        // 這裡使用 24小時前 截標邏輯 (即係公佈結果時間)
                         const now = new Date();
-                        // 假設播放時間前一小時截標，或這裡直接用播放時間比較
-                        const isOrderExpired = firstSlotDate && now >= firstSlotDate;
+                        let revealTimeStr = "---";
+                        let isOrderExpired = false;
+
+                        if (firstSlotDate) {
+                            const revealDate = new Date(firstSlotDate);
+                            revealDate.setHours(revealDate.getHours() - 24); // 24小時前
+                            isOrderExpired = now >= revealDate;
+                            revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        }
 
                         // --- 3. 狀態顯示邏輯 (修復載入中問題) ---
                         let statusConfig = { 
@@ -145,14 +153,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
                         } else if (order.status === 'partially_outbid') {
                             statusConfig = { bg: 'bg-orange-50', text: 'text-orange-700', label: t('status_partially_outbid') };
-                        }
-
-                        // 計算結果公佈時間文字
-                        let revealTimeStr = "---";
-                        if (firstSlotDate) {
-                            const revealDate = new Date(firstSlotDate);
-                            revealDate.setHours(revealDate.getHours() - 24); // 24小時前公佈
-                            revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
                         return (
@@ -199,16 +199,13 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <div className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono w-fit">{date}</div>
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                             {groupedSlots[date].map((slot) => {
-                                                                // Slot Status Logic
-                                                                const isWinning = slot.slotStatus === 'winning' || slot.slotStatus === 'won';
-                                                                const isOutbid = slot.slotStatus === 'outbid';
-                                                                const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
+                                                                const isOutbid = slot.slotStatus === 'outbid' || slot.slotStatus === 'lost';
+                                                                // 🔥 關鍵修正：如果單已結算，且該格沒有輸，那它就是贏了！
+                                                                const isWinning = (slot.slotStatus === 'winning' || slot.slotStatus === 'won') || (isSettled && !isOutbid);
                                                                 
-                                                                // Slot Specific Time Check
-                                                                const slotTime = new Date(`${slot.date}T${String(slot.hour).padStart(2,'0')}:00:00`);
-                                                                const isSlotExpired = new Date() >= slotTime;
+                                                                const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
+                                                                const isSlotExpired = isOrderExpired; // 使用整張單的截標時間
 
-                                                                // Dynamic Styles
                                                                 let borderClass = "border-slate-200";
                                                                 let bgClass = "bg-white";
                                                                 if(isWinning) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
@@ -262,7 +259,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                     </span>
                                                                                     
                                                                                     {/* 加價按鈕：只在被超越且未截標時顯示 */}
-                                                                                    {isOutbid && order.status !== 'lost' && (
+                                                                                    {isOutbid && !isSettled && (
                                                                                         isSlotExpired ? (
                                                                                             <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200">
                                                                                                 <Lock size={10}/> {t('bid_closed')}
@@ -298,7 +295,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
                                             
                                             <p className="text-xs text-slate-400 mt-1">
-                                                {['won', 'paid', 'partially_won'].includes(order.status) ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
+                                                {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
                                                  ['paid_pending_selection', 'partially_outbid', 'pending_reauth', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
                                                  order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
                                                  (lang==='en'?'Processing...':'等待處理...')}
