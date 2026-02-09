@@ -317,8 +317,6 @@ export const useDoohSystem = () => {
 
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
-    
-    // QR Code Check
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
         const id = parseInt(qrScreenId);
@@ -327,7 +325,6 @@ export const useDoohSystem = () => {
             showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
         }
     }
-
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
     const isCanceled = queryParams.get('canceled') === 'true'; 
@@ -479,14 +476,14 @@ export const useDoohSystem = () => {
       return true; 
   };
 
-  // 🔥🔥🔥 REFACTORED: 支援 Force Proceed 🔥🔥🔥
+  // 🔥🔥🔥 核心修改：加入 forceProceed 參數，確保確認後一定執行 🔥🔥🔥
   const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
-    // 🔥 如果沒有強制執行，就檢查限制
+    // 如果沒有強制執行，先檢查限制
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -499,11 +496,11 @@ export const useDoohSystem = () => {
     
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
     
-    // Close ALL modals
+    // 強制關閉所有 Modal，避免狀態衝突
     setIsBidModalOpen(false); 
     setIsBuyoutModalOpen(false);
-    setRestrictionModalData(null); // Force close
-    setTransactionStep('processing');
+    setRestrictionModalData(null); 
+    setTransactionStep('processing'); // 這裡觸發 Loading
     
     try { 
         const docRef = await addDoc(collection(db, "orders"), txnData); 
@@ -511,12 +508,21 @@ export const useDoohSystem = () => {
         localStorage.setItem('temp_txn_time', new Date().getTime().toString()); 
         setPendingTransaction({ ...txnData, id: docRef.id }); 
         setCurrentOrderId(docRef.id); 
-        setTransactionStep('summary'); 
+        setTransactionStep('summary'); // 這裡觸發跳轉 Payment Modal
     } catch (error) { 
         console.error("❌ AddDoc Error:", error); 
         showToast("建立訂單失敗"); 
         setTransactionStep('idle'); 
     }
+  };
+
+  // 🔥🔥🔥 新增：救單功能 (Resume Payment) 🔥🔥🔥
+  const resumePayment = (order) => {
+      setPendingTransaction(order); // 將舊單資料放回去
+      setCurrentOrderId(order.id);
+      localStorage.setItem('temp_order_id', order.id);
+      setTransactionStep('summary'); // 重新觸發付款介面
+      setIsProfileModalOpen(false); // 關閉 My Orders
   };
 
   const processPayment = async () => {
@@ -557,7 +563,7 @@ export const useDoohSystem = () => {
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
-  // 🔥🔥🔥 Simplified: Just call initiateTransaction with FORCE = true 🔥🔥🔥
+  // 🔥🔥🔥 更新 Handle Proceed: 直接呼叫 initiateTransaction 並帶入 force=true 🔥🔥🔥
   const handleProceedAfterRestriction = () => {
       const type = restrictionModalData?.type || 'bid';
       initiateTransaction(type, true); // Force Proceed!
@@ -575,7 +581,9 @@ export const useDoohSystem = () => {
     
     restrictionModalData, 
     setRestrictionModalData,
-    handleProceedAfterRestriction, 
+    handleProceedAfterRestriction,
+    
+    resumePayment, // Export this
 
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,

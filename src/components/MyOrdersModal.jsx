@@ -1,24 +1,20 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap } from 'lucide-react';
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
-const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid }) => {
+const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
   const { t, lang } = useLanguage();
   const [updatingSlot, setUpdatingSlot] = useState(null);
   const [newBidPrice, setNewBidPrice] = useState('');
 
   if (!isOpen || !user) return null;
 
-  // 處理加價提交 (包含重新授權總額計算)
   const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum) => {
       if (!newBidPrice || parseInt(newBidPrice) <= parseInt(currentPrice)) {
           alert(lang === 'en' ? "New bid must be higher!" : "新出價必須高於目前出價！");
           return;
       }
-      
-      // 計算重新授權的總額 (其他時段舊價 + 這個時段新價)
       const newTotal = otherSlotsSum + parseInt(newBidPrice);
-      
       const confirmMsg = lang === 'en' 
           ? `Confirm bid increase? Total re-authorization: HK$${newTotal.toLocaleString()}` 
           : `確定加價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
@@ -39,7 +35,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                 <div className="flex items-center gap-4">
                     <div className="relative">
                         <img src={user.photoURL} className="w-12 h-12 rounded-full border-2 border-white shadow-md" alt="User"/>
-                        {/* Online Indicator */}
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                     </div>
                     <div>
@@ -48,47 +43,29 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={onLogout} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-2 transition-colors">
-                        <LogOut size={16}/> {t('logout')}
-                    </button>
-                    <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
-                        <X size={24}/>
-                    </button>
+                    <button onClick={onLogout} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-2 transition-colors"><LogOut size={16}/> {t('logout')}</button>
+                    <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"><X size={24}/></button>
                 </div>
             </div>
             
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-                <h4 className="font-bold text-slate-700 text-lg flex items-center gap-2 mb-2">
-                    <History size={20}/> {t('my_orders')}
-                </h4>
+                <h4 className="font-bold text-slate-700 text-lg flex items-center gap-2 mb-2"><History size={20}/> {t('my_orders')}</h4>
                 
                 {myOrders.length === 0 ? (
-                    <div className="text-center py-20 opacity-50">
-                        <History size={64} className="mx-auto mb-4 text-slate-300"/>
-                        <p>{lang === 'en' ? "No orders yet" : "暫無訂單記錄"}</p>
-                    </div>
+                    <div className="text-center py-20 opacity-50"><History size={64} className="mx-auto mb-4 text-slate-300"/><p>No orders yet</p></div>
                 ) : (
                     myOrders.map((order) => {
-                        // --- 1. 資料分組與時間計算 ---
                         const groupedSlots = {};
                         let firstSlotDate = null;
-                        
-                        // 計算目前訂單總出價 (用於加價時計算 otherSlotsSum)
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
 
-                        // 🔥 計算實際「贏得」的金額 (UI Display Only) - 輸咗唔算錢
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             return isLost ? sum : sum + (parseInt(s.bidPrice)||0);
                         }, 0) : 0;
 
-                        // 判斷是否「已完全結算」 (Won, Paid, Completed, Lost)
                         const isSettled = ['won', 'paid', 'completed', 'lost'].includes(order.status);
-                        
-                        // 決定顯示哪個價錢：
-                        // - 如果已結算：顯示 actualWinningAmount (扣除輸掉的)
-                        // - 如果未結算：顯示 order.amount (預授權總額)
                         const displayAmount = isSettled ? actualWinningAmount : (order.amount || 0);
 
                         if (order.detailedSlots) { 
@@ -97,7 +74,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                 if (!groupedSlots[slot.date]) groupedSlots[slot.date] = []; 
                                 groupedSlots[slot.date].push(slotWithIndex); 
                             }); 
-                            // 獲取第一個時段的時間作為整張單的參考時間
                             if (order.detailedSlots.length > 0) {
                                 const d = new Date(order.detailedSlots[0].date); 
                                 d.setHours(parseInt(order.detailedSlots[0].hour), 0, 0, 0);
@@ -105,50 +81,34 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             }
                         }
                         
-                        // --- 2. 判斷是否過期 (已截標) ---
-                        // 這裡使用 24小時前 截標邏輯
                         const now = new Date();
                         let revealTimeStr = "---";
                         let isOrderExpired = false;
 
                         if (firstSlotDate) {
                             const revealDate = new Date(firstSlotDate);
-                            revealDate.setHours(revealDate.getHours() - 24); // 24小時前
+                            revealDate.setHours(revealDate.getHours() - 24); 
                             isOrderExpired = now >= revealDate;
                             revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
-                        // --- 3. 狀態顯示邏輯 ---
-                        let statusConfig = { 
-                            bg: 'bg-slate-100', 
-                            text: 'text-slate-500', 
-                            label: lang === 'en' ? 'Processing...' : '處理中...' 
-                        };
+                        let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         
-                        // 優先判斷明確的狀態
                         if (['won', 'paid', 'completed'].includes(order.status)) {
-                            statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') }; // 競價成功
+                            statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'partially_won') {
                             statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-700', label: lang==='en'?'Partially Won':'部分中標' };
                         } else if (order.status === 'lost') {
-                            statusConfig = { bg: 'bg-gray-100', text: 'text-gray-500', label: t('status_lost') }; // 未中標
+                            statusConfig = { bg: 'bg-gray-100', text: 'text-gray-500', label: t('status_lost') };
                         } else if (order.status === 'cancelled') {
                             statusConfig = { bg: 'bg-slate-100', text: 'text-slate-400', label: t('status_cancelled') };
                         } else if (order.status === 'outbid_needs_action') {
-                            statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') }; // 被超越 (全輸)
+                            statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') };
                         } else if (order.status === 'pending_auth' || order.status === 'pending_reauth') { 
-                            statusConfig = { bg: 'bg-purple-50', text: 'text-purple-600', label: t('status_pending_auth') }; // 授權中
-                        } 
-                        // 如果狀態是 "競價中" 或 "部分被超越"，但時間已過 -> 顯示 "已截止"
-                        else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
-                            statusConfig = { 
-                                bg: 'bg-slate-200', 
-                                text: 'text-slate-600', 
-                                label: lang === 'en' ? 'Closed' : '⏳ 已截止' 
-                            };
-                        }
-                        // 正常競價中
-                        else if (order.status === 'paid_pending_selection') {
+                            statusConfig = { bg: 'bg-purple-50', text: 'text-purple-600', label: t('status_pending_auth') };
+                        } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
+                            statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
+                        } else if (order.status === 'paid_pending_selection') {
                             statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
                         } else if (order.status === 'partially_outbid') {
                             statusConfig = { bg: 'bg-orange-50', text: 'text-orange-700', label: t('status_partially_outbid') };
@@ -156,22 +116,15 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
 
                         return (
                             <div key={order.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                                {/* Order Header */}
                                 <div className="bg-slate-50/50 p-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2">
                                     <div className="flex items-center gap-3">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${statusConfig.bg} ${statusConfig.text}`}>
-                                            {statusConfig.label}
-                                        </span>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${statusConfig.bg} ${statusConfig.text}`}>{statusConfig.label}</span>
                                         <span className="text-xs text-slate-400 font-mono">#{order.id.slice(0, 8)}</span>
                                     </div>
-                                    <div className="text-right">
-                                        <span className="text-xs text-slate-400 block">{order.displayTime}</span>
-                                    </div>
+                                    <div className="text-right"><span className="text-xs text-slate-400 block">{order.displayTime}</span></div>
                                 </div>
 
-                                {/* Order Body */}
                                 <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    {/* Left: Details */}
                                     <div className="md:col-span-2 space-y-4">
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{lang==='en'?'Type':'購買類型'}</p>
@@ -182,14 +135,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                             </div>
                                         </div>
 
-                                        {/* Reveal Time Info (只在未結算且未過期時顯示) */}
                                         {order.type === 'bid' && !['won','paid','completed','lost','cancelled'].includes(order.status) && !isOrderExpired && (
                                             <div className="bg-blue-50/50 border border-blue-100 rounded px-3 py-2 text-xs text-blue-800 flex items-center gap-2">
                                                 <Info size={14}/> <span>{t('reveal_time')}：<strong>{revealTimeStr}</strong> {t('before_24h')}</span>
                                             </div>
                                         )}
 
-                                        {/* Slots List */}
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">{t('slot_details')}</p>
                                             <div className="space-y-3">
@@ -199,23 +150,18 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                             {groupedSlots[date].map((slot) => {
                                                                 const isOutbid = slot.slotStatus === 'outbid' || slot.slotStatus === 'lost';
-                                                                // 如果單已結算，且該格沒有輸，那它就是贏了！
                                                                 const isWinning = (slot.slotStatus === 'winning' || slot.slotStatus === 'won') || (isSettled && !isOutbid && order.status !== 'pending_auth');
                                                                 
-                                                                // 🔥 狀態判斷修正 🔥
-                                                                // 1. 如果已截標 (isOrderExpired) 且是 Outbid -> 顯示 LOST (Red)
-                                                                // 2. 如果未截標 且是 Outbid -> 顯示 OUTBID (Yellow) + 加價按鈕
                                                                 const showLost = isOutbid && (isOrderExpired || order.status === 'lost');
                                                                 const showOutbidWarning = isOutbid && !isOrderExpired && order.status !== 'lost';
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
-                                                                // Dynamic Styles
                                                                 let borderClass = "border-slate-200";
                                                                 let bgClass = "bg-white";
                                                                 if(isWinning) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
-                                                                if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; } // 黃色警告
-                                                                if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; } // 紅色失敗
+                                                                if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
+                                                                if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 if(order.status === 'lost') { borderClass = "border-slate-100"; bgClass = "bg-slate-50 opacity-60"; }
 
                                                                 return (
@@ -227,59 +173,31 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
                                                                                     
-                                                                                    {/* 🔥 清晰的 Win / Lost / Outbid 標籤 */}
                                                                                     {order.status !== 'pending_auth' && (
                                                                                         isWinning ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
                                                                                         showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : 
                                                                                         showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200"><AlertTriangle size={8}/> 被超越</span> : null
                                                                                     )}
                                                                                 </div>
-                                                                                <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                                                                                    <Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}
-                                                                                </span>
+                                                                                <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}</span>
                                                                             </div>
                                                                         </div>
                                                                         
-                                                                        {/* Price & Action */}
                                                                         <div className="flex items-center gap-2">
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
-                                                                                    <input 
-                                                                                        type="number" autoFocus 
-                                                                                        className="w-16 text-xs border rounded px-1 py-1" 
-                                                                                        placeholder={`>${slot.bidPrice}`} 
-                                                                                        value={newBidPrice} 
-                                                                                        onChange={e => setNewBidPrice(e.target.value)} 
-                                                                                    />
-                                                                                    <button 
-                                                                                        onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice))} 
-                                                                                        className="bg-green-500 text-white p-1 rounded hover:bg-green-600"
-                                                                                    >
-                                                                                        <CheckCircle size={12}/>
-                                                                                    </button>
+                                                                                    <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={`>${slot.bidPrice}`} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
+                                                                                    <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice))} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
-                                                                                    <span className={`text-xs font-bold ${showOutbidWarning ? 'text-red-500 line-through' : 'text-slate-600'}`}>
-                                                                                        HK${slot.bidPrice}
-                                                                                    </span>
-                                                                                    
-                                                                                    {/* 加價按鈕：只在被超越且未過期時，顯示紅色加價按鈕 */}
+                                                                                    <span className={`text-xs font-bold ${showOutbidWarning ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
                                                                                     {showOutbidWarning && (
-                                                                                        <button 
-                                                                                            onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} 
-                                                                                            className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"
-                                                                                        >
-                                                                                            <Zap size={10}/> {t('increase_bid')}
-                                                                                        </button>
+                                                                                        <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"><Zap size={10}/> {t('increase_bid')}</button>
                                                                                     )}
-
-                                                                                    {/* 鎖定圖示：已截標 */}
                                                                                     {showLost && (
-                                                                                        <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200">
-                                                                                            <Lock size={10}/> {t('bid_closed')}
-                                                                                        </span>
+                                                                                        <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200"><Lock size={10}/> {t('bid_closed')}</span>
                                                                                     )}
                                                                                 </>
                                                                             )}
@@ -294,42 +212,33 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                         </div>
                                     </div>
 
-                                    {/* Right: Payment & Creative */}
                                     <div className="md:col-span-1 border-l border-slate-100 pl-0 md:pl-6 flex flex-col justify-between">
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{t('amount_paid')}</p>
-                                            
-                                            {/* 🔥 顯示動態計算的金額 */}
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
-                                            
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
                                                  ['paid_pending_selection', 'partially_outbid', 'pending_reauth', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
                                                  order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
                                                  (lang==='en'?'Processing...':'等待處理...')}
                                             </p>
+                                            
+                                            {/* 🔥🔥🔥 新增：救單按鈕 (如果還在授權中) 🔥🔥🔥 */}
+                                            {order.status === 'pending_auth' && (
+                                                <button onClick={() => onResumePayment(order)} className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm animate-pulse">
+                                                    <CreditCard size={14}/> {lang==='en'?'Complete Payment':'立即付款'}
+                                                </button>
+                                            )}
                                         </div>
                                         
                                         <div className="mt-6 pt-6 border-t border-slate-100">
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">{lang==='en'?'Creative':'廣告素材'}</p>
                                             {order.hasVideo ? (
-                                                <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
-                                                    <CheckCircle size={24} className="text-green-500 mx-auto mb-1"/>
-                                                    <p className="text-xs font-bold text-green-700">{t('video_uploaded')}</p>
-                                                    <p className="text-[10px] text-green-600 truncate px-1">{order.videoName}</p>
-                                                </div>
+                                                <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center"><CheckCircle size={24} className="text-green-500 mx-auto mb-1"/><p className="text-xs font-bold text-green-700">{t('video_uploaded')}</p><p className="text-[10px] text-green-600 truncate px-1">{order.videoName}</p></div>
                                             ) : (
                                                 (order.status !== 'lost' && order.status !== 'cancelled') ? (
-                                                    <button 
-                                                        onClick={() => onUploadClick(order.id)} 
-                                                        className="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg p-3 flex flex-col items-center transition-colors group"
-                                                    >
-                                                        <UploadCloud size={20} className="mb-1 group-hover:scale-110 transition-transform"/>
-                                                        <span className="text-xs font-bold">{t('upload_video')}</span>
-                                                    </button>
-                                                ) : (
-                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center text-slate-400 text-xs">{t('no_upload_needed')}</div>
-                                                )
+                                                    <button onClick={() => onUploadClick(order.id)} className="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg p-3 flex flex-col items-center transition-colors group"><UploadCloud size={20} className="mb-1 group-hover:scale-110 transition-transform"/><span className="text-xs font-bold">{t('upload_video')}</span></button>
+                                                ) : <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-center text-slate-400 text-xs">{t('no_upload_needed')}</div>
                                             )}
                                         </div>
                                     </div>

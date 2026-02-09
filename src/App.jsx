@@ -47,7 +47,8 @@ const DOOHBiddingSystem = () => {
     // New Props
     restrictionModalData, 
     setRestrictionModalData, 
-    handleProceedAfterRestriction 
+    handleProceedAfterRestriction,
+    resumePayment // 🔥 引入救單函數
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
@@ -137,7 +138,6 @@ const DOOHBiddingSystem = () => {
 
       {/* --- Modals Section --- */}
       
-      {/* 🔥🔥🔥 Reminder Modal Check 🔥🔥🔥 */}
       {restrictionModalData && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border-2 border-red-100 flex flex-col gap-4">
@@ -188,7 +188,19 @@ const DOOHBiddingSystem = () => {
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
       <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
-      <MyOrdersModal isOpen={isProfileModalOpen} user={user} myOrders={myOrders} onClose={() => setIsProfileModalOpen(false)} onLogout={handleLogout} onUploadClick={handleUploadClick} handleUpdateBid={handleUpdateBid} />
+      
+      {/* 🔥 連接 onResumePayment 🔥 */}
+      <MyOrdersModal 
+        isOpen={isProfileModalOpen} 
+        user={user} 
+        myOrders={myOrders} 
+        onClose={() => setIsProfileModalOpen(false)} 
+        onLogout={handleLogout} 
+        onUploadClick={handleUploadClick} 
+        handleUpdateBid={handleUpdateBid} 
+        onResumePayment={resumePayment} 
+      />
+      
       <BuyoutModal isOpen={isBuyoutModalOpen} onClose={() => setIsBuyoutModalOpen(false)} pricing={pricing} selectedSpecificDates={selectedSpecificDates} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('buyout')} />
       <BiddingModal isOpen={isBidModalOpen} onClose={() => setIsBidModalOpen(false)} generateAllSlots={generateAllSlots} slotBids={slotBids} handleSlotBidChange={handleSlotBidChange} batchBidInput={batchBidInput} setBatchBidInput={setBatchBidInput} handleBatchBid={handleBatchBid} isBundleMode={isBundleMode} pricing={pricing} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('bid')} />
       <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} />
