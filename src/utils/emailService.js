@@ -1,15 +1,15 @@
 import emailjs from '@emailjs/browser';
 
-// 請確保這些環境變數已在 .env 文件中設定，或直接在此處替換字串
-const SERVICE_ID = "service_euz8rzz"; // 你的 EmailJS Service ID
-const PUBLIC_KEY = "zTr4nyY_nusfPcNZU";   // 你的 EmailJS Public Key
+// 請確保這些環境變數已在 .env 文件中設定
+const SERVICE_ID = "service_euz8rzz"; 
+const PUBLIC_KEY = "zTr4nyY_nusfPcNZU";   
 
 // 初始化 EmailJS
 export const initEmailService = () => {
   emailjs.init(PUBLIC_KEY);
 };
 
-// 通用發送函數 (內部使用)
+// 通用發送函數
 const sendEmail = async (templateId, templateParams) => {
   try {
     const response = await emailjs.send(SERVICE_ID, templateId, templateParams);
@@ -26,8 +26,8 @@ const sendEmail = async (templateId, templateParams) => {
 // ============================================================
 
 /**
- * 當用戶成功提交競價 (Bid) 時發送
- * Template: 收到你的出價 (Bid Received)
+ * 收到出價 (Bid Received)
+ * ID: template_biprpck
  */
 export const sendBidReceivedEmail = async (user, order) => {
   const params = {
@@ -38,13 +38,12 @@ export const sendBidReceivedEmail = async (user, order) => {
     slot_summary: order.timeSlotSummary || 'Selected Slots',
     order_date: new Date().toLocaleDateString('zh-HK')
   };
-  // Template ID: template_biprpck
   return sendEmail("template_biprpck", params);
 };
 
 /**
- * 當用戶成功買斷 (Buyout) 時發送
- * Template: 你已成功「買斷 (Buyout)」所選的廣告時段
+ * 買斷成功 (Buyout Success)
+ * ID: template_99moneg
  */
 export const sendBuyoutSuccessEmail = async (user, order) => {
   const params = {
@@ -55,64 +54,60 @@ export const sendBuyoutSuccessEmail = async (user, order) => {
     slot_summary: order.timeSlotSummary || 'Buyout Slots',
     order_date: new Date().toLocaleDateString('zh-HK')
   };
-  // Template ID: template_99moneg
   return sendEmail("template_99moneg", params);
 };
 
 // ============================================================
-// 2. 競爭與被踢 (Outbid / Conflicts)
+// 2. 競爭與被踢 (Outbid / Conflicts) - 發生在競價期間
 // ============================================================
 
 /**
- * 當用戶出價被其他人「更高價」超越時發送 (叫佢加價)
- * Template: ⚠️ Outbid Alert / 出價被超越
+ * 出價被超越 (Outbid Alert) - 標準競價被高價壓過
+ * ID: template_34bea2p
  */
 export const sendStandardOutbidEmail = async (userEmail, userName, slotInfo, currentPrice) => {
   const params = {
     to_name: userName || 'Customer',
     to_email: userEmail,
-    slot_info: slotInfo, // 例如: "2024-02-05 18:00 @ Screen A"
-    new_price: currentPrice // 現時最高價
+    slot_info: slotInfo,
+    new_price: currentPrice
   };
-  // Template ID: template_34bea2p
   return sendEmail("template_34bea2p", params);
 };
 
 /**
- * 當用戶的時段被其他人「買斷 (Buyout)」踢走時發送 (無得救)
- * Template: 抱歉，你的時段已被買斷 (Outbid by Buyout)
+ * 被買斷踢走 (Outbid by Buyout) - 全單失效
+ * ID: template_9vthu4n
  */
 export const sendOutbidByBuyoutEmail = async (userEmail, userName, slotInfo) => {
   const params = {
     to_name: userName || 'Customer',
     to_email: userEmail,
-    slot_info: slotInfo // 被買斷的時段詳情
+    slot_info: slotInfo
   };
-  // Template ID: template_9vthu4n
   return sendEmail("template_9vthu4n", params);
 };
 
 /**
- * 當 Bundle 訂單中，只有部分屏幕被踢走，其餘仍在競價
- * Template: ⚠️ Order Update / 訂單狀態更新
+ * 訂單狀態更新 (Order Update) - 部分時段失效 (Partial Outbid)
+ * ID: template_f4h2lls
  */
 export const sendPartialOutbidEmail = async (userEmail, userName, lostSlotsInfo) => {
   const params = {
     to_name: userName || 'Customer',
     to_email: userEmail,
-    slot_info: lostSlotsInfo // 列出哪些時段失效了
+    slot_info: lostSlotsInfo
   };
-  // Template ID: template_f4h2lls
   return sendEmail("template_f4h2lls", params);
 };
 
 // ============================================================
-// 3. 結果通知 (Result Notification)
+// 3. 結果通知 (Result Notification) - 發生在結算時
 // ============================================================
 
 /**
- * 競價成功 (贏左)
- * Template: Congrats, 你已中標 (Bid Won)
+ * 恭喜中標 (Bid Won) - 全贏
+ * ID: template_3n90m3u
  */
 export const sendBidWonEmail = async (user, order) => {
   const params = {
@@ -122,13 +117,28 @@ export const sendBidWonEmail = async (user, order) => {
     amount: order.amount,
     final_slots: order.timeSlotSummary
   };
-  // Template ID: template_3n90m3u
   return sendEmail("template_3n90m3u", params);
 };
 
 /**
- * 競價失敗 (輸左)
- * Template: Bid Lost / 競投失敗 (未中標)
+ * 🔥 部分中標 (Partial Win) - 贏一半 🔥
+ * ID: template_vphbdyp (新開的 Template)
+ */
+export const sendPartialWinEmail = async (userEmail, userName, orderId, wonAmount, slotSummary) => {
+  const params = {
+    to_name: userName || 'Customer',
+    to_email: userEmail,
+    order_id: orderId,
+    amount: wonAmount,
+    slot_summary: slotSummary, // HTML 格式列表 (Win/Lost)
+    message: "部分時段競投成功。未能中標的時段款項將自動退還至您的信用卡。"
+  };
+  return sendEmail("template_vphbdyp", params);
+};
+
+/**
+ * 競投失敗 (Bid Lost) - 全輸
+ * ID: template_1v8p3y8
  */
 export const sendBidLostEmail = async (user, order) => {
   const params = {
@@ -136,7 +146,6 @@ export const sendBidLostEmail = async (user, order) => {
     to_email: user.email || user.userEmail,
     order_id: order.id
   };
-  // Template ID: template_1v8p3y8
   return sendEmail("template_1v8p3y8", params);
 };
 
@@ -145,8 +154,8 @@ export const sendBidLostEmail = async (user, order) => {
 // ============================================================
 
 /**
- * 影片審核通過
- * Template: Video Approved / 影片審核通過
+ * 影片審核通過 (Video Approved)
+ * ID: template_409gjoj
  */
 export const sendVideoApprovedEmail = async (user, order) => {
   const params = {
@@ -155,13 +164,12 @@ export const sendVideoApprovedEmail = async (user, order) => {
     order_id: order.id,
     order_id_short: order.id.slice(0, 8)
   };
-  // Template ID: template_409gjoj
   return sendEmail("template_409gjoj", params);
 };
 
 /**
- * 影片審核被拒 (需要行動)
- * Template: 🚫 Action Required / 需要行動
+ * 需要行動 (Action Required) - 影片被拒
+ * ID: template_waqdg9v
  */
 export const sendVideoRejectedEmail = async (user, order, reason) => {
   const params = {
@@ -171,7 +179,6 @@ export const sendVideoRejectedEmail = async (user, order, reason) => {
     order_id_short: order.id.slice(0, 8),
     reject_reason: reason || "Content policy violation"
   };
-  // Template ID: template_waqdg9v
   return sendEmail("template_waqdg9v", params);
 };
 

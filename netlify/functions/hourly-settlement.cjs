@@ -9,9 +9,7 @@ if (!admin.apps.length) {
     admin.initializeApp({
         credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
     });
-  } catch (e) {
-    console.error("❌ Firebase Init Error:", e);
-  }
+  } catch (e) { console.error("❌ Firebase Init Error:", e); }
 }
 const db = admin.firestore();
 
@@ -20,14 +18,13 @@ const EMAIL_CFG = {
     service_id: process.env.VITE_EMAILJS_SERVICE_ID,
     user_id: process.env.VITE_EMAILJS_PUBLIC_KEY,
     private_key: process.env.EMAILJS_PRIVATE_KEY,
-    admin_email: "hauyeeee@gmail.com",
     templates: {
         WON_BID: "template_3n90m3u", 
+        PARTIAL_WIN: "template_vphbdyp", // 🔥 更新為新的 Template ID
         LOST_BID: "template_1v8p3y8",
     }
 };
 
-// 3. Send Email Helper
 const sendEmail = (templateId, params) => {
     return new Promise((resolve) => {
         if (!EMAIL_CFG.service_id) return resolve("No Config");
@@ -48,17 +45,14 @@ const sendEmail = (templateId, params) => {
     });
 };
 
-// 4. Main Logic
 const settlementHandler = async (event, context) => {
-    console.log("⏰ Settlement Run (Fixed Slot Summary)...");
-    
+    console.log("⏰ Settlement Run (Partial Logic Fix)...");
     try {
-// 🔥 Fix: 加入 'won', 'paid', 'partially_won' 確保能看見「贏家」，從而正確判定其他人「輸了」
-const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid', 'partially_won', 'won', 'paid']).get();
+        const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid', 'partially_won', 'won', 'paid']).get();
         if (snapshot.empty) return { statusCode: 200, body: "No orders" };
 
         const slotsMap = {};      
-        const orderResults = {};  
+        const orderResults = {};
 
         // B. 準備數據
         snapshot.forEach(doc => {
@@ -87,18 +81,14 @@ const snapshot = await db.collection('orders').where('status', 'in', ['paid_pend
                 data.detailedSlots.forEach(slot => {
                     orderResults[orderId].totalSlots++; 
                     const slotDateTimeStr = `${slot.date} ${String(slot.hour).padStart(2,'0')}:00`;
-                    
-                    if (true) { 
-                        const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
-                        if (!slotsMap[key]) slotsMap[key] = [];
-                        
-                        slotsMap[key].push({
-                            orderId: orderId,
-                            bidPrice: parseInt(slot.bidPrice) || 0,
-                            slotInfo: `${slotDateTimeStr} @ ${slot.screenName || slot.screenId}`
-                        });
-                        orderResults[orderId].screenNames.add(slot.screenName || slot.screenId);
-                    }
+                    const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
+                    if (!slotsMap[key]) slotsMap[key] = [];
+                    slotsMap[key].push({
+                        orderId: orderId,
+                        bidPrice: parseInt(slot.bidPrice) || 0,
+                        slotInfo: `${slotDateTimeStr} @ ${slot.screenName || slot.screenId}`
+                    });
+                    orderResults[orderId].screenNames.add(slot.screenName || slot.screenId);
                 });
             }
         });
@@ -110,7 +100,7 @@ const snapshot = await db.collection('orders').where('status', 'in', ['paid_pend
             const losers = bids.slice(1); 
 
             if (orderResults[winner.orderId]) {
-                orderResults[winner.orderId].wonAmount += winner.bidPrice; 
+                orderResults[winner.orderId].wonAmount += winner.bidPrice;
                 orderResults[winner.orderId].winCount++;
                 orderResults[winner.orderId].wonSlotsList.push(`${winner.slotInfo} (HK$ ${winner.bidPrice})`);
             }
@@ -130,56 +120,52 @@ const snapshot = await db.collection('orders').where('status', 'in', ['paid_pend
             // 情況 1: 全輸
             if (res.winCount === 0) {
                 if (res.status !== 'lost') {
-                    if (res.paymentIntentId) {
-                        try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) {}
-                    }
-                    await orderRef.update({ 
-                        status: 'lost', 
-                        lostAt: admin.firestore.FieldValue.serverTimestamp(),
-                    });
-                    // LOST Email: 暫時不傳送詳細 list，因 template 不支援
-                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { 
-                        to_email: res.userEmail, 
-                        to_name: res.userName,
-                        order_id: orderId
-                    });
+                    if (res.paymentIntentId) { try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) {} }
+                    await orderRef.update({ status: 'lost', lostAt: admin.firestore.FieldValue.serverTimestamp() });
+                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { to_email: res.userEmail, to_name: res.userName, order_id: orderId });
                 }
             }
             
-            // 情況 2: 贏
+            // 情況 2: 全贏或部分贏
             else if (res.winCount > 0) {
                 if (res.status !== 'won' && res.status !== 'paid' && res.status !== 'partially_won') {
                     
                     if (res.paymentIntentId) {
                         try {
                             await stripe.paymentIntents.capture(res.paymentIntentId, {
-                                amount_to_capture: res.wonAmount * 100 
+                                amount_to_capture: Math.round(res.wonAmount * 100)
                             });
-                        } catch (e) { continue; }
+                        } catch (e) { 
+                            console.error(`Capture failed for ${orderId}:`, e);
+                            continue;
+                        }
                     }
 
                     const finalStatus = (res.winCount === res.totalSlots) ? 'won' : 'partially_won';
 
                     await orderRef.update({ 
                         status: finalStatus, 
-                        amount: res.wonAmount, 
+                        amount: res.wonAmount,
                         wonAt: admin.firestore.FieldValue.serverTimestamp(),
                         finalWinCount: res.winCount,
                         finalLostCount: res.loseCount
                     });
 
-                    // 🔥🔥 格式化時段摘要 (HTML Break) 🔥🔥
-                    let slotSummaryHtml = res.wonSlotsList.join('<br>');
+                    let slotSummaryHtml = `
+                        <b>✅ 成功競投 (Won):</b><br>${res.wonSlotsList.join('<br>')}<br><br>
+                        ${res.loseCount > 0 ? `<b>❌ 未能中標 (Lost - 已退款):</b><br>${res.lostSlotsList.join('<br>')}` : ''}
+                    `;
                     let screenNamesStr = Array.from(res.screenNames).join(', ');
 
-                    // 🔥🔥 使用正確的變數名 {{slot_summary}} 🔥🔥
-                    await sendEmail(EMAIL_CFG.templates.WON_BID, {
+                    const emailTemplate = finalStatus === 'partially_won' ? EMAIL_CFG.templates.PARTIAL_WIN : EMAIL_CFG.templates.WON_BID;
+
+                    await sendEmail(emailTemplate, {
                         to_email: res.userEmail,
                         to_name: res.userName,
                         amount: res.wonAmount,
                         order_id: orderId,
                         screen_names: screenNamesStr,
-                        slot_summary: slotSummaryHtml, 
+                        slot_summary: slotSummaryHtml,
                         order_link: "https://dooh-adv-pro.netlify.app" 
                     });
                 }
@@ -187,7 +173,6 @@ const snapshot = await db.collection('orders').where('status', 'in', ['paid_pend
         }
 
         return { statusCode: 200, body: "Settlement Done" };
-
     } catch (e) {
         console.error(e);
         return { statusCode: 500, body: e.message };
