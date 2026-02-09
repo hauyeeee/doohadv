@@ -318,14 +318,12 @@ export const useDoohSystem = () => {
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     
-    // 🔥🔥🔥 New Logic: Check for QR Code screen_id 🔥🔥🔥
+    // QR Code Check
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
         const id = parseInt(qrScreenId);
         if (!isNaN(id)) {
-            // 自動選擇該屏幕
             setSelectedScreens(new Set([id]));
-            // 提示用戶 (可選)
             showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
         }
     }
@@ -481,7 +479,7 @@ export const useDoohSystem = () => {
       return true; 
   };
 
-  // 🔥🔥🔥 Refactored: Make initiateTransaction re-usable with FORCE flag 🔥🔥🔥
+  // 🔥🔥🔥 REFACTORED: 支援 Force Proceed 🔥🔥🔥
   const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
@@ -501,10 +499,10 @@ export const useDoohSystem = () => {
     
     const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
     
-    // Close modals and Proceed
+    // Close ALL modals
     setIsBidModalOpen(false); 
     setIsBuyoutModalOpen(false);
-    setRestrictionModalData(null); // Ensure this is closed
+    setRestrictionModalData(null); // Force close
     setTransactionStep('processing');
     
     try { 
@@ -544,11 +542,8 @@ export const useDoohSystem = () => {
       oldSlots[slotIndex] = { ...targetSlot, bidPrice: newPrice, slotStatus: 'normal' };
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
-          
-          // 🔥 保留：通知被超越者
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           checkAndNotifyStandardOutbid(tempOrder);
-
       } catch (e) { console.error("Update DB Error", e); return alert("更新失敗"); }
       setCurrentOrderId(orderId);
       localStorage.setItem('temp_order_id', orderId);
@@ -562,7 +557,7 @@ export const useDoohSystem = () => {
   const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 
-  // 🔥🔥🔥 Simplified Handle Proceed 🔥🔥🔥
+  // 🔥🔥🔥 Simplified: Just call initiateTransaction with FORCE = true 🔥🔥🔥
   const handleProceedAfterRestriction = () => {
       const type = restrictionModalData?.type || 'bid';
       initiateTransaction(type, true); // Force Proceed!

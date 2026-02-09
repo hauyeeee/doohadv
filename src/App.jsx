@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react'; 
-import { Loader2, UploadCloud } from 'lucide-react';
+import { Loader2, UploadCloud, AlertTriangle, Monitor } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // Components
 import Header from './components/Header';
-// import InfoBox from './components/InfoBox'; // ❌ 移除這個
-import TutorialModal from './components/TutorialModal'; // ✅ 加入這個
+import TutorialModal from './components/TutorialModal'; 
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
@@ -39,17 +38,26 @@ const DOOHBiddingSystem = () => {
     initiateTransaction, processPayment, handleRealUpload, closeTransaction,
     viewingScreen,
     handleUpdateBid,
-    recalculateAllBids, // 🔥 Admin Tool
+    recalculateAllBids, 
     HOURS, getHourTier,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    occupiedSlots
+    occupiedSlots,
+    
+    // New Props
+    restrictionModalData, 
+    setRestrictionModalData, 
+    handleProceedAfterRestriction 
   } = useDoohSystem();
 
-  // 🔥 [新狀態] 控制教學 Modal
-  const [isTutorialOpen, setIsTutorialOpen] = useState(false); // 預設為 true，一入黎就彈
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
+  const [restrictionAgreed, setRestrictionAgreed] = useState(false); 
 
-  // 🔥 關鍵修正：處理「立即上傳」點擊
+  // Reset agreement when modal opens
+  useEffect(() => {
+      if (restrictionModalData) setRestrictionAgreed(false);
+  }, [restrictionModalData]);
+
   const handleUploadClick = (orderId) => {
     if (setCurrentOrderId) setCurrentOrderId(orderId);
     localStorage.setItem('temp_order_id', orderId);
@@ -63,19 +71,14 @@ const DOOHBiddingSystem = () => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-0">
       
-      {/* Header 包含了「玩法說明」按鈕 */}
       <Header 
         user={user} 
         onLoginClick={() => setIsLoginModalOpen(true)} 
         onProfileClick={() => setIsProfileModalOpen(true)} 
-        onHelpClick={() => setIsTutorialOpen(true)} // 按下 header 幫助按鈕時打開
+        onHelpClick={() => setIsTutorialOpen(true)} 
       />
 
       <main className="max-w-5xl mx-auto p-3 md:p-6 space-y-4 md:space-y-8 mt-4">
-        
-        {/* ❌ 移除了 InfoBox，因為現在用 Modal */}
-        
-        {/* 直接顯示 Screen Selector，因為這就是主菜 */}
         <ScreenSelector 
           selectedScreens={selectedScreens}
           screenSearchTerm={screenSearchTerm}
@@ -124,7 +127,6 @@ const DOOHBiddingSystem = () => {
         />
       </main>
 
-      {/* 🔥 隱藏的 File Input */}
       <input 
         type="file" 
         id="hidden-file-input" 
@@ -135,65 +137,61 @@ const DOOHBiddingSystem = () => {
 
       {/* --- Modals Section --- */}
       
-      {/* 🔥 新增：教學 Modal */}
-      <TutorialModal 
-        isOpen={isTutorialOpen} 
-        onClose={() => setIsTutorialOpen(false)} 
-      />
+      {/* 🔥🔥🔥 Reminder Modal Check 🔥🔥🔥 */}
+      {restrictionModalData && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border-2 border-red-100 flex flex-col gap-4">
+                  <div className="flex items-center gap-3 border-b pb-4">
+                      <div className="bg-red-100 p-2 rounded-full"><AlertTriangle className="text-red-600" size={24}/></div>
+                      <h3 className="text-xl font-bold text-red-700">⚠️ 重要注意事項</h3>
+                  </div>
+                  
+                  <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                      <p className="text-sm text-slate-600">您選擇的屏幕包含特殊條件或限制，請細閱以下內容：</p>
+                      {restrictionModalData.screens.map(s => (
+                          <div key={s.id} className="bg-red-50 p-4 rounded-lg border border-red-100">
+                              <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2"><Monitor size={16}/> {s.name}</h4>
+                              <p className="text-sm text-red-600 leading-relaxed font-bold">{s.restrictions}</p>
+                          </div>
+                      ))}
+                  </div>
 
-      <LoginModal 
-        isOpen={isLoginModalOpen} 
-        onClose={() => setIsLoginModalOpen(false)} 
-        handleGoogleLogin={handleGoogleLogin} 
-        isLoginLoading={isLoginLoading} 
-      />
-      <ScreenDetailModal 
-        screen={viewingScreen} 
-        onClose={() => setViewingScreen(null)} 
-      />
-      <MyOrdersModal 
-        isOpen={isProfileModalOpen} 
-        user={user} 
-        myOrders={myOrders} 
-        onClose={() => setIsProfileModalOpen(false)} 
-        onLogout={handleLogout} 
-        onUploadClick={handleUploadClick} 
-        handleUpdateBid={handleUpdateBid} 
-      />
-      <BuyoutModal 
-        isOpen={isBuyoutModalOpen} 
-        onClose={() => setIsBuyoutModalOpen(false)} 
-        pricing={pricing} 
-        selectedSpecificDates={selectedSpecificDates} 
-        termsAccepted={termsAccepted} 
-        setTermsAccepted={setTermsAccepted} 
-        onConfirm={() => initiateTransaction('buyout')} 
-      />
-      <BiddingModal 
-        isOpen={isBidModalOpen} 
-        onClose={() => setIsBidModalOpen(false)} 
-        generateAllSlots={generateAllSlots} 
-        slotBids={slotBids} 
-        handleSlotBidChange={handleSlotBidChange} 
-        batchBidInput={batchBidInput} 
-        setBatchBidInput={setBatchBidInput} 
-        handleBatchBid={handleBatchBid} 
-        isBundleMode={isBundleMode} 
-        pricing={pricing} 
-        termsAccepted={termsAccepted} 
-        setTermsAccepted={setTermsAccepted} 
-        onConfirm={() => initiateTransaction('bid')} 
-      />
-      <UrgentUploadModal 
-        isOpen={isUrgentUploadModalOpen} 
-        modalPaymentStatus={modalPaymentStatus} 
-        creativeStatus={creativeStatus} 
-        isUploadingReal={isUploadingReal} 
-        uploadProgress={uploadProgress} 
-        handleRealUpload={handleRealUpload} 
-        emailStatus={emailStatus} 
-        onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} 
-      />
+                  <div className="pt-4 border-t flex flex-col gap-3">
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                          <input 
+                              type="checkbox" 
+                              className="mt-1 w-4 h-4" 
+                              checked={restrictionAgreed}
+                              onChange={(e) => setRestrictionAgreed(e.target.checked)}
+                          />
+                          <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">
+                              我已閱讀並同意上述條款，並明白付款後 <strong className="text-red-600">不設退款</strong>。
+                          </span>
+                      </label>
+                      <div className="flex gap-3 mt-2">
+                          <button onClick={() => setRestrictionModalData(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-200">取消</button>
+                          <button 
+                              onClick={() => {
+                                  if(restrictionAgreed) handleProceedAfterRestriction();
+                                  else alert("請先勾選同意條款");
+                              }} 
+                              className={`flex-1 py-3 rounded-lg font-bold shadow-lg transition-all ${restrictionAgreed ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                          >
+                              確認並繼續付款
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
+      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
+      <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
+      <MyOrdersModal isOpen={isProfileModalOpen} user={user} myOrders={myOrders} onClose={() => setIsProfileModalOpen(false)} onLogout={handleLogout} onUploadClick={handleUploadClick} handleUpdateBid={handleUpdateBid} />
+      <BuyoutModal isOpen={isBuyoutModalOpen} onClose={() => setIsBuyoutModalOpen(false)} pricing={pricing} selectedSpecificDates={selectedSpecificDates} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('buyout')} />
+      <BiddingModal isOpen={isBidModalOpen} onClose={() => setIsBidModalOpen(false)} generateAllSlots={generateAllSlots} slotBids={slotBids} handleSlotBidChange={handleSlotBidChange} batchBidInput={batchBidInput} setBatchBidInput={setBatchBidInput} handleBatchBid={handleBatchBid} isBundleMode={isBundleMode} pricing={pricing} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('bid')} />
+      <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} />
       
       {transactionStep !== 'idle' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
@@ -209,8 +207,6 @@ const DOOHBiddingSystem = () => {
           </div>
         </div>
       )}
-
-
     </div>
   );
 };
