@@ -252,8 +252,8 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
 
-      // 🔥 關鍵修改：加入 'won' 和 'partially_won'
-      // 這樣即使對手之前被誤判為贏，現在有人出更高價，系統也會抓出來通知他「你被超越了」
+      // 🔥 關鍵修改 1：加入 'won' 和 'partially_won'
+      // 這是最重要的一步！即使對手已經顯示「已中標」，如果有新高價出現，系統必須重新將他拉出來比較。
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won"]));
       
       let snapshot;
@@ -270,16 +270,14 @@ export const useDoohSystem = () => {
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          if (oldOrder.userId === newOrder.userId) return;
+          if (oldOrder.userId === newOrder.userId) return; // 不通知自己
 
           let outbidInfo = [];
           let hasChange = false;
           let maxNewPrice = 0;
 
-          // 這裡我們只更新 detailedSlots 狀態，暫時不改動 'won' 這種大狀態 (交給 Hourly Settlement 改)
-          // 我們的主要目的是：1. 標記 slotStatus = 'outbid'  2. 發 Email
-          
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
+              // 比對日期、時間、屏幕ID
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
                   parseInt(ns.hour) === parseInt(oldSlot.hour) && 
@@ -290,12 +288,17 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
                   
+                  // 🔥 比價邏輯：新價 > 舊價 && 舊單未被標記為 Outbid
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
+                      
+                      // 使用 HTML <br/> 換行，確保 Email 顯示正常
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
+                      
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
+
                       hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記被超越
+                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記舊單為被超越
                   }
               }
               return oldSlot;
@@ -304,22 +307,23 @@ export const useDoohSystem = () => {
           if (hasChange) {
               outbidFound = true;
               
-              // 計算新狀態
+              // 計算舊單的新狀態
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               
-              let newStatus = oldOrder.status; // 預設保持原狀
+              let newStatus = oldOrder.status; 
               
-              // 如果之前係 won，現在有 slot 被超越，狀態應該轉變
-              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
-              else if (outbidCount > 0) newStatus = 'partially_outbid'; 
+              // 狀態邏輯：如果有 Slot 被超越，狀態必須改變
+              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; // 全輸
+              else if (outbidCount > 0) newStatus = 'partially_outbid';        // 輸一半
               
-              // 如果之前係 pending，就保持 pending 或 partial
-              if (oldOrder.status === 'paid_pending_selection') {
-                   if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
-                   else if (outbidCount > 0) newStatus = 'partially_outbid';
+              // 🔥 關鍵修改 2：強制更新狀態 (即使之前係 Won)
+              // 如果之前係 won，現在被人踢走，必須變番做 partial 或者 needs_action
+              if (oldOrder.status === 'won' || oldOrder.status === 'partially_won' || oldOrder.status === 'paid_pending_selection') {
+                   newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
               }
 
+              // 發送 Email
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('<br/>');
                   const targetEmail = oldOrder.userEmail;
@@ -343,6 +347,8 @@ export const useDoohSystem = () => {
       if (outbidFound) {
           await batch.commit();
           console.log("✅ Outbid updates committed to DB.");
+      } else {
+          console.log("✅ No outbids found this time.");
       }
   };
 
@@ -601,6 +607,7 @@ export const useDoohSystem = () => {
     try { const response = await fetch('/.netlify/functions/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), }); const data = await response.json(); if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); } } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
   };
 
+  // 🔥🔥🔥 在此處修正了 handleUpdateBid，確保它會觸發 checkAndNotifyStandardOutbid 🔥🔥🔥
   const handleUpdateBid = async (orderId, slotIndex, newPrice, newTotalAmount) => {
       if (!user) return alert("請先登入");
       const orderRef = doc(db, "orders", orderId);
@@ -615,8 +622,12 @@ export const useDoohSystem = () => {
       oldSlots[slotIndex] = { ...targetSlot, bidPrice: newPrice, slotStatus: 'normal' };
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
+          
+          // 🔥 這裡觸發 Outbid Check，通知被超越的用戶
+          // 我們構造一個臨時的 updated order object 傳入去
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           checkAndNotifyStandardOutbid(tempOrder);
+
       } catch (e) { console.error("Update DB Error", e); return alert("更新失敗"); }
       setCurrentOrderId(orderId);
       localStorage.setItem('temp_order_id', orderId);
