@@ -1,6 +1,5 @@
 import React from 'react';
-// 🔥 將 Map 改名為 MapIcon，解決 "Constructor Map requires 'new'" 錯誤
-import { Monitor, MapPin, X, Info, Map as MapIcon } from 'lucide-react';
+import { Monitor, MapPin, X, Info, Map as MapIcon, AlertTriangle } from 'lucide-react';
 
 const ScreenDetailModal = ({ screen, onClose }) => {
   if (!screen) return null;
@@ -27,6 +26,18 @@ const ScreenDetailModal = ({ screen, onClose }) => {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-0">
+            
+            {/* 🔥🔥🔥 新增：警告條 (如有 restrictions) 🔥🔥🔥 */}
+            {screen.restrictions && (
+                <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
+                    <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={20}/>
+                    <div>
+                        <h4 className="text-sm font-bold text-red-700 mb-1">⚠️ 注意事項 / 限制條款 (Important Notes)</h4>
+                        <p className="text-sm text-red-600 leading-relaxed whitespace-pre-wrap">{screen.restrictions}</p>
+                    </div>
+                </div>
+            )}
+
             {/* Gallery */}
             <div className="grid grid-cols-1 md:grid-cols-4 md:grid-rows-2 gap-2 h-[400px] bg-black">
                 <div className="md:col-span-2 md:row-span-2 relative group">
@@ -45,7 +56,6 @@ const ScreenDetailModal = ({ screen, onClose }) => {
             {/* Map & Specs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
                 <div className="lg:col-span-2 h-[350px] bg-slate-100 rounded-2xl relative overflow-hidden group shadow-sm">
-                   {/* 🔥 使用 MapIcon */}
                    {screen.mapEmbedUrl && screen.mapEmbedUrl.includes("google") ? 
                       <iframe src={screen.mapEmbedUrl} width="100%" height="100%" className="absolute inset-0 border-0 grayscale-[20%] group-hover:grayscale-0 transition-all duration-500"></iframe> : 
                       <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">

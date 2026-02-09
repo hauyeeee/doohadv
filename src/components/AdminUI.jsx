@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   Loader2, X, MapPin, Layers, Image as ImageIcon, FileText, Map, Clock, 
-  Copy, Save, CheckCircle, UploadCloud, AlertCircle, Trophy, Monitor 
+  Copy, Save, CheckCircle, UploadCloud, AlertCircle, Trophy, Monitor, AlertTriangle 
 } from 'lucide-react';
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -55,9 +55,8 @@ export const StatCard = ({ title, value, icon, bg, border }) => (
   </div>
 );
 
-// 🔥 防彈版 StatusBadge：防止 undefined 導致的錯誤
 export const StatusBadge = ({ status }) => {
-  const safeStatus = status || 'unknown'; // 預設值
+  const safeStatus = status || 'unknown';
   
   const map = {
     paid_pending_selection: { label: '競價中', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
@@ -98,6 +97,16 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Bundle Group (Optional)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Layers size={14} className="text-slate-400"/><input type="text" value={data.bundleGroup} onChange={e => setData({...data, bundleGroup: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. central_network"/></div><p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{data.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={data.mapUrl} onChange={e => setData({...data, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="http://maps.google.com..."/></div></div>
+                    
+                    {/* 🔥🔥🔥 新增：注意事項 (restrictions) 輸入框 🔥🔥🔥 */}
+                    <div className="col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 text-red-500"><AlertTriangle size={12}/> 注意事項 / 限制條款 (Important Notes)</label>
+                        <div className="flex items-start gap-2 border border-red-200 bg-red-50 rounded px-3 py-2">
+                            <textarea rows="2" value={data.restrictions || ''} onChange={e => setData({...data, restrictions: e.target.value})} className="w-full text-sm outline-none resize-none bg-transparent text-red-700 placeholder-red-300" placeholder="例如：此屏幕位於清真餐廳旁，禁止播放豬肉相關廣告。"/>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">如果此欄位有內容，客人在付款前必須閱讀並確認同意。</p>
+                    </div>
+
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={data.specifications} onChange={e => setData({...data, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px..."/></div></div>
                     <div className="col-span-2 border-t pt-4 mt-2">
                         <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據</h4>
