@@ -22,7 +22,7 @@ const EMAIL_CFG = {
     private_key: process.env.EMAILJS_PRIVATE_KEY,
     admin_email: "hauyeeee@gmail.com",
     templates: {
-        WON_BID: "template_3n90m3u", // 通用結算通知 (包含贏/輸詳情)
+        WON_BID: "template_3n90m3u", 
         LOST_BID: "template_1v8p3y8",
     }
 };
@@ -50,10 +50,11 @@ const sendEmail = (templateId, params) => {
 
 // 4. Main Logic
 const settlementHandler = async (event, context) => {
-    console.log("⏰ Settlement Run (Detailed Email Version)...");
+    console.log("⏰ Settlement Run (Fixed Slot Summary)...");
     
     try {
-        const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid']).get();
+// 🔥 Fix: 加入 'won', 'paid', 'partially_won' 確保能看見「贏家」，從而正確判定其他人「輸了」
+const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'outbid_needs_action', 'partially_outbid', 'partially_won', 'won', 'paid']).get();
         if (snapshot.empty) return { statusCode: 200, body: "No orders" };
 
         const slotsMap = {};      
@@ -75,9 +76,10 @@ const settlementHandler = async (event, context) => {
                     winCount: 0,
                     loseCount: 0,
                     totalSlots: 0,
-                    wonSlotsList: [], // 儲存贏的詳情
-                    lostSlotsList: [], // 儲存輸的詳情
-                    status: data.status
+                    wonSlotsList: [], 
+                    lostSlotsList: [], 
+                    status: data.status,
+                    screenNames: new Set()
                 };
             }
 
@@ -86,7 +88,6 @@ const settlementHandler = async (event, context) => {
                     orderResults[orderId].totalSlots++; 
                     const slotDateTimeStr = `${slot.date} ${String(slot.hour).padStart(2,'0')}:00`;
                     
-                    // 這裡暫時全部結算 (正式版應檢查 cutOffTime)
                     if (true) { 
                         const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                         if (!slotsMap[key]) slotsMap[key] = [];
@@ -96,6 +97,7 @@ const settlementHandler = async (event, context) => {
                             bidPrice: parseInt(slot.bidPrice) || 0,
                             slotInfo: `${slotDateTimeStr} @ ${slot.screenName || slot.screenId}`
                         });
+                        orderResults[orderId].screenNames.add(slot.screenName || slot.screenId);
                     }
                 });
             }
@@ -104,27 +106,24 @@ const settlementHandler = async (event, context) => {
         // C. 比武大會
         for (const [key, bids] of Object.entries(slotsMap)) {
             bids.sort((a, b) => b.bidPrice - a.bidPrice);
-            
             const winner = bids[0]; 
             const losers = bids.slice(1); 
 
-            // 贏家
             if (orderResults[winner.orderId]) {
                 orderResults[winner.orderId].wonAmount += winner.bidPrice; 
                 orderResults[winner.orderId].winCount++;
-                orderResults[winner.orderId].wonSlotsList.push(`${winner.slotInfo} ($${winner.bidPrice})`);
+                orderResults[winner.orderId].wonSlotsList.push(`${winner.slotInfo} (HK$ ${winner.bidPrice})`);
             }
 
-            // 輸家
             losers.forEach(loser => {
                 if (orderResults[loser.orderId]) {
                     orderResults[loser.orderId].loseCount++;
-                    orderResults[loser.orderId].lostSlotsList.push(`${loser.slotInfo} (Bid: $${loser.bidPrice})`);
+                    orderResults[loser.orderId].lostSlotsList.push(`${loser.slotInfo} (Bid: HK$ ${loser.bidPrice})`);
                 }
             });
         }
 
-        // D. 最終結算 & 發送詳細 Email
+        // D. 最終結算
         for (const [orderId, res] of Object.entries(orderResults)) {
             const orderRef = db.collection('orders').doc(orderId);
             
@@ -134,26 +133,20 @@ const settlementHandler = async (event, context) => {
                     if (res.paymentIntentId) {
                         try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) {}
                     }
-                    
-                    // 更新 DB
                     await orderRef.update({ 
                         status: 'lost', 
                         lostAt: admin.firestore.FieldValue.serverTimestamp(),
-                        // 將詳細輸贏寫入 DB 方便前端顯示 (Optional)
                     });
-
-                    // 🔥 詳細的 Lost Email
-                    const lostDetails = res.lostSlotsList.join('\n');
+                    // LOST Email: 暫時不傳送詳細 list，因 template 不支援
                     await sendEmail(EMAIL_CFG.templates.LOST_BID, { 
                         to_email: res.userEmail, 
                         to_name: res.userName,
-                        order_id: orderId,
-                        lost_details: lostDetails // 確保你的 Email Template 有這個變數 {{lost_details}}
+                        order_id: orderId
                     });
                 }
             }
             
-            // 情況 2: 贏 (部分或全部)
+            // 情況 2: 贏
             else if (res.winCount > 0) {
                 if (res.status !== 'won' && res.status !== 'paid' && res.status !== 'partially_won') {
                     
@@ -175,22 +168,19 @@ const settlementHandler = async (event, context) => {
                         finalLostCount: res.loseCount
                     });
 
-                    // 🔥 生成詳細的 Win/Lost 報告字串
-                    let emailBody = "🎉 恭喜！你已成功投得以下時段：\n";
-                    emailBody += res.wonSlotsList.join('\n');
-                    
-                    if (res.loseCount > 0) {
-                        emailBody += "\n\n⚠️ 以下時段因出價被超越而未能中標 (不會收費)：\n";
-                        emailBody += res.lostSlotsList.join('\n');
-                    }
+                    // 🔥🔥 格式化時段摘要 (HTML Break) 🔥🔥
+                    let slotSummaryHtml = res.wonSlotsList.join('<br>');
+                    let screenNamesStr = Array.from(res.screenNames).join(', ');
 
-                    // 發送中標 Email (使用 WON_BID 模板，將詳情塞入 slot_info 變數)
+                    // 🔥🔥 使用正確的變數名 {{slot_summary}} 🔥🔥
                     await sendEmail(EMAIL_CFG.templates.WON_BID, {
                         to_email: res.userEmail,
                         to_name: res.userName,
                         amount: res.wonAmount,
                         order_id: orderId,
-                        slot_info: emailBody // 🔥 這裡包含了贏和輸的所有細節
+                        screen_names: screenNamesStr,
+                        slot_summary: slotSummaryHtml, 
+                        order_link: "https://dooh-adv-pro.netlify.app" 
                     });
                 }
             }

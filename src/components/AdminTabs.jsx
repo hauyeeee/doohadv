@@ -234,9 +234,17 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-// --- 7. Rules View ---
+// --- 7. Rules View (🔥 重點升級：詳細顯示所有設定) ---
 export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete }) => {
     const { t } = useLanguage();
+    
+    // 輔助函數：顯示屏幕名稱
+    const getScreenName = (id) => {
+        if(id === 'all') return t('rule_global') || 'Global (全部)';
+        const s = screens.find(x => String(x.id) === String(id));
+        return s ? s.name : id;
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
             <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
@@ -245,14 +253,43 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                     <select value={newRule.screenId} onChange={e => setNewRule({...newRule, screenId: e.target.value})} className="w-full border rounded px-3 py-2 text-sm"><option value="all">{t('rule_global')}</option>{screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
                     <input type="date" value={newRule.date} onChange={e => setNewRule({...newRule, date: e.target.value})} className="w-full border rounded px-3 py-2 text-sm"/>
                     <input type="text" placeholder={t('rule_time_placeholder')} value={newRule.hoursStr} onChange={e => setNewRule({...newRule, hoursStr: e.target.value})} className="w-full border rounded px-3 py-2 text-sm"/>
-                    <div className="grid grid-cols-2 gap-2"><button onClick={() => setNewRule({...newRule, action: 'price_override'})} className={`py-2 text-xs font-bold rounded border`}>{t('rule_type_price')}</button><button onClick={() => setNewRule({...newRule, action: 'lock'})} className={`py-2 text-xs font-bold rounded border`}>{t('rule_type_lock')}</button></div>
-                    {newRule.action === 'price_override' && <input type="number" value={newRule.overridePrice} onChange={e => setNewRule({...newRule, overridePrice: e.target.value})} className="w-full border rounded px-3 py-2 text-sm"/>}
-                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800">{t('add')}</button>
+                    <div className="grid grid-cols-2 gap-2"><button onClick={() => setNewRule({...newRule, action: 'price_override'})} className={`py-2 text-xs font-bold rounded border ${newRule.action==='price_override'?'bg-blue-600 text-white':'bg-slate-50 text-slate-600'}`}>{t('rule_type_price')}</button><button onClick={() => setNewRule({...newRule, action: 'lock'})} className={`py-2 text-xs font-bold rounded border ${newRule.action==='lock'?'bg-red-600 text-white':'bg-slate-50 text-slate-600'}`}>{t('rule_type_lock')}</button></div>
+                    {newRule.action === 'price_override' && <div className="flex items-center border rounded px-3 py-2 bg-slate-50"><span className="text-slate-500 mr-2">$</span><input type="number" value={newRule.overridePrice} onChange={e => setNewRule({...newRule, overridePrice: e.target.value})} className="w-full text-sm outline-none bg-transparent"/></div>}
+                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 shadow-md">{t('add')}</button>
                 </div>
             </div>
+            
+            {/* 🔥 詳細規則列表 🔥 */}
             <div className="lg:col-span-2 space-y-4">
                 <h3 className="font-bold text-lg flex items-center gap-2"><Calendar size={20}/> {t('rule_existing')} ({rules.length})</h3>
-                {rules.map(rule => (<div key={rule.id} className="bg-white p-4 rounded-xl shadow-sm border flex justify-between"><div>{rule.date}</div><button onClick={() => onDelete(rule.id)} className="text-red-500"><Trash2 size={18}/></button></div>))}
+                {rules.length === 0 ? (
+                    <div className="text-slate-400 text-center py-10 bg-white rounded-xl border border-dashed text-sm">No rules set</div>
+                ) : (
+                    rules.map(rule => (
+                        <div key={rule.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center hover:shadow-md transition-shadow">
+                            <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-700 text-lg">{rule.date}</span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
+                                        {getScreenName(rule.screenId)}
+                                    </span>
+                                </div>
+                                <div className="text-sm text-slate-500 flex items-center gap-4">
+                                    <span className="flex items-center gap-1 font-mono bg-slate-100 px-2 py-0.5 rounded text-xs"><Clock size={12}/> {rule.hours && rule.hours.length === 24 ? 'All Day (全日)' : `Hours: ${rule.hours?.join(',')}`}</span>
+                                    
+                                    {rule.type === 'lock' ? (
+                                        <span className="text-red-600 font-bold flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded text-xs"><Lock size={12}/> Locked (鎖定)</span>
+                                    ) : (
+                                        <span className="text-green-600 font-bold flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded text-xs"><DollarSign size={12}/> ${rule.value}</span>
+                                    )}
+                                </div>
+                            </div>
+                            <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors">
+                                <Trash2 size={18}/>
+                            </button>
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     );
