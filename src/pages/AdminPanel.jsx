@@ -306,13 +306,35 @@ const AdminPanel = () => {
       } catch(e) { console.error(e); alert("Failed"); } finally { setLoading(false); }
   };
 
+ // 修改 AdminPanel.jsx 內的 handleReview
   const handleReview = async (id, action) => { 
       if(!confirm(action)) return; 
       try { 
-          await updateDoc(doc(db,"orders",id), { creativeStatus: action==='approve'?'approved':'rejected', isApproved: action==='approve', isRejected: action!=='approve', reviewNote: action!=='approve'?reviewNote:'' }); 
-          if(action==='approve') { const o = orders.find(x=>x.id===id); sendBidConfirmation({email:o.userEmail, displayName:o.userName}, o, 'video_approved'); }
-          alert("OK"); 
-      } catch(e){ alert("Error"); } 
+          // 1. 更新 DB
+          await updateDoc(doc(db,"orders",id), { 
+              creativeStatus: action==='approve'?'approved':'rejected', 
+              isApproved: action==='approve', 
+              isRejected: action!=='approve', 
+              reviewNote: action!=='approve'?reviewNote:'' 
+          }); 
+          
+          // 2. 獲取訂單資料以便發信
+          const o = orders.find(x=>x.id===id);
+          const userInfo = {email: o.userEmail, displayName: o.userName};
+
+          // 3. 發送對應 Email
+          if(action==='approve') { 
+              await sendBidConfirmation(userInfo, o, 'video_approved'); 
+          } else {
+              // 🔥 修正：Reject 也要發信！
+              await sendBidConfirmation(userInfo, o, 'video_rejected', reviewNote);
+          }
+
+          alert("Processed successfully"); 
+      } catch(e){ 
+          console.error(e);
+          alert("Error processing review"); 
+      } 
   };
 
   const handleMarkAsScheduled = async (id) => { if(!confirm("OK?"))return; await updateDoc(doc(db,"orders",id), {isScheduled:true, scheduledAt: new Date()}); alert("Scheduled"); };
