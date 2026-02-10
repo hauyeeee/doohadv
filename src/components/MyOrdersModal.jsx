@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag, Edit } from 'lucide-react';
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag, Edit, Hourglass } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
@@ -9,18 +9,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
   if (!isOpen || !user) return null;
 
-  // 🔥 修改：加入 isPendingPayment 和 marketHighestPrice 參數
   const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum, isPendingPayment, marketHighestPrice) => {
       const bidInt = parseInt(newBidPrice);
       const currentInt = parseInt(currentPrice);
       
-      // 🔥 邏輯修正：
-      // 如果是「待付款 (Pending)」，底價應該是「市場最高價」 (允許修正錯誤的高價)
-      // 如果是「已付款」，底價才是「目前出價」 (只能加價)
       let floorPrice = currentInt;
-      
       if (isPendingPayment) {
-          // 如果正在 Pending，只要比市場上的對手高就可以，不需要比自己填錯的那個高價高
           floorPrice = marketHighestPrice;
       }
 
@@ -32,13 +26,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
           return;
       }
 
-      // 如果是 Pending 狀態修改，其實是「修正」，不是「加價」，所以金額計算要小心
-      // 但因為 handleUpdateBid 是用 (新單個價錢 + 其他價錢) 來更新總額，所以邏輯通用
       const newTotal = otherSlotsSum + bidInt;
-      
       const confirmMsg = lang === 'en' 
-          ? `Confirm update? Total re-authorization: HK$${newTotal.toLocaleString()}` 
-          : `確定修改出價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
+          ? `Confirm bid increase? Total re-authorization: HK$${newTotal.toLocaleString()}` 
+          : `確定加價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
 
       if (window.confirm(confirmMsg)) {
           handleUpdateBid(orderId, slotIndex, bidInt, newTotal);
@@ -159,7 +150,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         } else if (order.status === 'outbid_needs_action') {
                             statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') };
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
-                            statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
+                            // 🔥 修改：如果過期了但還沒變 Lost/Won，顯示 "結算中"
+                            statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Finalizing...' : '⏳ 正在結算...' };
                         } else if (order.status === 'paid_pending_selection') {
                             if (hasRealTimeOutbid) {
                                 statusConfig = { bg: 'bg-yellow-100', text: 'text-yellow-700', label: lang === 'en' ? 'Outbid (Action Needed)' : '⚠️ 部份被超越' };
@@ -214,9 +206,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
                                                                 
-                                                                // 領先條件
-                                                                const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
+                                                                // 🔥 核心修正: 領先必須滿足 "已付款" + "未結算" + "未過期"
+                                                                const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid && !isOrderExpired;
                                                                 
+                                                                // 🔥 新增：正在結算 (已過期但後端還沒改 DB)
+                                                                const isProcessingResult = isOrderEffective && !isSettled && isOrderExpired;
+
                                                                 const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
                                                                 const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
                                                                 
@@ -225,16 +220,17 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
-                                                                // --- 邏輯提取：決定 Badge ---
                                                                 const renderSlotBadge = () => {
                                                                     if (isFinalWon) {
-                                                                        if (order.type === 'buyout') {
-                                                                            return <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span>;
-                                                                        }
+                                                                        if (order.type === 'buyout') return <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span>;
                                                                         return <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span>;
                                                                     }
                                                                     if (isLeading) {
                                                                         return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
+                                                                    }
+                                                                    // 🔥 新增：結算中 Badge
+                                                                    if (isProcessingResult) {
+                                                                        return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
                                                                     }
                                                                     if (showOutbidWarning) {
                                                                         return <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>;
@@ -255,8 +251,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 else if (showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
+                                                                else if (isProcessingResult) { borderClass = "border-slate-200"; bgClass = "bg-slate-100/50"; }
 
-                                                                // Placeholder 計算: 如果是Pending，顯示 "修改金額"，否則顯示 "大於市場價"
                                                                 const inputPlaceholder = isPendingPayment ? "修改金額" : `>${Math.max(slot.bidPrice, marketHighestPrice)}`;
 
                                                                 return (
@@ -277,7 +273,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
                                                                                     <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={inputPlaceholder} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
-                                                                                    {/* 🔥 修改：傳遞 isPendingPayment 和 marketHighestPrice 給 Submit 函數 */}
                                                                                     <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice), isPendingPayment, marketHighestPrice)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
