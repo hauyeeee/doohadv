@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard } from 'lucide-react';
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
@@ -60,6 +60,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                         let firstSlotDate = null;
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
 
+                        // 金額計算
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
@@ -95,8 +96,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
+                        // 訂單狀態標籤
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
-                        
                         if (['won', 'paid', 'completed'].includes(order.status)) {
                             statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'partially_won') {
@@ -152,24 +153,30 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <div className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono w-fit">{date}</div>
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                             {groupedSlots[date].map((slot) => {
-                                                                // 🔥🔥🔥 暴力邏輯：只要不是 WIN，就給我顯示按鈕！ 🔥🔥🔥
                                                                 const isOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
-                                                                const isWon = slot.slotStatus === 'winning' || slot.slotStatus === 'won';
                                                                 
-                                                                // 如果訂單已結算，且狀態是 WON，那就是真 WIN
-                                                                const finalWin = (isSettled && isWon) || (!isSettled && isWon);
+                                                                // 🔥 核心修正：區分 "Leading" (領先) 與 "Won" (中標) 🔥
+                                                                // 只有當訂單「已結算 (Settled)」時，才顯示 WIN
+                                                                // 如果「未結算 (Unsettled)」但沒輸，就顯示 Leading
+                                                                const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isOutbid && !isLost));
+                                                                const isLeading = !isSettled && !isOutbid && !isLost;
+
+                                                                const showOutbidWarning = isOutbid && !isOrderExpired;
+                                                                const showLost = isLost || (isOutbid && isOrderExpired);
                                                                 
-                                                                // 🔥 只要不是 WIN 且未過期，就允許加價！(包含 LOST, Outbid, 或其他任何狀態)
-                                                                const showIncreaseButton = !finalWin && !isOrderExpired;
-                                                                
+                                                                // 只要不是「最終贏」且未過期，就允許加價 (包含 Leading 也可以加價，或者只讓 Outbid 加)
+                                                                // 這裡設定為：只要被超越，或者想自我加價都可以 (這裡只顯示在 Outbid 狀態)
+                                                                const showIncreaseButton = showOutbidWarning; 
+
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
                                                                 let borderClass = "border-slate-200";
                                                                 let bgClass = "bg-white";
-                                                                if(finalWin) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
-                                                                else if(isOutbid) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
-                                                                else if(isLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
+                                                                if(isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
+                                                                else if(isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } // 領先用藍色
+                                                                else if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
+                                                                else if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 
                                                                 return (
                                                                     <div key={slot.originalIndex} className={`flex items-center justify-between p-2 rounded border ${borderClass} ${bgClass}`}>
@@ -180,9 +187,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
                                                                                     
-                                                                                    {finalWin ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
-                                                                                     isOutbid ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
-                                                                                     isLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : null
+                                                                                    {isFinalWon ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
+                                                                                     isLeading ? <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span> :
+                                                                                     showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
+                                                                                     showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : null
                                                                                     }
                                                                                 </div>
                                                                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}</span>
@@ -198,11 +206,11 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
-                                                                                    <span className={`text-xs font-bold ${!finalWin ? 'text-red-500' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
+                                                                                    <span className={`text-xs font-bold ${(!isFinalWon && !isLeading && !showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
                                                                                     {showIncreaseButton && (
                                                                                         <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"><Zap size={10}/> {t('increase_bid')}</button>
                                                                                     )}
-                                                                                    {isLost && isOrderExpired && (
+                                                                                    {showLost && !showIncreaseButton && (
                                                                                         <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200"><Lock size={10}/> {t('bid_closed')}</span>
                                                                                     )}
                                                                                 </>

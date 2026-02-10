@@ -244,22 +244,23 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-// 🔥🔥🔥 終極修復：Check Outbid (全狀態掃描) 🔥🔥🔥
+// 🔥🔥🔥 核心修復：Outbid Check (加入 Debug Log) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
       if (!newSlots || newSlots.length === 0) return;
 
-      console.log("🔍 [Check Outbid] Starting check for order:", newOrder.id);
+      console.log("🔍 [Outbid Check] Started for Order:", newOrder.id);
 
-      // 🔥 掃描所有可能的狀態，寧殺錯不放過
+      // 抓取所有可能相關的訂單
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
       
       let snapshot;
       try {
           snapshot = await getDocs(q);
+          console.log(`🔍 [Outbid Check] Found ${snapshot.size} potential competitors.`);
       } catch (error) {
-          console.error("❌ [Check Outbid] Error reading orders:", error);
+          console.error("❌ [Outbid Check] Query Error:", error);
           return;
       }
 
@@ -275,6 +276,7 @@ export const useDoohSystem = () => {
           let maxNewPrice = 0;
 
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
+              // 🔥 寬鬆比對：確保 string/number 都能對上
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
                   parseInt(ns.hour) === parseInt(oldSlot.hour) && 
@@ -285,11 +287,15 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
                   
-                  // 🔥 只要新價高過舊價，就踢！
+                  // 🔥 Log 出來睇下比對成點
+                  // console.log(`👉 Comparing: Old($${oldPrice}) vs New($${newPrice})`);
+
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
-                      console.log(`⚡ Outbid detected! User ${oldOrder.userEmail} ($${oldPrice}) < ($${newPrice})`);
+                      console.log(`⚡ Outbid Triggered! OldUser(${oldOrder.userEmail}) $${oldPrice} < $${newPrice}`);
+                      
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
+
                       hasChange = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
@@ -329,6 +335,8 @@ export const useDoohSystem = () => {
       if (outbidFound) {
           await batch.commit();
           console.log("✅ Outbid updates committed to DB.");
+      } else {
+          console.log("✅ No outbids detected (You are the highest bidder, or no overlap).");
       }
   };
 
