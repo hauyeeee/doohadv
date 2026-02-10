@@ -20,7 +20,6 @@ import {
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
-  // --- States ---
   const [user, setUser] = useState(null); 
   const [isAuthReady, setIsAuthReady] = useState(false); 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -74,11 +73,9 @@ export const useDoohSystem = () => {
 
   const emailSentRef = useRef(false);
 
-  // --- Constants ---
   const HOURS = Array.from({ length: 24 }, (_, i) => ({ val: i, label: `${String(i).padStart(2, '0')}:00` }));
   const WEEKDAYS_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 
-  // --- Helpers ---
   const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -107,7 +104,6 @@ export const useDoohSystem = () => {
       if (hasPrime) return 'prime'; if (hasGold) return 'gold'; return 'normal';
   };
 
-  // --- Effects ---
   useEffect(() => {
     initEmailService(); 
     const fetchScreens = async () => {
@@ -244,7 +240,7 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-// 🔥🔥🔥 核心修復：Outbid Check (加入 Debug Log) 🔥🔥🔥
+  // 🔥🔥🔥 核心修復：Outbid Check (強力轉型比對) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -252,13 +248,11 @@ export const useDoohSystem = () => {
 
       console.log("🔍 [Outbid Check] Started for Order:", newOrder.id);
 
-      // 抓取所有可能相關的訂單
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
       
       let snapshot;
       try {
           snapshot = await getDocs(q);
-          console.log(`🔍 [Outbid Check] Found ${snapshot.size} potential competitors.`);
       } catch (error) {
           console.error("❌ [Outbid Check] Query Error:", error);
           return;
@@ -269,35 +263,35 @@ export const useDoohSystem = () => {
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
-          if (oldOrder.userId === newOrder.userId) return; // Skip self
+          if (oldOrder.userId === newOrder.userId) return; 
 
           let outbidInfo = [];
           let hasChange = false;
           let maxNewPrice = 0;
 
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-              // 🔥 寬鬆比對：確保 string/number 都能對上
+              // 🔥 強力比對邏輯：轉 String, 去空格, 轉 Int
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
-                  parseInt(ns.hour) === parseInt(oldSlot.hour) && 
-                  String(ns.screenId) === String(oldSlot.screenId)
+                  parseInt(ns.hour, 10) === parseInt(oldSlot.hour, 10) && // Base 10 int 確保 '02' == 2
+                  String(ns.screenId).trim() === String(oldSlot.screenId).trim() // String + Trim
               );
 
               if (matchNewSlot) {
-                  const oldPrice = parseInt(oldSlot.bidPrice) || 0;
-                  const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
+                  const oldPrice = parseInt(oldSlot.bidPrice, 10) || 0;
+                  const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
                   
-                  // 🔥 Log 出來睇下比對成點
-                  // console.log(`👉 Comparing: Old($${oldPrice}) vs New($${newPrice})`);
+                  // 🔥 Log 幫助 Debug
+                  // console.log(`👉 Comparison: User(${oldOrder.userName}) $${oldPrice} vs New $${newPrice}`);
 
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
-                      console.log(`⚡ Outbid Triggered! OldUser(${oldOrder.userEmail}) $${oldPrice} < $${newPrice}`);
+                      console.log(`⚡ Outbid Confirmed! User(${oldOrder.userEmail}) $${oldPrice} < $${newPrice}`);
                       
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
 
                       hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; 
+                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記為 outbid
                   }
               }
               return oldSlot;
@@ -335,8 +329,6 @@ export const useDoohSystem = () => {
       if (outbidFound) {
           await batch.commit();
           console.log("✅ Outbid updates committed to DB.");
-      } else {
-          console.log("✅ No outbids detected (You are the highest bidder, or no overlap).");
       }
   };
 
@@ -357,11 +349,11 @@ export const useDoohSystem = () => {
                          await updateDoc(orderRef, { emailSent: true });
                     }
                     
-                    // 🔥 Check Outbid here too
                     if (data.type === 'buyout') {
                         checkAndNotifyLosers(data);
                     } else {
-                        checkAndNotifyStandardOutbid(data);
+                        // 🔥 確保這裡調用 checkAndNotifyStandardOutbid
+                        await checkAndNotifyStandardOutbid(data);
                     }
                 }
             } catch(e) { console.error(e); } 
@@ -607,15 +599,12 @@ export const useDoohSystem = () => {
       const slotDateObj = new Date(slotDateTimeStr);
       if (new Date() >= slotDateObj) return alert(`❌ 截標失敗：時段已過期`);
       
-      // 更新 Slot
       oldSlots[slotIndex] = { ...targetSlot, bidPrice: newPrice, slotStatus: 'normal' };
       
       try {
-          // 1. 更新 Database
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
-          // 2. 🔥 立即觸發 Outbid Check
-          // 我們傳入更新後的 "虛擬訂單" 來做比對
+          // 🔥 傳入虛擬訂單以觸發檢查
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
 

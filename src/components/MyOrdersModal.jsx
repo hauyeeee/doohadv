@@ -60,7 +60,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                         let firstSlotDate = null;
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
 
-                        // 金額計算
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
@@ -96,7 +95,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                             revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
-                        // 訂單狀態標籤
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         if (['won', 'paid', 'completed'].includes(order.status)) {
                             statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
@@ -156,25 +154,22 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                 const isOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 
-                                                                // 🔥 核心修正：區分 "Leading" (領先) 與 "Won" (中標) 🔥
-                                                                // 只有當訂單「已結算 (Settled)」時，才顯示 WIN
-                                                                // 如果「未結算 (Unsettled)」但沒輸，就顯示 Leading
+                                                                // 🔥 核心修正：只有在明確贏了的情況下才叫 WIN，其他時候是 Leading 或 Outbid
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isOutbid && !isLost));
                                                                 const isLeading = !isSettled && !isOutbid && !isLost;
 
                                                                 const showOutbidWarning = isOutbid && !isOrderExpired;
                                                                 const showLost = isLost || (isOutbid && isOrderExpired);
                                                                 
-                                                                // 只要不是「最終贏」且未過期，就允許加價 (包含 Leading 也可以加價，或者只讓 Outbid 加)
-                                                                // 這裡設定為：只要被超越，或者想自我加價都可以 (這裡只顯示在 Outbid 狀態)
-                                                                const showIncreaseButton = showOutbidWarning; 
+                                                                // 🔥 修正：按鈕只在輸錢 (Outbid/Lost) 的時候出現，贏錢 (Leading/Won) 不出現
+                                                                const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
                                                                 let borderClass = "border-slate-200";
                                                                 let bgClass = "bg-white";
                                                                 if(isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
-                                                                else if(isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } // 領先用藍色
+                                                                else if(isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
                                                                 else if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 else if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 
