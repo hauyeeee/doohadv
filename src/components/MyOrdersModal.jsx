@@ -9,18 +9,39 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
   if (!isOpen || !user) return null;
 
-  const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum) => {
-      if (!newBidPrice || parseInt(newBidPrice) <= parseInt(currentPrice)) {
-          alert(lang === 'en' ? "New bid must be higher!" : "新出價必須高於目前出價！");
+  // 🔥 修改：加入 isPendingPayment 和 marketHighestPrice 參數
+  const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum, isPendingPayment, marketHighestPrice) => {
+      const bidInt = parseInt(newBidPrice);
+      const currentInt = parseInt(currentPrice);
+      
+      // 🔥 邏輯修正：
+      // 如果是「待付款 (Pending)」，底價應該是「市場最高價」 (允許修正錯誤的高價)
+      // 如果是「已付款」，底價才是「目前出價」 (只能加價)
+      let floorPrice = currentInt;
+      
+      if (isPendingPayment) {
+          // 如果正在 Pending，只要比市場上的對手高就可以，不需要比自己填錯的那個高價高
+          floorPrice = marketHighestPrice;
+      }
+
+      if (!newBidPrice || bidInt <= floorPrice) {
+          const msg = lang === 'en' 
+              ? `Bid must be higher than HK$${floorPrice}!` 
+              : `出價必須高於 HK$${floorPrice}！`;
+          alert(msg);
           return;
       }
-      const newTotal = otherSlotsSum + parseInt(newBidPrice);
+
+      // 如果是 Pending 狀態修改，其實是「修正」，不是「加價」，所以金額計算要小心
+      // 但因為 handleUpdateBid 是用 (新單個價錢 + 其他價錢) 來更新總額，所以邏輯通用
+      const newTotal = otherSlotsSum + bidInt;
+      
       const confirmMsg = lang === 'en' 
-          ? `Confirm bid increase? Total re-authorization: HK$${newTotal.toLocaleString()}` 
-          : `確定加價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
+          ? `Confirm update? Total re-authorization: HK$${newTotal.toLocaleString()}` 
+          : `確定修改出價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
 
       if (window.confirm(confirmMsg)) {
-          handleUpdateBid(orderId, slotIndex, parseInt(newBidPrice), newTotal);
+          handleUpdateBid(orderId, slotIndex, bidInt, newTotal);
           setUpdatingSlot(null);
           setNewBidPrice('');
       }
@@ -116,7 +137,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         
-                        // Badge 狀態邏輯 (簡化版)
+                        // Badge 狀態邏輯
                         if (isPendingPayment) {
                             if (isOrderExpired) {
                                 statusConfig = { bg: 'bg-slate-200', text: 'text-slate-500', label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' };
@@ -193,6 +214,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
                                                                 
+                                                                // 領先條件
                                                                 const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
                                                                 
                                                                 const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
@@ -234,7 +256,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
 
-                                                                // Placeholder 計算
+                                                                // Placeholder 計算: 如果是Pending，顯示 "修改金額"，否則顯示 "大於市場價"
                                                                 const inputPlaceholder = isPendingPayment ? "修改金額" : `>${Math.max(slot.bidPrice, marketHighestPrice)}`;
 
                                                                 return (
@@ -255,7 +277,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
                                                                                     <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={inputPlaceholder} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
-                                                                                    <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice))} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
+                                                                                    {/* 🔥 修改：傳遞 isPendingPayment 和 marketHighestPrice 給 Submit 函數 */}
+                                                                                    <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice), isPendingPayment, marketHighestPrice)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
                                                                             ) : (
