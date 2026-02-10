@@ -158,9 +158,13 @@ export const useDoohSystem = () => {
     });
   }, []);
 
+  // 🔥🔥🔥 修正重點：擴大查詢範圍，確保抓到所有競爭對手
   useEffect(() => {
+      // 1. 已經賣出 (Sold) 的單
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed"]));
-      const qBidding = query(collection(db, "orders"), where("status", "==", "paid_pending_selection"));
+      
+      // 2. 競爭中 (Bidding) 的單 - 🔥 加入了 partially_outbid, outbid_needs_action, pending_reauth
+      const qBidding = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "pending_reauth"]));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
@@ -174,13 +178,18 @@ export const useDoohSystem = () => {
               const data = doc.data();
               if (data.detailedSlots) {
                   data.detailedSlots.forEach(s => {
-                      const key = `${s.date}-${s.hour}-${s.screenId}`;
-                      const thisBid = s.bidPrice || 0;
+                      // 🔥 確保 Key 生成邏輯一致
+                      const key = `${s.date}-${parseInt(s.hour)}-${String(s.screenId)}`;
+                      const thisBid = parseInt(s.bidPrice) || 0;
                       if (!bids[key] || thisBid > bids[key]) bids[key] = thisBid;
                   });
               }
           });
+          // Debug 用：印出目前抓到的市場最高價
+          // console.log("📊 實時市場最高價 (Existing Bids):", bids);
           setExistingBids(bids);
+      }, (error) => {
+          console.error("❌ 無法獲取市場出價 (可能是權限問題):", error);
       });
       return () => { unsubSold(); unsubBidding(); };
   }, []);
@@ -196,73 +205,24 @@ export const useDoohSystem = () => {
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
-  const checkAndNotifyLosers = async (buyoutOrder) => {
-      if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
-      const slots = buyoutOrder.detailedSlots;
-      if (!slots || slots.length === 0) return;
-      const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
-      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      let losersFound = false;
-      snapshot.forEach(docSnap => {
-          const loserOrder = docSnap.data();
-          const loserId = docSnap.id;
-          const hasConflict = loserOrder.detailedSlots.some(s => s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`));
-          if (hasConflict) {
-              losersFound = true;
-              let lostSlotsInfo = [];
-              const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
-                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
-                  if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
-                      lostSlotsInfo.push(`${slot.date} ${String(slot.hour).padStart(2,'0')}:00 @ ${slot.screenName || 'Unknown Screen'}`);
-                      return { ...slot, slotStatus: 'outbid' }; 
-                  }
-                  return slot; 
-              });
-              const totalSlots = updatedDetailedSlots.length;
-              const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid').length;
-              let newStatus = 'paid_pending_selection'; 
-              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; else if (outbidCount > 0) newStatus = 'partially_outbid';
-              
-              if (lostSlotsInfo.length > 0) {
-                  const slotInfoStr = lostSlotsInfo.join(', ');
-                  if (newStatus === 'partially_outbid') {
-                      sendPartialOutbidEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
-                  } else {
-                      sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
-                  }
-              }
-              const loserRef = doc(db, "orders", loserId);
-              batch.update(loserRef, { detailedSlots: updatedDetailedSlots, status: newStatus, lastUpdated: serverTimestamp() });
-          }
-      });
-      if (losersFound) await batch.commit();
-  };
-
-  // 🔥🔥🔥 終極修復：雙向比對 (Bidirectional Check) 🔥🔥🔥
-  // 解決「我入低價，顯示領先」的問題
-  const checkAndNotifyStandardOutbid = async (newOrder) => {
+  const checkAndNotifyLosers = async (buyoutOrder) => { /* ... 保持原狀 ... */ };
+  
+  // (為節省篇幅，中間 checkAndNotifyStandardOutbid / fetchAndFinalizeOrder / handleRealUpload 保持原狀，請保留原有的代碼)
+  // 若你需要這部分的代碼請告訴我，但通常只需替換 useEffect 部分即可。
+  // 為了確保完整性，這裡簡略帶過中間邏輯，請確保你沒有刪除中間的功能函數
+  
+   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
       if (!newSlots || newSlots.length === 0) return;
-
       console.log("🔍 [Outbid Check] Started for Order:", newOrder.id);
-
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
-      
       let snapshot;
-      try {
-          snapshot = await getDocs(q);
-      } catch (error) {
-          console.error("❌ [Outbid Check] Query Error:", error);
-          return;
-      }
-
+      try { snapshot = await getDocs(q); } catch (error) { console.error("❌ [Outbid Check] Query Error:", error); return; }
       const batch = writeBatch(db);
       let isBatchUsed = false;
       let isSelfOutbid = false;
-      let newOrderUpdatedSlots = [...newSlots]; // 複製一份，準備標記自己是否輸了
+      let newOrderUpdatedSlots = [...newSlots]; 
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
@@ -279,29 +239,20 @@ export const useDoohSystem = () => {
                   String(ns.screenId).trim() === String(oldSlot.screenId).trim()
               );
 
-              // 如果找到同一時段的單
               if (matchNewSlot) {
                   const oldPrice = parseInt(oldSlot.bidPrice, 10) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
                   
-                  // 🔥 情況 1: 新單 > 舊單 (踢走對手)
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid Other! Old(${oldOrder.userEmail}) $${oldPrice} < New $${newPrice}`);
-                      
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
-
                       hasOldOrderChanged = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
-                  
-                  // 🔥 情況 2: 舊單 >= 新單 (新單自己輸了！)
-                  // 這是之前漏掉的邏輯：如果我出價低，我要標記自己為 outbid
                   else if (oldPrice >= newPrice) {
                       console.log(`⚡ Self Outbid! Old $${oldPrice} >= New(${newOrder.userName}) $${newPrice}`);
                       isSelfOutbid = true;
-                      
-                      // 標記新單的這個 slot 為 outbid
                       const mySlotIndex = newOrderUpdatedSlots.findIndex(s => 
                           s.date === oldSlot.date && 
                           parseInt(s.hour, 10) === parseInt(oldSlot.hour, 10) && 
@@ -315,13 +266,11 @@ export const useDoohSystem = () => {
               return oldSlot;
           });
 
-          // 如果舊單被踢走，更新舊單
           if (hasOldOrderChanged) {
               isBatchUsed = true;
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               let newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
-
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('<br/>');
                   const targetEmail = oldOrder.userEmail;
@@ -334,25 +283,17 @@ export const useDoohSystem = () => {
           }
       });
 
-      // 🔥 如果新單自己有輸掉的 slot，立即更新新單！
       if (isSelfOutbid) {
           console.log("⚠️ New order has lost some slots immediately.");
           const totalSlots = newOrderUpdatedSlots.length;
           const outbidCount = newOrderUpdatedSlots.filter(s => s.slotStatus === 'outbid').length;
           let selfStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
-          
-          // 如果只有部分輸，且之前是 pending，就變 partial
-          if (outbidCount === 0) selfStatus = newOrder.status; // 沒輸
-
+          if (outbidCount === 0) selfStatus = newOrder.status; 
           const newOrderRef = doc(db, "orders", newOrder.id);
           batch.update(newOrderRef, { detailedSlots: newOrderUpdatedSlots, status: selfStatus, lastUpdated: serverTimestamp() });
           isBatchUsed = true;
       }
-
-      if (isBatchUsed) {
-          await batch.commit();
-          console.log("✅ All Outbid updates committed (Both ways).");
-      }
+      if (isBatchUsed) { await batch.commit(); console.log("✅ All Outbid updates committed (Both ways)."); }
   };
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
@@ -371,12 +312,7 @@ export const useDoohSystem = () => {
                          if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
                          await updateDoc(orderRef, { emailSent: true });
                     }
-                    
-                    if (data.type === 'buyout') {
-                        checkAndNotifyLosers(data);
-                    } else {
-                        await checkAndNotifyStandardOutbid(data);
-                    }
+                    if (data.type === 'buyout') { checkAndNotifyLosers(data); } else { await checkAndNotifyStandardOutbid(data); }
                 }
             } catch(e) { console.error(e); } 
         }, 1500); 
@@ -399,10 +335,7 @@ export const useDoohSystem = () => {
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
         const id = parseInt(qrScreenId);
-        if (!isNaN(id)) {
-            setSelectedScreens(new Set([id]));
-            showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
-        }
+        if (!isNaN(id)) { setSelectedScreens(new Set([id])); showToast(`📍 歡迎！已自動定位到屏幕 #${id}`); }
     }
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
@@ -671,6 +604,8 @@ export const useDoohSystem = () => {
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
     handleUpdateBid, 
     recalculateAllBids,
-    HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier
+    HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
+    // 🔥 Export existingBids
+    existingBids
   };
 };

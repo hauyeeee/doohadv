@@ -189,7 +189,7 @@ const DOOHBiddingSystem = () => {
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
       <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
       
-      {/* 🔥 傳入 existingBids 進行即時比價 🔥 */}
+      {/* 🔥 傳入 existingBids 進行即時比價 */}
       <MyOrdersModal 
         isOpen={isProfileModalOpen} 
         user={user} 
