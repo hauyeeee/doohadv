@@ -37,6 +37,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                     </div>
                     <div>
+                        {/* 這裡確保顯示全名 */}
                         <h3 className="font-bold text-xl text-slate-800">{user.displayName}</h3>
                         <p className="text-xs text-slate-500 flex items-center gap-1"><Mail size={10}/> {user.email}</p>
                     </div>
@@ -58,7 +59,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         const groupedSlots = {};
                         let firstSlotDate = null;
                         
-                        // 🔥 邏輯修復 1: 預先檢查是否有實時被超越的情況 (用於覆蓋頂部 Badge)
                         let hasRealTimeOutbid = false;
                         
                         if (order.detailedSlots) { 
@@ -67,7 +67,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 if (!groupedSlots[slot.date]) groupedSlots[slot.date] = []; 
                                 groupedSlots[slot.date].push(slotWithIndex);
                                 
-                                // 檢查實時出價
                                 const slotKey = `${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`;
                                 const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
                                 if ((parseInt(slot.bidPrice) || 0) < marketHighestPrice) {
@@ -104,7 +103,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
-                        // 🔥 邏輯修復 2: 根據實時狀態調整頂部 Badge
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         
                         if (['won', 'paid', 'completed'].includes(order.status)) {
@@ -121,8 +119,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             statusConfig = { bg: 'bg-purple-50', text: 'text-purple-600', label: t('status_pending_auth') };
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
-                        
-                        // 🔥 重點: 如果狀態是 "paid_pending_selection" (原本顯示領先)，但前端發現輸緊錢 -> 顯示警告
                         } else if (order.status === 'paid_pending_selection') {
                             if (hasRealTimeOutbid) {
                                 statusConfig = { bg: 'bg-yellow-100', text: 'text-yellow-700', label: lang === 'en' ? 'Outbid (Action Needed)' : '⚠️ 部份被超越' };
@@ -176,17 +172,11 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 
-                                                                // 贏: 已結算 且 (slotStatus贏 或 沒被踢沒輸)
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
-                                                                
-                                                                // 領先: 未結算 且 沒被踢 且 沒輸 且 實時沒被超
                                                                 const isLeading = !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
                                                                 
-                                                                // 警告/輸
                                                                 const showOutbidWarning = (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
                                                                 const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
-                                                                
-                                                                // 按鈕顯示: 輸緊且未過期且未贏
                                                                 const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
@@ -212,7 +202,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                      showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : null
                                                                                     }
                                                                                 </div>
-                                                                                <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}</span>
+                                                                                {/* 🔥 修正：顯示全名，不再 split */}
+                                                                                <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName || slot.screenId}</span>
                                                                             </div>
                                                                         </div>
                                                                         
@@ -227,7 +218,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                 <>
                                                                                     <div className="flex flex-col items-end">
                                                                                         <span className={`text-xs font-bold ${(showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
-                                                                                        {showOutbidWarning && <span className="text-[8px] text-slate-400">最高: ${marketHighestPrice}</span>}
+                                                                                        {/* 顯示最高價，方便確認 */}
+                                                                                        {<span className="text-[8px] text-slate-400">最高: ${marketHighestPrice}</span>}
                                                                                     </div>
                                                                                     
                                                                                     {showIncreaseButton && (
