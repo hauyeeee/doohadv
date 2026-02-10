@@ -162,14 +162,15 @@ export const useDoohSystem = () => {
       // 2. 競價中 (Bidding) 的單 
       // 🔥 修改重點：移除了 "pending_auth"
       // 只有 Stripe Webhook 回傳確認 (變成 paid_pending_selection) 後，這張單才有資格參與競價！
-      const qBidding = query(collection(db, "orders"), where("status", "in", [
-          "paid_pending_selection", // ✅ 已付款，有效
-          "partially_outbid",       // ✅ 已付款但部分輸，有效
-          "outbid_needs_action",    // ✅ 已付款但全輸，有效
-          "pending_reauth",         // ✅ 舊單加價中 (本身已付款)，暫時當有效
-          // "pending_auth",        // ❌ 刪除這一行！未付款不准影響市價！
+     const qBidding = query(collection(db, "orders"), where("status", "in", [
+          "paid_pending_selection", // ✅ Webhook 改的
+          "partially_outbid",       
+          "outbid_needs_action",    
+          "pending_reauth",         // (如果這是加價單，前提是舊單已付過錢，所以可保留)
           "won",          
-          "partially_won"
+          "partially_won",
+          "paid"
+          // ❌ 絕對不能有 "pending_auth"
       ]));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
@@ -231,35 +232,36 @@ export const useDoohSystem = () => {
   const checkAndNotifyLosers = async (buyoutOrder) => { /* ... */ };
   const checkAndNotifyStandardOutbid = async (newOrder) => { /* ... 保持原狀 ... */ };
 
-  const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
+const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
+
     if (isUrlSuccess) { 
-        setModalPaymentStatus('paid'); 
-        setTimeout(async () => { 
-            try { 
-                const docSnap = await getDoc(orderRef); 
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const userInfo = { email: data.userEmail, displayName: data.userName };
-                    if (data.status === 'pending_reauth') { await updateDoc(orderRef, { status: 'paid_pending_selection' }); }
-                    if (!data.emailSent) {
-                         if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
-                         await updateDoc(orderRef, { emailSent: true });
-                    }
-                    if (data.type === 'buyout') { checkAndNotifyLosers(data); } else { await checkAndNotifyStandardOutbid(data); }
-                }
-            } catch(e) { console.error(e); } 
-        }, 1500); 
+        // 🔥 修改 1: 不要在這裡改 status！只改 UI 顯示 "驗證中"
+        // 刪除所有 updateDoc 改 status 的代碼
+        setModalPaymentStatus('verifying'); 
+        
+        // 僅保留發送 Email 的觸發 (如果你想由前端發)，但建議最好連 Email 都由 Webhook 發
+        // 為安全起見，這裡只做 UI 狀態管理
     }
+
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
             setCreativeStatus(orderData.hasVideo ? 'approved' : 'empty');
             setCreativeName(orderData.videoName || ''); 
-            const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid'].includes(orderData.status);
-            if (isPaid) { setModalPaymentStatus('paid'); localStorage.removeItem('temp_txn_time'); } 
-            else { if (!isUrlSuccess) setModalPaymentStatus('verifying'); }
+            
+            // 🔥 修改 2: 只有當 DB 真的變成以下狀態，前端才顯示 "付款成功"
+            const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid', 'partially_outbid', 'outbid_needs_action'].includes(orderData.status);
+            
+            if (isPaid) { 
+                setModalPaymentStatus('paid'); 
+                localStorage.removeItem('temp_txn_time'); 
+                showToast("✅ 付款已確認！");
+            } else { 
+                // 如果 URL 說 success 但 DB 還是 pending_auth，證明 Webhook 還沒到，繼續轉圈圈
+                if (isUrlSuccess) setModalPaymentStatus('verifying'); 
+            }
         }
     });
     return unsubscribe;
