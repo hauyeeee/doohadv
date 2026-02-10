@@ -154,22 +154,21 @@ export const useDoohSystem = () => {
     });
   }, []);
 
-  // 🔥🔥🔥 核心修復：無差別抓取所有訂單，確保不漏單
+ // 🔥🔥🔥 核心修復：嚴格定義「有效出價」
   useEffect(() => {
       // 1. 已鎖定 (Sold) 的單
-      // 邏輯：贏咗(won)、已付款(paid)、部分贏(partially_won) 的單都會佔用時段
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "partially_won"]));
       
       // 2. 競價中 (Bidding) 的單 
-      // 🔥 重點：加入了 'pending_auth' (等待付款中) 和 'pending_reauth' (重新授權中)
-      // 只要用戶點了 Confirm，就算還沒最終付款，個價錢都應該即時反映給對手看！
+      // 🔥 修改重點：移除了 "pending_auth"
+      // 只有 Stripe Webhook 回傳確認 (變成 paid_pending_selection) 後，這張單才有資格參與競價！
       const qBidding = query(collection(db, "orders"), where("status", "in", [
-          "paid_pending_selection", 
-          "partially_outbid", 
-          "outbid_needs_action", 
-          "pending_reauth", 
-          "pending_auth", // 🔥 確保剛建立的單都能被看到
-          "won",          // 🔥 贏了的高價也要繼續顯示為最高價
+          "paid_pending_selection", // ✅ 已付款，有效
+          "partially_outbid",       // ✅ 已付款但部分輸，有效
+          "outbid_needs_action",    // ✅ 已付款但全輸，有效
+          "pending_reauth",         // ✅ 舊單加價中 (本身已付款)，暫時當有效
+          // "pending_auth",        // ❌ 刪除這一行！未付款不准影響市價！
+          "won",          
           "partially_won"
       ]));
 
