@@ -244,6 +244,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                 <>
                                                                                     <div className="flex flex-col items-end">
                                                                                         <span className={`text-xs font-bold ${isPendingPayment ? 'text-purple-600' : (showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
+                                                                                        {/* 🔥 修復了這裡的語法錯誤 */}
                                                                                         <span className="text-[8px] text-slate-400">最高: HK${marketHighestPrice}</span>
                                                                                     </div>
                                                                                     
