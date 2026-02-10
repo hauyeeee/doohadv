@@ -154,23 +154,23 @@ export const useDoohSystem = () => {
     });
   }, []);
 
- // 🔥🔥🔥 核心修復：嚴格定義「有效出價」
+ // 只有真正 "Hold 左錢" (Stripe Webhook 確認) 的單，才有資格做 Highest Bid
   useEffect(() => {
       // 1. 已鎖定 (Sold) 的單
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "partially_won"]));
       
       // 2. 競價中 (Bidding) 的單 
-      // 🔥 修改重點：移除了 "pending_auth"
-      // 只有 Stripe Webhook 回傳確認 (變成 paid_pending_selection) 後，這張單才有資格參與競價！
-     const qBidding = query(collection(db, "orders"), where("status", "in", [
-          "paid_pending_selection", // ✅ Webhook 改的
-          "partially_outbid",       
-          "outbid_needs_action",    
-          "pending_reauth",         // (如果這是加價單，前提是舊單已付過錢，所以可保留)
-          "won",          
-          "partially_won",
-          "paid"
-          // ❌ 絕對不能有 "pending_auth"
+      // 🔥 修改重點：這裡只保留 "肯定有錢" 的狀態
+      // ❌ 刪除 'pending_reauth' (加價中，未俾錢)
+      // ❌ 刪除 'pending_auth' (新單，未俾錢)
+      // ✅ 只有以下狀態才算有效出價：
+      const qBidding = query(collection(db, "orders"), where("status", "in", [
+          "paid_pending_selection", // ✅ Webhook 確認已付款
+          "partially_outbid",       // ✅ 已付款但部分輸
+          "outbid_needs_action",    // ✅ 已付款但全輸 (佢個價錢依然係有效參考)
+          "won",                    // ✅ 已贏
+          "partially_won",          // ✅ 部分贏
+          "paid"                    // ✅ 已買斷
       ]));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {

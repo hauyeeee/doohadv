@@ -115,8 +115,22 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             statusConfig = { bg: 'bg-slate-100', text: 'text-slate-400', label: t('status_cancelled') };
                         } else if (order.status === 'outbid_needs_action') {
                             statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') };
-                        } else if (order.status === 'pending_auth' || order.status === 'pending_reauth') { 
-                            statusConfig = { bg: 'bg-purple-50', text: 'text-purple-600', label: t('status_pending_auth') };
+                       } else if (order.status === 'pending_auth' || order.status === 'pending_reauth') { 
+    if (isOrderExpired) {
+        // 如果截標了還在 pending，代表付款失敗或放棄付款 -> 視為失效
+        statusConfig = { 
+            bg: 'bg-slate-200', 
+            text: 'text-slate-500', 
+            label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' 
+        };
+    } else {
+        // 還沒截標，那是真的在等付款
+        statusConfig = { 
+            bg: 'bg-purple-50', 
+            text: 'text-purple-600', 
+            label: t('status_pending_auth') // "銀行授權中"
+        };
+    }
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
                         } else if (order.status === 'paid_pending_selection') {
