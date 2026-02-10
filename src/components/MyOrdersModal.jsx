@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag } from 'lucide-react';
+import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag, RefreshCw, Edit } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
@@ -29,7 +29,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden" onClick={onClose}>
         <div className="bg-slate-50 rounded-2xl shadow-2xl max-w-3xl w-full h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            {/* Header */}
             <div className="p-5 border-b bg-white flex justify-between items-center shadow-sm shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative">
@@ -37,7 +36,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                     </div>
                     <div>
-                        {/* 這裡確保顯示全名 */}
                         <h3 className="font-bold text-xl text-slate-800">{user.displayName}</h3>
                         <p className="text-xs text-slate-500 flex items-center gap-1"><Mail size={10}/> {user.email}</p>
                     </div>
@@ -48,7 +46,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                 </div>
             </div>
             
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
                 <h4 className="font-bold text-slate-700 text-lg flex items-center gap-2 mb-2"><History size={20}/> {t('my_orders')}</h4>
                 
@@ -61,6 +58,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         
                         let hasRealTimeOutbid = false;
                         
+                        // 🔥 關鍵檢查：訂單是否「有效」 (已付款)
+                        const isOrderEffective = ['won', 'paid_pending_selection', 'partially_outbid', 'outbid_needs_action', 'paid', 'completed'].includes(order.status);
+                        
+                        // 🔥 關鍵檢查：訂單是否「付款中」
+                        const isPendingPayment = order.status === 'pending_auth' || order.status === 'pending_reauth';
+
                         if (order.detailedSlots) { 
                             order.detailedSlots.forEach((slot, index) => { 
                                 const slotWithIndex = { ...slot, originalIndex: index };
@@ -69,7 +72,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 
                                 const slotKey = `${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`;
                                 const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
-                                if ((parseInt(slot.bidPrice) || 0) < marketHighestPrice) {
+                                
+                                // 只有當訂單有效時，才去比價。如果未付款，這裡無所謂，因為我們會強制顯示 "待付款"
+                                if (isOrderEffective && (parseInt(slot.bidPrice) || 0) < marketHighestPrice) {
                                     hasRealTimeOutbid = true;
                                 }
                             }); 
@@ -105,7 +110,14 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         
-                        if (['won', 'paid', 'completed'].includes(order.status)) {
+                        // 🔥 頂部 Badge 狀態邏輯
+                        if (isPendingPayment) {
+                            if (isOrderExpired) {
+                                statusConfig = { bg: 'bg-slate-200', text: 'text-slate-500', label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' };
+                            } else {
+                                statusConfig = { bg: 'bg-purple-100', text: 'text-purple-700', label: lang === 'en' ? 'Payment Required' : '💳 等待付款' };
+                            }
+                        } else if (['won', 'paid', 'completed'].includes(order.status)) {
                             statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'partially_won') {
                             statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-700', label: lang==='en'?'Partially Won':'部分中標' };
@@ -115,22 +127,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             statusConfig = { bg: 'bg-slate-100', text: 'text-slate-400', label: t('status_cancelled') };
                         } else if (order.status === 'outbid_needs_action') {
                             statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') };
-                       } else if (order.status === 'pending_auth' || order.status === 'pending_reauth') { 
-    if (isOrderExpired) {
-        // 如果截標了還在 pending，代表付款失敗或放棄付款 -> 視為失效
-        statusConfig = { 
-            bg: 'bg-slate-200', 
-            text: 'text-slate-500', 
-            label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' 
-        };
-    } else {
-        // 還沒截標，那是真的在等付款
-        statusConfig = { 
-            bg: 'bg-purple-50', 
-            text: 'text-purple-600', 
-            label: t('status_pending_auth') // "銀行授權中"
-        };
-    }
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
                         } else if (order.status === 'paid_pending_selection') {
@@ -187,21 +183,31 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
-                                                                const isLeading = !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
                                                                 
-                                                                const showOutbidWarning = (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
+                                                                // 🔥 核心修正: 領先必須滿足 "已付款" (isOrderEffective)
+                                                                // 如果是 Pending Payment，絕對不顯示領先
+                                                                const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
+                                                                
+                                                                // 警告狀態 (已付款但被踢)
+                                                                const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
                                                                 const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
+                                                                
+                                                                // 🔥 按鈕顯示邏輯
+                                                                // 1. 輸緊 -> 顯示加價
+                                                                // 2. 付款中 -> 顯示修改
                                                                 const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
+                                                                const showEditButton = isPendingPayment && !isOrderExpired;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
                                                                 let borderClass = "border-slate-200";
                                                                 let bgClass = "bg-white";
-                                                                if(isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
-                                                                else if(isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
-                                                                else if(showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
-                                                                else if(showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
-                                                                
+                                                                if (isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
+                                                                else if (isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
+                                                                else if (showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
+                                                                else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
+                                                                else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
+
                                                                 return (
                                                                     <div key={slot.originalIndex} className={`flex items-center justify-between p-2 rounded border ${borderClass} ${bgClass}`}>
                                                                         <div className="flex items-center gap-2">
@@ -213,10 +219,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                     {isFinalWon ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
                                                                                      isLeading ? <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span> :
                                                                                      showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
-                                                                                     showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> : null
+                                                                                     showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> :
+                                                                                     isPendingPayment ? <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span> : null
                                                                                     }
                                                                                 </div>
-                                                                                {/* 🔥 修正：顯示全名，不再 split */}
                                                                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName || slot.screenId}</span>
                                                                             </div>
                                                                         </div>
@@ -224,20 +230,23 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                         <div className="flex items-center gap-2">
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
-                                                                                    <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={`>${Math.max(slot.bidPrice, marketHighestPrice)}`} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
+                                                                                    <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={isPendingPayment ? "修改金額" : `>${Math.max(slot.bidPrice, marketHighestPrice)}`} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
                                                                                     <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice))} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
                                                                                     <div className="flex flex-col items-end">
-                                                                                        <span className={`text-xs font-bold ${(showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
-                                                                                        {/* 顯示最高價，方便確認 */}
+                                                                                        <span className={`text-xs font-bold ${isPendingPayment ? 'text-purple-600' : (showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
                                                                                         {<span className="text-[8px] text-slate-400">最高: ${marketHighestPrice}</span>}
                                                                                     </div>
                                                                                     
                                                                                     {showIncreaseButton && (
                                                                                         <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"><Zap size={10}/> {t('increase_bid')}</button>
+                                                                                    )}
+                                                                                    {/* 🔥 新增：修改出價按鈕 (給付款失敗的人用) */}
+                                                                                    {showEditButton && (
+                                                                                        <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-purple-600 text-white px-2 py-1 rounded font-bold hover:bg-purple-700 flex items-center gap-1 shadow-sm transition-all"><Edit size={10}/> 修改</button>
                                                                                     )}
                                                                                     {showLost && !showIncreaseButton && (
                                                                                         <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200"><Lock size={10}/> {t('bid_closed')}</span>
@@ -261,14 +270,15 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
-                                                 ['paid_pending_selection', 'partially_outbid', 'pending_reauth', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
+                                                 isPendingPayment ? (lang==='en'?'Waiting for payment...':'⏳ 等待付款中...') : // 🔥 修正文字
+                                                 ['paid_pending_selection', 'partially_outbid', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
                                                  order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
                                                  (lang==='en'?'Processing...':'等待處理...')}
                                             </p>
                                             
-                                            {order.status === 'pending_auth' && (
-                                                <button onClick={() => onResumePayment(order)} className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm animate-pulse">
-                                                    <CreditCard size={14}/> {lang==='en'?'Complete Payment':'立即付款'}
+                                            {isPendingPayment && !isOrderExpired && (
+                                                <button onClick={() => onResumePayment(order)} className="w-full mt-3 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm animate-pulse">
+                                                    <CreditCard size={14}/> {lang==='en'?'Complete Payment':'繼續付款'}
                                                 </button>
                                             )}
                                         </div>
