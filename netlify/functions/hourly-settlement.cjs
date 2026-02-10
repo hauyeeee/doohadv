@@ -26,6 +26,13 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
       }
   };
 
+  // Helper: 渲染訂單狀態 Badge
+  const renderStatusBadge = (order, statusConfig) => (
+      <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${statusConfig.bg} ${statusConfig.text}`}>
+          {statusConfig.label}
+      </span>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden" onClick={onClose}>
         <div className="bg-slate-50 rounded-2xl shadow-2xl max-w-3xl w-full h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
@@ -57,12 +64,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                     myOrders.map((order) => {
                         const groupedSlots = {};
                         let firstSlotDate = null;
-                        
                         let hasRealTimeOutbid = false;
                         
                         // 檢查訂單是否有效 (已付款)
                         const isOrderEffective = ['won', 'paid_pending_selection', 'partially_outbid', 'outbid_needs_action', 'paid', 'completed'].includes(order.status);
-                        
                         // 檢查訂單是否付款中
                         const isPendingPayment = order.status === 'pending_auth' || order.status === 'pending_reauth';
 
@@ -148,7 +153,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             <div key={order.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
                                 <div className="bg-slate-50/50 p-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2">
                                     <div className="flex items-center gap-3">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${statusConfig.bg} ${statusConfig.text}`}>{statusConfig.label}</span>
+                                        {renderStatusBadge(order, statusConfig)}
                                         <span className="text-xs text-slate-400 font-mono">#{order.id.slice(0, 8)}</span>
                                     </div>
                                     <div className="text-right"><span className="text-xs text-slate-400 block">{order.displayTime}</span></div>
@@ -244,7 +249,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                 <>
                                                                                     <div className="flex flex-col items-end">
                                                                                         <span className={`text-xs font-bold ${isPendingPayment ? 'text-purple-600' : (showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
-                                                                                        {/* 🔥 修復了這裡的語法錯誤 */}
                                                                                         <span className="text-[8px] text-slate-400">最高: HK${marketHighestPrice}</span>
                                                                                     </div>
                                                                                     
