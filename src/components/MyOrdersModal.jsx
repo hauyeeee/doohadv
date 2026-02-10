@@ -29,6 +29,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden" onClick={onClose}>
         <div className="bg-slate-50 rounded-2xl shadow-2xl max-w-3xl w-full h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            {/* Header */}
             <div className="p-5 border-b bg-white flex justify-between items-center shadow-sm shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative">
@@ -46,6 +47,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                 </div>
             </div>
             
+            {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
                 <h4 className="font-bold text-slate-700 text-lg flex items-center gap-2 mb-2"><History size={20}/> {t('my_orders')}</h4>
                 
@@ -55,6 +57,30 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                     myOrders.map((order) => {
                         const groupedSlots = {};
                         let firstSlotDate = null;
+                        
+                        // 🔥 邏輯修復 1: 預先檢查是否有實時被超越的情況 (用於覆蓋頂部 Badge)
+                        let hasRealTimeOutbid = false;
+                        
+                        if (order.detailedSlots) { 
+                            order.detailedSlots.forEach((slot, index) => { 
+                                const slotWithIndex = { ...slot, originalIndex: index };
+                                if (!groupedSlots[slot.date]) groupedSlots[slot.date] = []; 
+                                groupedSlots[slot.date].push(slotWithIndex);
+                                
+                                // 檢查實時出價
+                                const slotKey = `${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`;
+                                const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
+                                if ((parseInt(slot.bidPrice) || 0) < marketHighestPrice) {
+                                    hasRealTimeOutbid = true;
+                                }
+                            }); 
+                            if (order.detailedSlots.length > 0) {
+                                const d = new Date(order.detailedSlots[0].date); 
+                                d.setHours(parseInt(order.detailedSlots[0].hour), 0, 0, 0);
+                                firstSlotDate = d;
+                            }
+                        }
+
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
@@ -63,21 +89,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             }
                             return sum + (parseInt(s.bidPrice)||0);
                         }, 0) : 0;
+
                         const isSettled = ['won', 'paid', 'completed', 'lost', 'partially_won'].includes(order.status);
                         const displayAmount = isSettled ? actualWinningAmount : (order.amount || 0);
-
-                        if (order.detailedSlots) { 
-                            order.detailedSlots.forEach((slot, index) => { 
-                                const slotWithIndex = { ...slot, originalIndex: index };
-                                if (!groupedSlots[slot.date]) groupedSlots[slot.date] = []; 
-                                groupedSlots[slot.date].push(slotWithIndex); 
-                            }); 
-                            if (order.detailedSlots.length > 0) {
-                                const d = new Date(order.detailedSlots[0].date); 
-                                d.setHours(parseInt(order.detailedSlots[0].hour), 0, 0, 0);
-                                firstSlotDate = d;
-                            }
-                        }
                         
                         const now = new Date();
                         let revealTimeStr = "---";
@@ -90,7 +104,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             revealTimeStr = revealDate.toLocaleString(lang === 'en' ? 'en-US' : 'zh-HK', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
 
+                        // 🔥 邏輯修復 2: 根據實時狀態調整頂部 Badge
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
+                        
                         if (['won', 'paid', 'completed'].includes(order.status)) {
                             statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'partially_won') {
@@ -105,8 +121,14 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             statusConfig = { bg: 'bg-purple-50', text: 'text-purple-600', label: t('status_pending_auth') };
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Closed' : '⏳ 已截止' };
+                        
+                        // 🔥 重點: 如果狀態是 "paid_pending_selection" (原本顯示領先)，但前端發現輸緊錢 -> 顯示警告
                         } else if (order.status === 'paid_pending_selection') {
-                            statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
+                            if (hasRealTimeOutbid) {
+                                statusConfig = { bg: 'bg-yellow-100', text: 'text-yellow-700', label: lang === 'en' ? 'Outbid (Action Needed)' : '⚠️ 部份被超越' };
+                            } else {
+                                statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
+                            }
                         } else if (order.status === 'partially_outbid') {
                             statusConfig = { bg: 'bg-orange-50', text: 'text-orange-700', label: t('status_partially_outbid') };
                         }
@@ -149,14 +171,22 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const slotKey = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                                                                 const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
                                                                 const myBidPrice = parseInt(slot.bidPrice) || 0;
+                                                                
                                                                 const isRealTimeOutbid = myBidPrice < marketHighestPrice;
-
                                                                 const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
+                                                                
+                                                                // 贏: 已結算 且 (slotStatus贏 或 沒被踢沒輸)
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
+                                                                
+                                                                // 領先: 未結算 且 沒被踢 且 沒輸 且 實時沒被超
                                                                 const isLeading = !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
+                                                                
+                                                                // 警告/輸
                                                                 const showOutbidWarning = (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
                                                                 const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
+                                                                
+                                                                // 按鈕顯示: 輸緊且未過期且未贏
                                                                 const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
@@ -185,6 +215,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName?.split(' ')[0] || slot.screenId}</span>
                                                                             </div>
                                                                         </div>
+                                                                        
                                                                         <div className="flex items-center gap-2">
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
@@ -198,6 +229,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                         <span className={`text-xs font-bold ${(showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
                                                                                         {showOutbidWarning && <span className="text-[8px] text-slate-400">最高: ${marketHighestPrice}</span>}
                                                                                     </div>
+                                                                                    
                                                                                     {showIncreaseButton && (
                                                                                         <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"><Zap size={10}/> {t('increase_bid')}</button>
                                                                                     )}

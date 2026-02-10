@@ -158,17 +158,27 @@ export const useDoohSystem = () => {
     });
   }, []);
 
-  // 🔥🔥🔥 修正重點：擴大查詢範圍，確保抓到所有競爭對手
+// 🔥🔥🔥 修正重點：擴大查詢範圍，確保抓到所有競爭對手 (已修復部分)
   useEffect(() => {
-      // 1. 已經賣出 (Sold) 的單
-      const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed"]));
+      // 1. 已經賣出 (Sold) 的單 - 🔥 加入 "partially_won"
+      const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "partially_won"]));
       
-      // 2. 競爭中 (Bidding) 的單 - 🔥 加入了 partially_outbid, outbid_needs_action, pending_reauth
+      // 2. 競爭中 (Bidding) 的單 - 🔥 確保包含所有可能的高價狀態
       const qBidding = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "pending_reauth"]));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
-          snapshot.docs.forEach(doc => { if (doc.data().detailedSlots) doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${s.screenId}`)); });
+          snapshot.docs.forEach(doc => { 
+              const data = doc.data();
+              if (data.detailedSlots) {
+                  data.detailedSlots.forEach(s => {
+                      // 🔥 修正：如果是 partially_won，只有贏咗嘅 slot 先算 Sold
+                      if (['won', 'paid', 'completed'].includes(data.status) || (data.status === 'partially_won' && s.slotStatus === 'won')) {
+                          sold.add(`${s.date}-${s.hour}-${s.screenId}`);
+                      }
+                  });
+              }
+          });
           setOccupiedSlots(sold);
       });
 
@@ -181,12 +191,11 @@ export const useDoohSystem = () => {
                       // 🔥 確保 Key 生成邏輯一致
                       const key = `${s.date}-${parseInt(s.hour)}-${String(s.screenId)}`;
                       const thisBid = parseInt(s.bidPrice) || 0;
+                      // 取市場最高價
                       if (!bids[key] || thisBid > bids[key]) bids[key] = thisBid;
                   });
               }
           });
-          // Debug 用：印出目前抓到的市場最高價
-          // console.log("📊 實時市場最高價 (Existing Bids):", bids);
           setExistingBids(bids);
       }, (error) => {
           console.error("❌ 無法獲取市場出價 (可能是權限問題):", error);
