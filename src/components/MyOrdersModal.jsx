@@ -117,8 +117,20 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             } else {
                                 statusConfig = { bg: 'bg-purple-100', text: 'text-purple-700', label: lang === 'en' ? 'Payment Required' : '💳 等待付款' };
                             }
-                        } else if (['won', 'paid', 'completed'].includes(order.status)) {
-                            statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
+                       if (['won', 'paid', 'completed'].includes(order.status)) {
+    if (order.type === 'buyout') {
+        statusConfig = { 
+            bg: 'bg-emerald-100', 
+            text: 'text-emerald-800', 
+            label: lang === 'en' ? 'Purchased' : '已購買 (成功)' 
+        };
+    } else {
+        statusConfig = { 
+            bg: 'bg-green-100', 
+            text: 'text-green-700', 
+            label: t('status_won') // "競價成功"
+        };
+    }
                         } else if (order.status === 'partially_won') {
                             statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-700', label: lang==='en'?'Partially Won':'部分中標' };
                         } else if (order.status === 'lost') {
@@ -216,7 +228,17 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                     <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
-                                                                                    {isFinalWon ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
+                                                                                   {isFinalWon ? (
+    order.type === 'buyout' ? (
+        <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200">
+            <CheckCircle size={8}/> BOUGHT
+        </span>
+    ) : (
+        <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200">
+            <Trophy size={8}/> WIN
+        </span>
+    )
+) :
                                                                                      isLeading ? <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span> :
                                                                                      showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
                                                                                      showLost ? <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span> :
