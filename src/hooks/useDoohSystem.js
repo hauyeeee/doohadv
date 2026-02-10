@@ -240,7 +240,8 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 核心修復：Outbid Check (強力轉型比對) 🔥🔥🔥
+  // 🔥🔥🔥 終極修復：雙向比對 (Bidirectional Check) 🔥🔥🔥
+  // 解決「我入低價，顯示領先」的問題
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -259,76 +260,98 @@ export const useDoohSystem = () => {
       }
 
       const batch = writeBatch(db);
-      let outbidFound = false;
+      let isBatchUsed = false;
+      let isSelfOutbid = false;
+      let newOrderUpdatedSlots = [...newSlots]; // 複製一份，準備標記自己是否輸了
 
       snapshot.forEach(docSnap => {
           const oldOrder = docSnap.data();
           if (oldOrder.userId === newOrder.userId) return; 
 
           let outbidInfo = [];
-          let hasChange = false;
+          let hasOldOrderChanged = false;
           let maxNewPrice = 0;
 
           const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-              // 🔥 強力比對邏輯：轉 String, 去空格, 轉 Int
               const matchNewSlot = newSlots.find(ns => 
                   ns.date === oldSlot.date && 
-                  parseInt(ns.hour, 10) === parseInt(oldSlot.hour, 10) && // Base 10 int 確保 '02' == 2
-                  String(ns.screenId).trim() === String(oldSlot.screenId).trim() // String + Trim
+                  parseInt(ns.hour, 10) === parseInt(oldSlot.hour, 10) && 
+                  String(ns.screenId).trim() === String(oldSlot.screenId).trim()
               );
 
+              // 如果找到同一時段的單
               if (matchNewSlot) {
                   const oldPrice = parseInt(oldSlot.bidPrice, 10) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
                   
-                  // 🔥 Log 幫助 Debug
-                  // console.log(`👉 Comparison: User(${oldOrder.userName}) $${oldPrice} vs New $${newPrice}`);
-
+                  // 🔥 情況 1: 新單 > 舊單 (踢走對手)
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
-                      console.log(`⚡ Outbid Confirmed! User(${oldOrder.userEmail}) $${oldPrice} < $${newPrice}`);
+                      console.log(`⚡ Outbid Other! Old(${oldOrder.userEmail}) $${oldPrice} < New $${newPrice}`);
                       
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
 
-                      hasChange = true;
-                      return { ...oldSlot, slotStatus: 'outbid' }; // 標記為 outbid
+                      hasOldOrderChanged = true;
+                      return { ...oldSlot, slotStatus: 'outbid' }; 
+                  }
+                  
+                  // 🔥 情況 2: 舊單 >= 新單 (新單自己輸了！)
+                  // 這是之前漏掉的邏輯：如果我出價低，我要標記自己為 outbid
+                  else if (oldPrice >= newPrice) {
+                      console.log(`⚡ Self Outbid! Old $${oldPrice} >= New(${newOrder.userName}) $${newPrice}`);
+                      isSelfOutbid = true;
+                      
+                      // 標記新單的這個 slot 為 outbid
+                      const mySlotIndex = newOrderUpdatedSlots.findIndex(s => 
+                          s.date === oldSlot.date && 
+                          parseInt(s.hour, 10) === parseInt(oldSlot.hour, 10) && 
+                          String(s.screenId).trim() === String(oldSlot.screenId).trim()
+                      );
+                      if (mySlotIndex !== -1) {
+                          newOrderUpdatedSlots[mySlotIndex] = { ...newOrderUpdatedSlots[mySlotIndex], slotStatus: 'outbid' };
+                      }
                   }
               }
               return oldSlot;
           });
 
-          if (hasChange) {
-              outbidFound = true;
-              
+          // 如果舊單被踢走，更新舊單
+          if (hasOldOrderChanged) {
+              isBatchUsed = true;
               const totalSlots = updatedOldSlots.length;
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
-              
-              // 強制更新狀態
               let newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
 
               if (outbidInfo.length > 0) {
                   const infoStr = outbidInfo.join('<br/>');
                   const targetEmail = oldOrder.userEmail;
-                  
                   if (targetEmail) {
-                      sendStandardOutbidEmail(
-                          targetEmail, 
-                          oldOrder.userName || 'Customer', 
-                          infoStr, 
-                          maxNewPrice
-                      );
-                      console.log(`📧 Outbid email SENT to ${targetEmail}`);
+                      sendStandardOutbidEmail(targetEmail, oldOrder.userName || 'Customer', infoStr, maxNewPrice);
                   }
               }
-
               const oldOrderRef = doc(db, "orders", docSnap.id);
               batch.update(oldOrderRef, { detailedSlots: updatedOldSlots, status: newStatus, lastUpdated: serverTimestamp() });
           }
       });
 
-      if (outbidFound) {
+      // 🔥 如果新單自己有輸掉的 slot，立即更新新單！
+      if (isSelfOutbid) {
+          console.log("⚠️ New order has lost some slots immediately.");
+          const totalSlots = newOrderUpdatedSlots.length;
+          const outbidCount = newOrderUpdatedSlots.filter(s => s.slotStatus === 'outbid').length;
+          let selfStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
+          
+          // 如果只有部分輸，且之前是 pending，就變 partial
+          if (outbidCount === 0) selfStatus = newOrder.status; // 沒輸
+
+          const newOrderRef = doc(db, "orders", newOrder.id);
+          batch.update(newOrderRef, { detailedSlots: newOrderUpdatedSlots, status: selfStatus, lastUpdated: serverTimestamp() });
+          isBatchUsed = true;
+      }
+
+      if (isBatchUsed) {
           await batch.commit();
-          console.log("✅ Outbid updates committed to DB.");
+          console.log("✅ All Outbid updates committed (Both ways).");
       }
   };
 
@@ -352,7 +375,6 @@ export const useDoohSystem = () => {
                     if (data.type === 'buyout') {
                         checkAndNotifyLosers(data);
                     } else {
-                        // 🔥 確保這裡調用 checkAndNotifyStandardOutbid
                         await checkAndNotifyStandardOutbid(data);
                     }
                 }
