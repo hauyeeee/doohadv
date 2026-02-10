@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
-const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
+// 🔥 修改 1: 這裡記得加入 existingBids
+const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
   const { t, lang } = useLanguage();
   const [updatingSlot, setUpdatingSlot] = useState(null);
   const [newBidPrice, setNewBidPrice] = useState('');
@@ -10,10 +11,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
   if (!isOpen || !user) return null;
 
   const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum) => {
+      // 檢查新價錢必須高於舊價錢
       if (!newBidPrice || parseInt(newBidPrice) <= parseInt(currentPrice)) {
           alert(lang === 'en' ? "New bid must be higher!" : "新出價必須高於目前出價！");
           return;
       }
+      
       const newTotal = otherSlotsSum + parseInt(newBidPrice);
       const confirmMsg = lang === 'en' 
           ? `Confirm bid increase? Total re-authorization: HK$${newTotal.toLocaleString()}` 
@@ -151,17 +154,30 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                         <div className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono w-fit">{date}</div>
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                             {groupedSlots[date].map((slot) => {
-                                                                const isOutbid = slot.slotStatus === 'outbid'; 
+                                                                // 🔥 修改 2: 計算實時市場狀態
+                                                                const slotKey = `${slot.date}-${parseInt(slot.hour)}-${slot.screenId}`;
+                                                                const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
+                                                                const myBidPrice = parseInt(slot.bidPrice) || 0;
+                                                                
+                                                                // 如果我的價錢低於市場價，即時當作輸
+                                                                const isRealTimeOutbid = myBidPrice < marketHighestPrice;
+
+                                                                const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 
-                                                                // 🔥 核心修正：只有在明確贏了的情況下才叫 WIN，其他時候是 Leading 或 Outbid
-                                                                const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isOutbid && !isLost));
-                                                                const isLeading = !isSettled && !isOutbid && !isLost;
-
-                                                                const showOutbidWarning = isOutbid && !isOrderExpired;
-                                                                const showLost = isLost || (isOutbid && isOrderExpired);
+                                                                // 🔥 狀態修正：
+                                                                // 1. 贏：已結算 + 贏
+                                                                const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
                                                                 
-                                                                // 🔥 修正：按鈕只在輸錢 (Outbid/Lost) 的時候出現，贏錢 (Leading/Won) 不出現
+                                                                // 2. 領先：未結算 + 無被後端踢 + 無被Lost + 無被實時超越
+                                                                const isLeading = !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid;
+
+                                                                // 3. 警告：被後端踢 OR 被實時超越
+                                                                const showOutbidWarning = (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
+                                                                const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
+                                                                
+                                                                // 🔥 修改 3: 按鈕出現條件
+                                                                // 只有在 (警告中 OR 已輸) 且 (未過期) 且 (未贏) 時才顯示加價
                                                                 const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
@@ -182,6 +198,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
                                                                                     
+                                                                                    {/* 狀態 Badge */}
                                                                                     {isFinalWon ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span> :
                                                                                      isLeading ? <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span> :
                                                                                      showOutbidWarning ? <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span> :
@@ -195,13 +212,18 @@ const MyOrdersModal = ({ isOpen, user, myOrders, onClose, onLogout, onUploadClic
                                                                         <div className="flex items-center gap-2">
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
-                                                                                    <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={`>${slot.bidPrice}`} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
+                                                                                    <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={`>${Math.max(slot.bidPrice, marketHighestPrice)}`} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
                                                                                     <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice))} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
                                                                             ) : (
                                                                                 <>
-                                                                                    <span className={`text-xs font-bold ${(!isFinalWon && !isLeading && !showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
+                                                                                    {/* 價格顯示：如果被超越，變紅 + 刪除線 */}
+                                                                                    <div className="flex flex-col items-end">
+                                                                                        <span className={`text-xs font-bold ${(showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
+                                                                                        {showOutbidWarning && <span className="text-[8px] text-slate-400">最高: ${marketHighestPrice}</span>}
+                                                                                    </div>
+                                                                                    
                                                                                     {showIncreaseButton && (
                                                                                         <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-red-600 text-white px-2 py-1 rounded font-bold hover:bg-red-700 flex items-center gap-1 shadow-sm transition-all animate-pulse"><Zap size={10}/> {t('increase_bid')}</button>
                                                                                     )}
