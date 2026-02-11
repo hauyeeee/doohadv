@@ -425,30 +425,30 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       return true; 
   };
 
-  const initiateTransaction = async (type = 'bid', forceProceed = false) => {
+ const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
-    if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
-    if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
+    if (type === 'bid' && pricing.missingBids > 0) { showToast(⁠ ❌ 尚有 ${pricing.missingBids} 個時段未出價 ⁠); return; }
+    if (type === 'bid' && pricing.invalidBids > 0) { showToast(⁠ ❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價 ⁠); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
-   // 🔥🔥🔥 【新增】方案 A：競價限制邏輯 (開始) 🔥🔥🔥
-    // 邏輯：如果是 'bid'，檢查所有有效時段是否屬於「同一日期」且「同一小時」
-    // 允許：不同屏幕 (Screens)，但必須是相同 Date + Hour
+    // 🔥🔥🔥 方案 A：競價限制邏輯 (UI 優化版) 🔥🔥🔥
     const validSlotsToCheck = generateAllSlots.filter(s => !s.isSoldOut);
     
     if (type === 'bid' && validSlotsToCheck.length > 0) {
         const firstSlot = validSlotsToCheck[0];
         
+        // 檢查是否所有項目都跟第一個項目的日期和小時一樣
         const isAllSameTime = validSlotsToCheck.every(slot => 
             slot.dateStr === firstSlot.dateStr && slot.hour === firstSlot.hour
         );
 
         if (!isAllSameTime) {
-            alert("⚠️ 競價訂單限制 (Bidding Restriction)\n\n由於競價結算時間不同，一張競價訂單只能包含「同一日期 + 同一小時」。\n\n(您可以選擇多個屏幕，但必須是相同時間)\n如需競投不同時段，請分開兩張訂單結帳。");
-            return; // ⛔️ 阻止繼續，唔會建立訂單
+            // ❌ 唔好再用 alert，改用 State 開靚 Modal
+            setIsTimeMismatchModalOpen(true);
+            return; // ⛔️ 阻止繼續
         }
     }
-    // 🔥🔥🔥 【新增】競價限制邏輯 (結束) 🔥🔥🔥
+    // 🔥🔥🔥 限制邏輯結束 🔥🔥🔥
 
 
 
@@ -548,7 +548,9 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
+    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,  isTimeMismatchModalOpen,      // 👈 加呢個
+    setIsTimeMismatchModalOpen,   // 👈 加呢個
+
     
     restrictionModalData, 
     setRestrictionModalData,

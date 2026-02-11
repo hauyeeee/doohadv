@@ -48,7 +48,9 @@ const DOOHBiddingSystem = () => {
     restrictionModalData, 
     setRestrictionModalData, 
     handleProceedAfterRestriction,
-    resumePayment 
+    resumePayment,
+    isTimeMismatchModalOpen,      // 👈 新增
+    setIsTimeMismatchModalOpen,   // 👈 新增
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
@@ -184,6 +186,53 @@ const DOOHBiddingSystem = () => {
               </div>
           </div>
       )}
+
+{isTimeMismatchModalOpen && (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
+        <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center relative overflow-hidden">
+            
+            {/* 背景裝飾 */}
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-red-500"></div>
+
+            <div className="mb-5 flex justify-center">
+                <div className="bg-orange-50 p-4 rounded-full border border-orange-100">
+                    <Clock size={40} className="text-orange-500" />
+                </div>
+            </div>
+
+            <h3 className="text-xl font-bold text-slate-800 mb-2">競價時段限制</h3>
+            <p className="text-slate-500 text-sm mb-6 leading-relaxed">
+                由於競價需要在特定時間進行結算，<br/>
+                一張競價訂單只能包含 <strong>「同一日期 + 同一小時」</strong>。
+            </p>
+
+            <div className="bg-slate-50 rounded-xl p-4 mb-6 text-left space-y-3 border border-slate-100">
+                <div className="flex items-start gap-3">
+                    <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={18}/>
+                    <div>
+                        <p className="text-sm font-bold text-slate-700">正確做法</p>
+                        <p className="text-xs text-slate-500">同時競投 Screen A, B, C (全部都在 15:00)</p>
+                    </div>
+                </div>
+                <div className="flex items-start gap-3">
+                    <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={18}/>
+                    <div>
+                        <p className="text-sm font-bold text-slate-700">不支援</p>
+                        <p className="text-xs text-slate-500">一張單同時包含 15:00 和 16:00</p>
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                onClick={() => setIsTimeMismatchModalOpen(false)} 
+                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
+            >
+                明白了，我會分開結帳
+            </button>
+        </div>
+    </div>
+)}
+
 
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
