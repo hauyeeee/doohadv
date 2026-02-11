@@ -3,7 +3,8 @@ import {
   collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
 import { 
-  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe 
+  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe, 
+  X, Lock, Check, AlertCircle, Image as ImageIcon, Plus, Trash2
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -11,8 +12,8 @@ import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 import { useLanguage } from '../context/LanguageContext';
 
-// 引入拆分後的 UI 組件
-import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
+// 引入拆分後的 UI 組件 (由於需要修改 Modal 內部結構，我將這些組件內嵌在下方，原本的 import 註解掉)
+// import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
 } from '../components/AdminTabs';
@@ -140,7 +141,6 @@ const AdminPanel = () => {
       return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
-  // 🔥🔥🔥 修正版 Month View Data (加入 Action Count) 🔥🔥🔥
   const monthViewData = useMemo(() => {
       const startOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1); 
       const endOfMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0); 
@@ -157,7 +157,6 @@ const AdminPanel = () => {
           order.detailedSlots.forEach(slot => { 
               if(days[slot.date]) { 
                   days[slot.date].count++; 
-                  
                   const isBidding = ['paid_pending_selection', 'partially_outbid'].includes(order.status);
                   const isReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
                   const isScheduled = order.isScheduled;
@@ -166,7 +165,7 @@ const AdminPanel = () => {
                   if (isBidding) days[slot.date].bidding++;
                   else if (isReview) days[slot.date].pending++;
                   else if (isScheduled) days[slot.date].scheduled++;
-                  else if (isWon) days[slot.date].action++; // 🔥 加上這個：待辦事項
+                  else if (isWon) days[slot.date].action++; 
               } 
           }); 
       });
@@ -183,8 +182,6 @@ const AdminPanel = () => {
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
   // --- Handlers ---
-  
-  // 🔥🔥🔥 強制修復版：確保 Screen ID 類型統一，防止 $1000 輸 $200 🔥🔥🔥
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
       setLoading(true);
@@ -210,7 +207,7 @@ const AdminPanel = () => {
                   if (!slot.date || !slot.screenId) return;
 
                   const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId); // 強制轉 String
+                  const screenIdStr = String(slot.screenId); 
                   const key = `${slot.date}-${hourInt}-${screenIdStr}`;
                   
                   const myPrice = parseInt(slot.bidPrice) || 0;
@@ -231,8 +228,6 @@ const AdminPanel = () => {
                   }
               });
           });
-
-          console.log("👑 Slot Winners (Debug):", slotWars);
 
           const batch = writeBatch(db);
           let updateCount = 0;
@@ -306,11 +301,9 @@ const AdminPanel = () => {
       } catch(e) { console.error(e); alert("Failed"); } finally { setLoading(false); }
   };
 
- // 修改 AdminPanel.jsx 內的 handleReview
   const handleReview = async (id, action) => { 
       if(!confirm(action)) return; 
       try { 
-          // 1. 更新 DB
           await updateDoc(doc(db,"orders",id), { 
               creativeStatus: action==='approve'?'approved':'rejected', 
               isApproved: action==='approve', 
@@ -318,15 +311,12 @@ const AdminPanel = () => {
               reviewNote: action!=='approve'?reviewNote:'' 
           }); 
           
-          // 2. 獲取訂單資料以便發信
           const o = orders.find(x=>x.id===id);
           const userInfo = {email: o.userEmail, displayName: o.userName};
 
-          // 3. 發送對應 Email
           if(action==='approve') { 
               await sendBidConfirmation(userInfo, o, 'video_approved'); 
           } else {
-              // 🔥 修正：Reject 也要發信！
               await sendBidConfirmation(userInfo, o, 'video_rejected', reviewNote);
           }
 
@@ -358,8 +348,7 @@ const AdminPanel = () => {
       setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); 
       setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); 
   };
-const saveScreenFull = async () => { 
-      // 整理表單數據
+  const saveScreenFull = async () => { 
       const p = { 
           ...newScreenData, 
           basePrice: parseFloat(newScreenData.basePrice), 
@@ -368,25 +357,16 @@ const saveScreenFull = async () => {
       };
 
       if(editingScreenId) {
-          // --- 編輯模式 (保持不變) ---
           await updateDoc(doc(db,"screens",editingScreenId), p);
       } else { 
-          // --- 新增模式 (修改這裡) ---
-          
-          // 1. 🔥 直接從資料庫獲取最新的所有螢幕，確保 ID 不會重複
           const snapshot = await getDocs(collection(db, "screens"));
-          
-          // 2. 找出目前最大的 ID (過濾掉非數字的 ID)
           const currentIds = snapshot.docs.map(d => {
               const val = Number(d.data().id);
               return isNaN(val) ? 0 : val;
           });
-          
-          // 3. 計算下一個 ID
           const maxId = Math.max(0, ...currentIds);
           const nextId = String(maxId + 1);
 
-          // 4. 寫入資料庫
           await addDoc(collection(db,"screens"), {
               ...p, 
               id: nextId, 
@@ -439,13 +419,207 @@ const saveScreenFull = async () => {
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
 
-        {/* Modals */}
-        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} />
+        {/* Modals - Modified to include Firestore ID and Locked Input */}
+        <ScreenModal 
+            isOpen={isAddScreenModalOpen} 
+            onClose={()=>setIsAddScreenModalOpen(false)} 
+            isEdit={!!editingScreenId} 
+            firestoreId={editingScreenId} // 🔥 傳入 Firestore ID
+            data={newScreenData} 
+            setData={setNewScreenData} 
+            handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} 
+            handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} 
+            toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} 
+            activeDayTab={activeDayTab} 
+            setActiveDayTab={setActiveDayTab} 
+            onSave={saveScreenFull} 
+        />
         <SlotGroupModal group={selectedSlotGroup} onClose={()=>setSelectedSlotGroup(null)} onReview={handleReview} onMarkScheduled={handleMarkAsScheduled} />
       
       </div>
     </div>
   );
+};
+
+// --- Embedded UI Components (Replaces ../components/AdminUI) ---
+
+const LoadingScreen = () => (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+    </div>
+);
+
+const SlotGroupModal = ({ group, onClose, onReview, onMarkScheduled }) => {
+    if (!group) return null;
+    return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                <div className="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+                    <h2 className="text-xl font-bold">Slot Details</h2>
+                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><X size={20}/></button>
+                </div>
+                <div className="p-4">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                       {group.map((slot, idx) => (
+                           <div key={idx} className="border p-4 rounded-lg bg-slate-50">
+                               <div className="flex justify-between mb-2">
+                                   <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${slot.status==='won'?'bg-green-100 text-green-700':slot.status==='paid'?'bg-blue-100 text-blue-700':'bg-gray-100'}`}>{slot.status}</span>
+                                   <span className="font-mono text-sm">{slot.hour}:00</span>
+                               </div>
+                               <div className="text-sm space-y-1">
+                                   <p><strong>Order:</strong> {slot.orderId}</p>
+                                   <p><strong>User:</strong> {slot.userEmail}</p>
+                                   <p><strong>Price:</strong> ${slot.price}</p>
+                                   {slot.videoUrl && (
+                                       <div className="mt-2">
+                                            <a href={slot.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">View Video</a>
+                                            {slot.creativeStatus === 'pending_review' && (
+                                                <div className="mt-2 flex gap-2">
+                                                    <button onClick={()=>onReview(slot.orderId, 'approve')} className="bg-green-600 text-white px-2 py-1 rounded text-xs">Approve</button>
+                                                    <button onClick={()=>onReview(slot.orderId, 'reject')} className="bg-red-600 text-white px-2 py-1 rounded text-xs">Reject</button>
+                                                </div>
+                                            )}
+                                       </div>
+                                   )}
+                                   {slot.isScheduled && <p className="text-green-600 font-bold text-xs mt-1 flex items-center gap-1"><Check size={12}/> Scheduled</p>}
+                                   {!slot.isScheduled && slot.status === 'won' && (
+                                       <button onClick={()=>onMarkScheduled(slot.orderId)} className="mt-2 text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded">Mark Scheduled</button>
+                                   )}
+                               </div>
+                           </div>
+                       ))}
+                   </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ScreenModal = ({ isOpen, onClose, isEdit, firestoreId, data, setData, handleImageChange, handleApplyToAllDays, toggleTierHour, activeDayTab, setActiveDayTab, onSave }) => {
+    if (!isOpen) return null;
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto flex flex-col">
+                <div className="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                        {isEdit ? <><Settings size={20}/> Edit Screen</> : <><Plus size={20}/> Add New Screen</>}
+                    </h2>
+                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><X size={20}/></button>
+                </div>
+                
+                <div className="p-6 space-y-6">
+                    {/* Basic Info */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Screen ID (Manual)</label>
+                            <div className="relative">
+                                {/* 🔥 鎖死 ID 輸入框邏輯 */}
+                                <input 
+                                    type="text" 
+                                    value={data.id || (isEdit ? '' : '(Auto-generated)')} 
+                                    disabled={true} // 永遠鎖死，因為新增是自動生成，編輯不可改
+                                    className="w-full border p-2 rounded bg-slate-100 text-slate-500 cursor-not-allowed"
+                                />
+                                <Lock size={14} className="absolute right-3 top-3 text-slate-400" />
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">ID is auto-assigned by system.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Screen Name</label>
+                            <input type="text" value={data.name} onChange={e=>setData({...data, name:e.target.value})} className="w-full border p-2 rounded" placeholder="e.g. Times Square LED"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Base Price ($)</label>
+                            <input type="number" value={data.basePrice} onChange={e=>setData({...data, basePrice:e.target.value})} className="w-full border p-2 rounded"/>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Location</label>
+                            <input type="text" value={data.location} onChange={e=>setData({...data, location:e.target.value})} className="w-full border p-2 rounded"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">District</label>
+                            <input type="text" value={data.district} onChange={e=>setData({...data, district:e.target.value})} className="w-full border p-2 rounded"/>
+                        </div>
+                    </div>
+
+                    {/* Images */}
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">Images (URL)</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {[0,1,2].map(i => (
+                                <div key={i} className="relative group">
+                                    <input type="text" value={data.images[i]||''} onChange={e=>handleImageChange(i,e.target.value)} className="w-full border p-2 rounded text-xs" placeholder={`Image URL ${i+1}`}/>
+                                    {data.images[i] && (
+                                        <div className="mt-1 h-20 bg-slate-100 rounded overflow-hidden">
+                                            <img src={data.images[i]} alt="" className="w-full h-full object-cover"/>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Details */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                         <div><label className="block text-xs font-bold text-slate-500">Resolution</label><input type="text" value={data.resolution||''} onChange={e=>setData({...data, resolution:e.target.value})} className="w-full border p-1 rounded text-sm"/></div>
+                         <div><label className="block text-xs font-bold text-slate-500">Operating Hours</label><input type="text" value={data.operatingHours||''} onChange={e=>setData({...data, operatingHours:e.target.value})} className="w-full border p-1 rounded text-sm"/></div>
+                         <div><label className="block text-xs font-bold text-slate-500">Footfall</label><input type="text" value={data.footfall||''} onChange={e=>setData({...data, footfall:e.target.value})} className="w-full border p-1 rounded text-sm"/></div>
+                         <div><label className="block text-xs font-bold text-slate-500">Audience</label><input type="text" value={data.audience||''} onChange={e=>setData({...data, audience:e.target.value})} className="w-full border p-1 rounded text-sm"/></div>
+                    </div>
+
+                    {/* Schedule Rules */}
+                    <div className="border rounded-lg p-4 bg-slate-50">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-sm">Slot Configuration (Prime/Gold)</h3>
+                            <button onClick={handleApplyToAllDays} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold hover:bg-blue-200">Copy to All Days</button>
+                        </div>
+                        <div className="flex gap-1 mb-4 border-b">
+                            {DAYS.map((d,i) => (
+                                <button key={i} onClick={()=>setActiveDayTab(i)} className={`px-3 py-1 text-sm font-bold rounded-t-lg ${activeDayTab===i?'bg-white border border-b-0 text-blue-600':'bg-slate-100 text-slate-500'}`}>{d}</button>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-6 gap-2">
+                            {Array.from({length:24},(_,h)=>(
+                                <div key={h} className="flex flex-col items-center border p-1 rounded bg-white">
+                                    <span className="text-xs font-mono mb-1">{h}:00</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={()=>toggleTierHour('prime',h)} className={`w-4 h-4 rounded-full border ${data.tierRules[activeDayTab]?.prime?.includes(h)?'bg-purple-500 border-purple-600':'bg-slate-100'}`} title="Prime"></button>
+                                        <button onClick={()=>toggleTierHour('gold',h)} className={`w-4 h-4 rounded-full border ${data.tierRules[activeDayTab]?.gold?.includes(h)?'bg-amber-400 border-amber-500':'bg-slate-100'}`} title="Gold"></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                            <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-purple-500"></div> Prime Slot</span>
+                            <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-amber-400"></div> Gold Slot</span>
+                        </div>
+                    </div>
+
+                    {/* 🔥 Firestore System ID Display */}
+                    {isEdit && firestoreId && (
+                        <div className="mt-4 p-3 bg-slate-100 rounded border border-slate-200 flex flex-col gap-1">
+                            <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1">
+                                <Settings size={12}/> System Reference (Firestore ID)
+                            </label>
+                            <div className="font-mono text-sm text-slate-600 select-all">
+                                {firestoreId}
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2 sticky bottom-0">
+                    <button onClick={onClose} className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded">Cancel</button>
+                    <button onClick={onSave} className="px-6 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-700 shadow-lg">Save Screen</button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 export default AdminPanel;
