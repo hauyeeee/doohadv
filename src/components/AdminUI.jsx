@@ -95,10 +95,76 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">位置</label><div className="flex items-center gap-2 border rounded px-3 py-2"><MapPin size={14} className="text-slate-400"/><input type="text" value={data.location} onChange={e => setData({...data, location: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. 皇后大道中 100號"/></div></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">區域 (District)</label><input type="text" value={data.district} onChange={e => setData({...data, district: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Central"/></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Bundle Group (Optional)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Layers size={14} className="text-slate-400"/><input type="text" value={data.bundleGroup} onChange={e => setData({...data, bundleGroup: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. central_network"/></div><p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p></div>
-                    <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">圖片集 (最多 3 張)</label><div className="space-y-2">{data.images.map((url, index) => (<div key={index} className="flex items-center gap-2 border rounded px-3 py-2"><ImageIcon size={14} className="text-slate-400"/><input type="text" value={url} onChange={e => handleImageChange(index, e.target.value)} className="w-full text-sm outline-none" placeholder={`Image URL ${index + 1} (https://...)`}/></div>))}</div></div>
+                    
+                    {/* 🔥🔥🔥 圖片集 (完整修復版) 🔥🔥🔥 */}
+                    <div className="col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                            <ImageIcon size={12}/> 圖片集 (最多 3 張)
+                        </label>
+                        <div className="space-y-3">
+                            {/* 1. 顯示現有圖片預覽 & 刪除按鈕 */}
+                            {data.images && data.images.length > 0 && (
+                                <div className="flex flex-wrap gap-3">
+                                    {data.images.map((url, index) => (
+                                        <div key={index} className="relative w-24 h-24 border rounded-lg overflow-hidden group bg-slate-100 shadow-sm">
+                                            <img src={url} alt={`Preview ${index}`} className="w-full h-full object-cover" />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const newImages = data.images.filter((_, i) => i !== index);
+                                                    setData({ ...data, images: newImages });
+                                                }}
+                                                className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-700"
+                                                title="刪除圖片"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* 2. 圖片 URL 輸入框 (如果未滿 3 張) */}
+                            {(!data.images || data.images.length < 3) && (
+                                <div className="flex items-center gap-2 border-2 border-dashed border-slate-300 rounded-lg px-3 py-2 bg-slate-50 hover:bg-white transition-colors">
+                                    <ImageIcon size={16} className="text-slate-400"/>
+                                    <input 
+                                        type="text" 
+                                        placeholder="貼上圖片網址 (https://...) 並按 Enter" 
+                                        className="w-full text-sm outline-none bg-transparent placeholder-slate-400"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                const val = e.target.value.trim();
+                                                if (val) {
+                                                    setData(prev => ({
+                                                        ...prev,
+                                                        images: [...(prev.images || []), val]
+                                                    }));
+                                                    e.target.value = ''; // 清空輸入框
+                                                }
+                                            }
+                                        }}
+                                        onBlur={(e) => {
+                                            const val = e.target.value.trim();
+                                            if (val) {
+                                                setData(prev => ({
+                                                    ...prev,
+                                                    images: [...(prev.images || []), val]
+                                                }));
+                                                e.target.value = ''; 
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            )}
+                            <p className="text-[10px] text-slate-400">輸入網址後按 Enter 或點擊空白處以新增。</p>
+                        </div>
+                    </div>
+                    {/* 🔥🔥🔥 圖片集修復結束 🔥🔥🔥 */}
+
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={data.mapUrl} onChange={e => setData({...data, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="http://maps.google.com..."/></div></div>
                     
-                    {/* 🔥🔥🔥 新增：注意事項 (restrictions) 輸入框 🔥🔥🔥 */}
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 text-red-500"><AlertTriangle size={12}/> 注意事項 / 限制條款 (Important Notes)</label>
                         <div className="flex items-start gap-2 border border-red-200 bg-red-50 rounded px-3 py-2">
