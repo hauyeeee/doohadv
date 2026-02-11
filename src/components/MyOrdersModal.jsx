@@ -9,36 +9,61 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
   if (!isOpen || !user) return null;
 
-  const onUpdateBidSubmit = (orderId, slotIndex, currentPrice, otherSlotsSum, isPendingPayment, marketHighestPrice) => {
-      const bidInt = parseInt(newBidPrice);
-      const currentInt = parseInt(currentPrice);
-      
-      let floorPrice = currentInt;
-      if (isPendingPayment) {
-          floorPrice = marketHighestPrice;
-      }
+  // 🔥 核心修復：加入錯誤捕捉和詳細 Log
+  const onUpdateBidSubmit = (e, orderId, slotIndex, currentPrice, otherSlotsSum, isPendingPayment, marketHighestPrice) => {
+      e.preventDefault(); // 防止任何預設行為
+      e.stopPropagation(); // 防止事件冒泡
 
-      if (!newBidPrice || bidInt <= floorPrice) {
-          const msg = lang === 'en' 
-              ? `Bid must be higher than HK$${floorPrice}!` 
-              : `出價必須高於 HK$${floorPrice}！`;
-          alert(msg);
-          return;
-      }
+      console.log("🟢 Submit Clicked:", { orderId, slotIndex, newBidPrice, currentPrice, isPendingPayment, marketHighestPrice });
 
-      const newTotal = otherSlotsSum + bidInt;
-      const confirmMsg = lang === 'en' 
-          ? `Confirm bid increase? Total re-authorization: HK$${newTotal.toLocaleString()}` 
-          : `確定加價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
+      try {
+          const bidInt = parseInt(newBidPrice);
+          const currentInt = parseInt(currentPrice) || 0;
+          const marketInt = parseInt(marketHighestPrice) || 0;
+          
+          if (isNaN(bidInt)) {
+              alert("請輸入有效的數字金額");
+              return;
+          }
 
-      if (window.confirm(confirmMsg)) {
-          handleUpdateBid(orderId, slotIndex, bidInt, newTotal);
-          setUpdatingSlot(null);
-          setNewBidPrice('');
+          // 邏輯：待付款(Pending)只需高於市場價；已付款(Paid)必須高於自己舊價
+          let floorPrice = isPendingPayment ? marketInt : currentInt;
+
+          // Debug Log
+          console.log(`🔍 Checking Price: Bid=${bidInt}, Floor=${floorPrice} (Pending? ${isPendingPayment})`);
+
+          if (bidInt <= floorPrice) {
+              const msg = lang === 'en' 
+                  ? `Bid must be higher than HK$${floorPrice}!` 
+                  : `出價必須高於 HK$${floorPrice}！`;
+              alert(msg);
+              return;
+          }
+
+          // 安全計算總額
+          const safeOtherSum = parseInt(otherSlotsSum) || 0;
+          const newTotal = safeOtherSum + bidInt;
+          
+          console.log(`💰 New Total Calculation: ${safeOtherSum} + ${bidInt} = ${newTotal}`);
+
+          const confirmMsg = lang === 'en' 
+              ? `Confirm update? Total re-authorization: HK$${newTotal.toLocaleString()}` 
+              : `確定修改出價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
+
+          if (window.confirm(confirmMsg)) {
+              if (typeof handleUpdateBid !== 'function') {
+                  throw new Error("System Error: handleUpdateBid is missing. Please refresh.");
+              }
+              handleUpdateBid(orderId, slotIndex, bidInt, newTotal);
+              setUpdatingSlot(null);
+              setNewBidPrice('');
+          }
+      } catch (err) {
+          console.error("❌ Update Error:", err);
+          alert(`更新失敗: ${err.message}`);
       }
   };
 
-  // Helper: 渲染訂單頂部狀態 Badge
   const renderStatusBadge = (statusConfig) => (
       <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${statusConfig.bg} ${statusConfig.text}`}>
           {statusConfig.label}
@@ -78,13 +103,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         let firstSlotDate = null;
                         let hasRealTimeOutbid = false;
                         
-                        // 檢查訂單是否有效 (已付款)
                         const isOrderEffective = ['won', 'paid_pending_selection', 'partially_outbid', 'outbid_needs_action', 'paid', 'completed'].includes(order.status);
-                        // 檢查訂單是否付款中
                         const isPendingPayment = order.status === 'pending_auth' || order.status === 'pending_reauth';
 
-                        // 🔥 1. 計算「動態預計金額」 (Projected Amount)
-                        // 只計算那些「贏」或「領先」的 slot，排除被超越的 slot
                         let projectedAmount = 0;
 
                         if (order.detailedSlots) { 
@@ -97,21 +118,15 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
                                 const myBidPrice = parseInt(slot.bidPrice) || 0;
                                 
-                                // 判斷是否輸了
                                 const isRealTimeOutbidCheck = isOrderEffective && myBidPrice < marketHighestPrice;
                                 const isBackendOutbidCheck = slot.slotStatus === 'outbid';
                                 const isLostCheck = slot.slotStatus === 'lost';
 
-                                if (isRealTimeOutbidCheck) {
-                                    hasRealTimeOutbid = true;
-                                }
-
-                                // 🔥 如果目前是領先或已贏，這筆錢就算在預計金額內
+                                if (isRealTimeOutbidCheck) hasRealTimeOutbid = true;
                                 if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck) {
                                     projectedAmount += myBidPrice;
                                 }
                             }); 
-                            
                             if (order.detailedSlots.length > 0) {
                                 const d = new Date(order.detailedSlots[0].date); 
                                 d.setHours(parseInt(order.detailedSlots[0].hour), 0, 0, 0);
@@ -119,7 +134,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             }
                         }
 
-                        // 後端結算金額 (如果已結算)
+                        const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
@@ -130,18 +145,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         const isSettled = ['won', 'paid', 'completed', 'lost', 'partially_won'].includes(order.status);
                         
-                        // 🔥 決定顯示哪個金額
-                        // 1. 如果已結算 -> 顯示後端算好的 wonAmount
-                        // 2. 如果待付款 -> 顯示全額 (Max)
-                        // 3. 如果競價中/結算中 -> 顯示前端動態算的 projectedAmount (只含領先部分)
                         let displayAmount = 0;
-                        if (isSettled) {
-                            displayAmount = actualWinningAmount;
-                        } else if (isPendingPayment) {
-                            displayAmount = order.amount || 0;
-                        } else {
-                            displayAmount = projectedAmount;
-                        }
+                        if (isSettled) displayAmount = actualWinningAmount;
+                        else if (isPendingPayment) displayAmount = order.amount || 0;
+                        else displayAmount = projectedAmount;
                         
                         const now = new Date();
                         let revealTimeStr = "---";
@@ -156,19 +163,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         let statusConfig = { bg: 'bg-slate-100', text: 'text-slate-500', label: lang === 'en' ? 'Processing...' : '處理中...' };
                         
-                        // Badge 狀態邏輯
                         if (isPendingPayment) {
-                            if (isOrderExpired) {
-                                statusConfig = { bg: 'bg-slate-200', text: 'text-slate-500', label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' };
-                            } else {
-                                statusConfig = { bg: 'bg-purple-100', text: 'text-purple-700', label: lang === 'en' ? 'Payment Required' : '💳 等待付款' };
-                            }
+                            if (isOrderExpired) statusConfig = { bg: 'bg-slate-200', text: 'text-slate-500', label: lang === 'en' ? 'Payment Failed / Expired' : '❌ 付款未完成 / 已失效' };
+                            else statusConfig = { bg: 'bg-purple-100', text: 'text-purple-700', label: lang === 'en' ? 'Payment Required' : '💳 等待付款' };
                         } else if (['won', 'paid', 'completed'].includes(order.status)) {
-                            if (order.type === 'buyout') {
-                                statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-800', label: lang === 'en' ? 'Purchased' : '已購買 (成功)' };
-                            } else {
-                                statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
-                            }
+                            if (order.type === 'buyout') statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-800', label: lang === 'en' ? 'Purchased' : '已購買 (成功)' };
+                            else statusConfig = { bg: 'bg-green-100', text: 'text-green-700', label: t('status_won') };
                         } else if (order.status === 'partially_won') {
                             statusConfig = { bg: 'bg-emerald-100', text: 'text-emerald-700', label: lang==='en'?'Partially Won':'部分中標' };
                         } else if (order.status === 'lost') {
@@ -180,11 +180,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Finalizing...' : '⏳ 正在結算...' };
                         } else if (order.status === 'paid_pending_selection') {
-                            if (hasRealTimeOutbid) {
-                                statusConfig = { bg: 'bg-yellow-100', text: 'text-yellow-700', label: lang === 'en' ? 'Outbid (Action Needed)' : '⚠️ 部份被超越' };
-                            } else {
-                                statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
-                            }
+                            if (hasRealTimeOutbid) statusConfig = { bg: 'bg-yellow-100', text: 'text-yellow-700', label: lang === 'en' ? 'Outbid (Action Needed)' : '⚠️ 部份被超越' };
+                            else statusConfig = { bg: 'bg-blue-50', text: 'text-blue-700', label: t('status_paid_pending_selection') };
                         } else if (order.status === 'partially_outbid') {
                             statusConfig = { bg: 'bg-orange-50', text: 'text-orange-700', label: t('status_partially_outbid') };
                         }
@@ -249,21 +246,11 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                         if (order.type === 'buyout') return <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span>;
                                                                         return <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span>;
                                                                     }
-                                                                    if (isLeading) {
-                                                                        return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
-                                                                    }
-                                                                    if (isProcessingResult) {
-                                                                        return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
-                                                                    }
-                                                                    if (showOutbidWarning) {
-                                                                        return <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>;
-                                                                    }
-                                                                    if (showLost) {
-                                                                        return <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span>;
-                                                                    }
-                                                                    if (isPendingPayment) {
-                                                                        return <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span>;
-                                                                    }
+                                                                    if (isLeading) return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
+                                                                    if (isProcessingResult) return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
+                                                                    if (showOutbidWarning) return <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>;
+                                                                    if (showLost) return <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span>;
+                                                                    if (isPendingPayment) return <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span>;
                                                                     return null;
                                                                 };
 
@@ -296,7 +283,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                             {isEditing ? (
                                                                                 <div className="flex items-center gap-1 animate-in slide-in-from-right duration-200">
                                                                                     <input type="number" autoFocus className="w-16 text-xs border rounded px-1 py-1" placeholder={inputPlaceholder} value={newBidPrice} onChange={e => setNewBidPrice(e.target.value)} />
-                                                                                    <button onClick={() => onUpdateBidSubmit(order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice), isPendingPayment, marketHighestPrice)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
+                                                                                    <button onClick={(e) => onUpdateBidSubmit(e, order.id, slot.originalIndex, slot.bidPrice, currentTotalAmount - parseInt(slot.bidPrice), isPendingPayment, marketHighestPrice)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><CheckCircle size={12}/></button>
                                                                                     <button onClick={() => {setUpdatingSlot(null); setNewBidPrice('')}} className="bg-slate-200 text-slate-500 p-1 rounded hover:bg-slate-300"><X size={12}/></button>
                                                                                 </div>
                                                                             ) : (
@@ -332,7 +319,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{t('amount_paid')}</p>
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
-                                            {/* 🔥 根據狀態顯示不同的文字說明 */}
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
                                                  isPendingPayment ? (lang==='en'?'Pre-auth will be held':'預授權將被凍結 (最高)') : 
