@@ -23,7 +23,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
               return;
           }
 
-          // 邏輯：待付款(Pending)只需高於市場價；已付款(Paid)必須高於自己舊價
           let floorPrice = isPendingPayment ? marketInt : currentInt;
 
           if (bidInt <= floorPrice) {
@@ -109,8 +108,16 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 const isLostCheck = slot.slotStatus === 'lost';
                                 const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout';
 
+                                // 🔥 計算：檢查市場上是否已售罄 (用於計算 projectedAmount)
+                                const isSoldOutInMarket = occupiedSlots && occupiedSlots.has(slotKey) && order.status !== 'won' && order.status !== 'paid' && slot.slotStatus !== 'won';
+                                
+                                // 🔥 死亡條件：被買斷 (後端標記) OR 市場已無 (前端標記)
+                                const isDead = isBuyoutLoss || isSoldOutInMarket;
+
                                 if (isRealTimeOutbidCheck) hasRealTimeOutbid = true;
-                                if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck && !isBuyoutLoss) {
+
+                                // 🔥 只有當此時段「活著」且「未輸」時，才計入金額
+                                if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck && !isDead) {
                                     projectedAmount += myBidPrice;
                                 }
                             }); 
@@ -121,7 +128,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             }
                         }
 
-                        const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
                                 return (s.slotStatus === 'outbid' || s.slotStatus === 'lost' || s.slotStatus === 'outbid_by_buyout') ? sum : sum + (parseInt(s.bidPrice)||0);
@@ -131,10 +137,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         const isSettled = ['won', 'paid', 'completed', 'lost', 'partially_won'].includes(order.status);
                         
-                        let displayAmount = 0;
-                        if (isSettled) displayAmount = actualWinningAmount;
-                        else if (isPendingPayment) displayAmount = order.amount || 0;
-                        else displayAmount = projectedAmount;
+                        // 🔥 修正顯示金額邏輯：
+                        // 1. 已結算 -> 顯示後端結果
+                        // 2. 未結算 (包含待付款) -> 顯示前端計算的 projectedAmount (自動扣除 Dead Slots)
+                        let displayAmount = isSettled ? actualWinningAmount : projectedAmount;
                         
                         const now = new Date();
                         let revealTimeStr = "---";
@@ -214,9 +220,9 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isRealTimeOutbid = myBidPrice < marketHighestPrice;
                                                                 const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
-                                                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 讀取後端標記
+                                                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout';
                                                                 
-                                                                // 🔥 檢查是否被買斷 (後端標記 OR 市場標記)
+                                                                // 🔥 渲染層檢查：是否死局
                                                                 const isSoldOutInMarket = occupiedSlots && occupiedSlots.has(slotKey) && order.status !== 'won' && order.status !== 'paid' && slot.slotStatus !== 'won';
                                                                 const isDead = isBuyoutLoss || isSoldOutInMarket;
 
@@ -236,7 +242,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 let borderClass = "border-slate-200"; let bgClass = "bg-white";
                                                                 if (isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
                                                                 else if (isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
-                                                                else if (isDead) { borderClass = "border-red-300"; bgClass = "bg-red-50"; } // 🔴 買斷顯示紅色
+                                                                else if (isDead) { borderClass = "border-red-300"; bgClass = "bg-red-50"; }
                                                                 else if (showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
@@ -250,7 +256,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                     <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
-                                                                                    {/* 🔥 INLINE RENDERING - NO FUNCTION CALLS */}
+                                                                                    {/* Inline Status Badge */}
                                                                                     {isFinalWon ? (
                                                                                         order.type === 'buyout' ? <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span> :
                                                                                         <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span>
@@ -314,7 +320,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
-                                                 isPendingPayment ? (lang==='en'?'Pre-auth will be held':'預授權將被凍結 (最高)') : 
+                                                 isPendingPayment ? (lang==='en'?'Projected amount (Valid Slots)':'預計成交金額 (有效時段)') : 
                                                  isOrderExpired ? (lang==='en'?'Estimated winning amount':'預計成交金額 (結算中)') :
                                                  (lang==='en'?'Projected winning amount':'預計成交金額 (競價中)')}
                                             </p>
