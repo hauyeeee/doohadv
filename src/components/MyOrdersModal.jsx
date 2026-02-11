@@ -23,6 +23,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
               return;
           }
 
+          // 邏輯：待付款(Pending)只需高於市場價；已付款(Paid)必須高於自己舊價
           let floorPrice = isPendingPayment ? marketInt : currentInt;
 
           if (bidInt <= floorPrice) {
@@ -106,7 +107,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 const isRealTimeOutbidCheck = isOrderEffective && myBidPrice < marketHighestPrice;
                                 const isBackendOutbidCheck = slot.slotStatus === 'outbid';
                                 const isLostCheck = slot.slotStatus === 'lost';
-                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 新增
+                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout';
 
                                 if (isRealTimeOutbidCheck) hasRealTimeOutbid = true;
                                 if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck && !isBuyoutLoss) {
@@ -213,14 +214,13 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isRealTimeOutbid = myBidPrice < marketHighestPrice;
                                                                 const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
-                                                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 後端標記
+                                                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 讀取後端標記
                                                                 
                                                                 // 🔥 檢查是否被買斷 (後端標記 OR 市場標記)
-                                                                // occupiedSlots 是從 useDoohSystem 傳進來的，包含了所有 'won'/'paid' 的 slot
                                                                 const isSoldOutInMarket = occupiedSlots && occupiedSlots.has(slotKey) && order.status !== 'won' && order.status !== 'paid' && slot.slotStatus !== 'won';
-                                                                
                                                                 const isDead = isBuyoutLoss || isSoldOutInMarket;
 
+                                                                const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost && !isDead));
                                                                 const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid && !isOrderExpired && !isDead;
                                                                 const isProcessingResult = isOrderEffective && !isSettled && isOrderExpired;
 
@@ -231,32 +231,16 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const showEditButton = isPendingPayment && !isOrderExpired && !isDead;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
-                                                                
-                                                                const renderSlotBadge = () => {
-                                                                    if (isFinalWon) {
-                                                                        if (order.type === 'buyout') return <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span>;
-                                                                        return <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span>;
-                                                                    }
-                                                                    if (isLeading) return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
-                                                                    if (isProcessingResult) return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
-                                                                    if (isDead) return <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-700 animate-pulse"><Lock size={8}/> SOLD OUT</span>;
-                                                                    if (showOutbidWarning) return <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>;
-                                                                    if (showLost) return <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span>;
-                                                                    if (isPendingPayment) return <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span>;
-                                                                    return null;
-                                                                };
+                                                                const inputPlaceholder = isPendingPayment ? "修改金額" : `>${Math.max(slot.bidPrice, marketHighestPrice)}`;
 
-                                                                let borderClass = "border-slate-200";
-                                                                let bgClass = "bg-white";
+                                                                let borderClass = "border-slate-200"; let bgClass = "bg-white";
                                                                 if (isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
                                                                 else if (isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
-                                                                else if (isDead) { borderClass = "border-red-300"; bgClass = "bg-red-50"; } // 🔥 買斷死刑
+                                                                else if (isDead) { borderClass = "border-red-300"; bgClass = "bg-red-50"; } // 🔴 買斷顯示紅色
                                                                 else if (showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
                                                                 else if (isProcessingResult) { borderClass = "border-slate-200"; bgClass = "bg-slate-100/50"; }
-
-                                                                const inputPlaceholder = isPendingPayment ? "修改金額" : `>${Math.max(slot.bidPrice, marketHighestPrice)}`;
 
                                                                 return (
                                                                     <div key={slot.originalIndex} className={`flex items-center justify-between p-2 rounded border ${borderClass} ${bgClass}`}>
@@ -266,7 +250,23 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                     <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
                                                                                         <Clock size={10}/> {String(slot.hour).padStart(2,'0')}:00
                                                                                     </span>
-                                                                                    {renderSlotBadge()}
+                                                                                    {/* 🔥 INLINE RENDERING - NO FUNCTION CALLS */}
+                                                                                    {isFinalWon ? (
+                                                                                        order.type === 'buyout' ? <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-emerald-200"><CheckCircle size={8}/> BOUGHT</span> :
+                                                                                        <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-green-200"><Trophy size={8}/> WIN</span>
+                                                                                    ) : isLeading ? (
+                                                                                        <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>
+                                                                                    ) : isProcessingResult ? (
+                                                                                        <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>
+                                                                                    ) : isDead ? (
+                                                                                        <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-700 animate-pulse"><Lock size={8}/> SOLD OUT</span>
+                                                                                    ) : showOutbidWarning ? (
+                                                                                        <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>
+                                                                                    ) : showLost ? (
+                                                                                        <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span>
+                                                                                    ) : isPendingPayment ? (
+                                                                                        <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span>
+                                                                                    ) : null}
                                                                                 </div>
                                                                                 <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5"><Monitor size={10}/> {slot.screenName || slot.screenId}</span>
                                                                             </div>

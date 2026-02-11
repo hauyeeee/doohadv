@@ -40,19 +40,12 @@ const sendEmail = (templateId, params) => {
     });
 };
 
-// 4A. 邏輯：處理 Buyout 踢人 (清場)
 const handleBuyoutKicking = async (buyoutOrder) => {
     console.log(`🧹 執行買斷清場: Order ${buyoutOrder.id}`);
     
-    // 🔥 修改 1: 擴大抓取範圍，包含 'won', 'partially_won', 'pending_auth'
+    // 🔥 擴大抓取範圍
     const q = await db.collection('orders').where('status', 'in', [
-        'paid_pending_selection', 
-        'partially_outbid', 
-        'outbid_needs_action', 
-        'pending_reauth', 
-        'pending_auth',   
-        'won',            
-        'partially_won'
+        'paid_pending_selection', 'partially_outbid', 'outbid_needs_action', 'pending_reauth', 'pending_auth', 'won', 'partially_won'
     ]).get();
     
     const batch = db.batch();
@@ -67,16 +60,10 @@ const handleBuyoutKicking = async (buyoutOrder) => {
         let hasChanged = false;
 
         const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-            // 檢查是否撞期 (Buyout 贏一切)
-            const match = newSlots.find(ns => 
-                ns.date === oldSlot.date && 
-                parseInt(ns.hour) === parseInt(oldSlot.hour) && 
-                String(ns.screenId) === String(oldSlot.screenId)
-            );
+            const match = newSlots.find(ns => ns.date === oldSlot.date && parseInt(ns.hour) === parseInt(oldSlot.hour) && String(ns.screenId) === String(oldSlot.screenId));
 
             if (match) {
-                // 只要撞期，直接判死刑
-                // 🔥 修改 2: 狀態改為 'outbid_by_buyout'
+                // 🔥 關鍵修正：狀態改為 'outbid_by_buyout'
                 if (oldSlot.slotStatus !== 'outbid_by_buyout') {
                     outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 (已被買斷)`);
                     hasChanged = true;
@@ -89,19 +76,14 @@ const handleBuyoutKicking = async (buyoutOrder) => {
         if (hasChanged) {
             kickedCount++;
             const allOutbid = updatedOldSlots.every(s => s.slotStatus === 'outbid' || s.slotStatus === 'outbid_by_buyout');
-            
             batch.update(db.collection('orders').doc(doc.id), { 
                 detailedSlots: updatedOldSlots, 
                 status: allOutbid ? 'outbid_needs_action' : 'partially_outbid',
                 lastUpdated: admin.firestore.FieldValue.serverTimestamp()
             });
-
-            // 發送 "被買斷" 通知信
             if (outbidInfo.length > 0) {
                 await sendEmail(EMAIL_CFG.templates.OUTBID_BY_BUYOUT, {
-                    to_name: oldOrder.userName || 'Customer',
-                    to_email: oldOrder.userEmail,
-                    slot_info: outbidInfo.join('\n')
+                    to_name: oldOrder.userName || 'Customer', to_email: oldOrder.userEmail, slot_info: outbidInfo.join('\n')
                 });
             }
         }
@@ -110,7 +92,6 @@ const handleBuyoutKicking = async (buyoutOrder) => {
     console.log(`✅ 買斷清場完成，踢走了 ${kickedCount} 張單`);
 };
 
-// 4B. 邏輯：處理一般競價踢人
 const handleStandardBidding = async (newOrder) => {
     const q = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'partially_outbid', 'outbid_needs_action', 'pending_reauth']).get();
     const batch = db.batch();
@@ -126,9 +107,7 @@ const handleStandardBidding = async (newOrder) => {
         let maxNewPrice = 0;
 
         const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
-            const matchNewSlot = newSlots.find(ns => 
-                ns.date === oldSlot.date && parseInt(ns.hour) === parseInt(oldSlot.hour) && String(ns.screenId) === String(oldSlot.screenId)
-            );
+            const matchNewSlot = newSlots.find(ns => ns.date === oldSlot.date && parseInt(ns.hour) === parseInt(oldSlot.hour) && String(ns.screenId) === String(oldSlot.screenId));
             if (matchNewSlot) {
                 const oldPrice = parseInt(oldSlot.bidPrice) || 0;
                 const newPrice = parseInt(matchNewSlot.bidPrice) || 0;
@@ -145,17 +124,9 @@ const handleStandardBidding = async (newOrder) => {
         if (hasChanged) {
             isBatchUsed = true;
             const allOutbid = updatedOldSlots.every(s => s.slotStatus === 'outbid');
-            batch.update(db.collection('orders').doc(doc.id), { 
-                detailedSlots: updatedOldSlots, 
-                status: allOutbid ? 'outbid_needs_action' : 'partially_outbid',
-                lastUpdated: admin.firestore.FieldValue.serverTimestamp() 
-            });
-            
+            batch.update(db.collection('orders').doc(doc.id), { detailedSlots: updatedOldSlots, status: allOutbid ? 'outbid_needs_action' : 'partially_outbid', lastUpdated: admin.firestore.FieldValue.serverTimestamp() });
             if (outbidInfo.length > 0) {
-                await sendEmail(EMAIL_CFG.templates.OUTBID_ALERT, {
-                    to_name: oldOrder.userName, to_email: oldOrder.userEmail,
-                    slot_info: outbidInfo.join('\n'), new_price: maxNewPrice
-                });
+                await sendEmail(EMAIL_CFG.templates.OUTBID_ALERT, { to_name: oldOrder.userName, to_email: oldOrder.userEmail, slot_info: outbidInfo.join('\n'), new_price: maxNewPrice });
             }
         }
     }
@@ -165,11 +136,9 @@ const handleStandardBidding = async (newOrder) => {
 exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     const sig = event.headers['stripe-signature'];
-    
     let stripeEvent;
-    try {
-        stripeEvent = stripe.webhooks.constructEvent(event.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) { return { statusCode: 400, body: `Webhook Error: ${err.message}` }; }
+    try { stripeEvent = stripe.webhooks.constructEvent(event.body, sig, process.env.STRIPE_WEBHOOK_SECRET); } 
+    catch (err) { return { statusCode: 400, body: `Webhook Error: ${err.message}` }; }
 
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object;
@@ -179,38 +148,19 @@ exports.handler = async (event) => {
         if (orderId) {
             try {
                 let newStatus = orderType === 'buyout' ? 'paid' : 'paid_pending_selection';
-                
                 await db.collection('orders').doc(orderId).update({
-                    status: newStatus,
-                    paymentStatus: 'paid_verified_webhook',
-                    stripeSessionId: session.id,
-                    paymentIntentId: session.payment_intent,
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    status: newStatus, paymentStatus: 'paid_verified_webhook', stripeSessionId: session.id, paymentIntentId: session.payment_intent, updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
-
                 const orderSnap = await db.collection('orders').doc(orderId).get();
                 const orderData = { id: orderId, ...orderSnap.data() };
-
                 const confirmTemplate = orderType === 'buyout' ? EMAIL_CFG.templates.BUYOUT_SUCCESS : EMAIL_CFG.templates.BID_RECEIVED;
-                await sendEmail(confirmTemplate, {
-                    to_name: orderData.userName || 'Customer',
-                    to_email: orderData.userEmail,
-                    order_id: orderId,
-                    amount: orderData.amount,
-                    slot_summary: orderData.timeSlotSummary || 'Selected Slots'
-                });
+                await sendEmail(confirmTemplate, { to_name: orderData.userName || 'Customer', to_email: orderData.userEmail, order_id: orderId, amount: orderData.amount, slot_summary: orderData.timeSlotSummary || 'Selected Slots' });
 
-                if (orderType === 'buyout') {
-                    await handleBuyoutKicking(orderData);
-                } else {
-                    await handleStandardBidding(orderData);
-                }
+                if (orderType === 'buyout') { await handleBuyoutKicking(orderData); } 
+                else { await handleStandardBidding(orderData); }
 
                 return { statusCode: 200, body: JSON.stringify({ received: true }) };
-            } catch (error) {
-                console.error("Server Error:", error);
-                return { statusCode: 500, body: error.message };
-            }
+            } catch (error) { console.error("Server Error:", error); return { statusCode: 500, body: error.message }; }
         }
     }
     return { statusCode: 200, body: JSON.stringify({ received: true }) };
