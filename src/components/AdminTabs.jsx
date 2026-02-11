@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   BarChart3, TrendingUp, Users, DollarSign, Search, Video, Monitor, Save, Trash2, 
   List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy 
+  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
@@ -155,7 +155,7 @@ export const ConfigView = ({ config, setConfig, globalConfig, setGlobal, target,
     );
 };
 
-// --- 6. Calendar View (🔥 重點升級：顯示所有工作細節) ---
+// --- 6. Calendar View ---
 export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid, screens, onSelectSlot, onPrev, onNext }) => {
     const { t } = useLanguage();
     return (
@@ -168,7 +168,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                 </div>
             </div>
             
-            {/* 🔥🔥🔥 月視圖：顯示所有標籤 (待辦/審核/已排/競價) 🔥🔥🔥 */}
             {mode === 'month' && (
                 <div className="flex-1 p-4 overflow-auto">
                     <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -188,7 +187,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                 </div>
             )}
 
-            {/* 🔥🔥🔥 日視圖：顯示詳細工作卡 (Job Card) 🔥🔥🔥 */}
             {mode === 'day' && (
                 <div className="flex-1 overflow-auto flex flex-col min-h-0">
                     <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
@@ -234,11 +232,10 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-// --- 7. Rules View (🔥 重點升級：詳細顯示所有設定) ---
+// --- 7. Rules View ---
 export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete }) => {
     const { t } = useLanguage();
     
-    // 輔助函數：顯示屏幕名稱
     const getScreenName = (id) => {
         if(id === 'all') return t('rule_global') || 'Global (全部)';
         const s = screens.find(x => String(x.id) === String(id));
@@ -259,7 +256,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                 </div>
             </div>
             
-            {/* 🔥 詳細規則列表 🔥 */}
             <div className="lg:col-span-2 space-y-4">
                 <h3 className="font-bold text-lg flex items-center gap-2"><Calendar size={20}/> {t('rule_existing')} ({rules.length})</h3>
                 {rules.length === 0 ? (
@@ -295,8 +291,8 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
     );
 };
 
-// --- 8. Screens View ---
-export const ScreensView = ({ screens, editingScreens, onAdd, onEdit, onSaveSimple, onChange, onToggle, onEditFull }) => {
+// --- 8. Screens View (🔥 修正：加入 Copy 按鈕 & 接收 onCopy Prop) ---
+export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy, onSaveSimple, onChange, onToggle }) => {
     const { t } = useLanguage();
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in">
@@ -319,8 +315,21 @@ export const ScreensView = ({ screens, editingScreens, onAdd, onEdit, onSaveSimp
                                     <td className="p-4 text-center"><button onClick={()=>onToggle(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?t('btn_toggle_on'):t('btn_toggle_off')}</button></td>
                                     <td className="p-4"><div className="flex items-center gap-1 bg-white border rounded px-2 py-1"><span className="text-slate-400">$</span><input type="number" value={currentPrice} onChange={(e)=>onChange(s.firestoreId, 'basePrice', e.target.value)} className="w-full font-bold outline-none"/></div></td>
                                     <td className="p-4 text-right flex items-center justify-end gap-2">
-                                        {isEditingSimple && <button onClick={()=>onSaveSimple(s)} className="bg-green-600 text-white p-1.5 rounded hover:bg-green-700"><CheckCircle size={14}/></button>}
-                                        <button onClick={()=>onEditFull(s)} className="bg-white border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-50"><Edit size={14}/></button>
+                                        
+                                        {/* Simple Save */}
+                                        {isEditingSimple && <button onClick={()=>onSaveSimple(s)} className="bg-green-600 text-white p-1.5 rounded hover:bg-green-700" title="儲存底價"><CheckCircle size={14}/></button>}
+                                        
+                                        {/* Edit Full */}
+                                        <button onClick={()=>onEditFull(s)} className="bg-white border border-slate-200 text-blue-600 p-1.5 rounded hover:bg-blue-50" title="編輯詳情"><Edit size={14}/></button>
+                                        
+                                        {/* 🔥 Copy Button */}
+                                        <button onClick={()=>onCopy(s)} className="bg-white border border-slate-200 text-emerald-600 p-1.5 rounded hover:bg-emerald-50" title="複製"><Copy size={14}/></button>
+
+                                        {/* Toggle Active */}
+                                        <button onClick={()=>onToggle(s)} className="bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded" title={s.isActive ? "下架" : "上架"}>
+                                            {s.isActive ? <Eye size={14}/> : <EyeOff size={14}/>}
+                                        </button>
+
                                     </td>
                                 </tr>
                              )
