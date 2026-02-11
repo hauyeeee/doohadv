@@ -1,19 +1,26 @@
 // netlify/functions/stripe-webhook.cjs
-console.log("🚀 [DEBUG] Stripe Webhook v7.1 - Self-Buyout Fix");
+console.log("🚀 [DEBUG] Stripe Webhook v7.2 - Self-Buyout Fixed");
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 const https = require('https');
 
+// 1. 初始化 Firebase Admin
 if (!admin.apps.length) {
     try {
+        const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+        if (!serviceAccountRaw) throw new Error("❌ 缺少環境變數 FIREBASE_SERVICE_ACCOUNT");
         admin.initializeApp({
-            credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
+            credential: admin.credential.cert(JSON.parse(serviceAccountRaw))
         });
-    } catch (error) { console.error("❌ Firebase Init Error:", error.message); }
+    } catch (error) {
+        console.error("❌ Firebase Init Error:", error.message);
+        throw error;
+    }
 }
 const db = admin.firestore();
 
+// 2. EmailJS 配置
 const EMAIL_CFG = {
     service_id: process.env.VITE_EMAILJS_SERVICE_ID,
     user_id: process.env.VITE_EMAILJS_PUBLIC_KEY,
@@ -26,17 +33,27 @@ const EMAIL_CFG = {
     }
 };
 
+// 3. 通用發信函數
 const sendEmail = (templateId, params) => {
     return new Promise((resolve) => {
         if (!EMAIL_CFG.private_key) return resolve("No Private Key");
+        
         const postData = JSON.stringify({
-            service_id: EMAIL_CFG.service_id, template_id: templateId, user_id: EMAIL_CFG.user_id, accessToken: EMAIL_CFG.private_key, template_params: params
+            service_id: EMAIL_CFG.service_id,
+            template_id: templateId,
+            user_id: EMAIL_CFG.user_id,
+            accessToken: EMAIL_CFG.private_key,
+            template_params: params
         });
+
         const req = https.request({
             hostname: 'api.emailjs.com', port: 443, path: '/api/v1.0/email/send', method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
         }, (res) => resolve(res.statusCode));
-        req.on('error', (e) => resolve("Error")); req.write(postData); req.end();
+
+        req.on('error', (e) => { console.error("Email Error:", e); resolve("Error"); });
+        req.write(postData);
+        req.end();
     });
 };
 
@@ -44,7 +61,6 @@ const sendEmail = (templateId, params) => {
 const handleBuyoutKicking = async (buyoutOrder) => {
     console.log(`🧹 執行買斷清場: Order ${buyoutOrder.id}`);
     
-    // 抓取所有可能佔位的訂單
     const q = await db.collection('orders').where('status', 'in', [
         'paid_pending_selection', 
         'partially_outbid', 
@@ -62,9 +78,11 @@ const handleBuyoutKicking = async (buyoutOrder) => {
     for (const doc of q.docs) {
         const oldOrder = doc.data();
         
-        // 🔥 修正：移除了 "oldOrder.userId === buyoutOrder.userId" 的檢查
-        // 即使是自己的舊單，如果現在選擇了買斷，舊單也必須被標記為 outbid_by_buyout
-        if (doc.id === buyoutOrder.id) continue; // 唯一要跳過的是「這張買斷單自己」
+        // 🔥🔥🔥 核心修正由這裡開始 🔥🔥🔥
+        // 舊代碼: if (oldOrder.userId === buyoutOrder.userId) continue;  <-- 這行導致自己的舊單沒被踢
+        // 新代碼: 只有當「這張單」等於「剛買斷的那張單」時才跳過，其他的（包括自己的舊單）通通踢走！
+        if (doc.id === buyoutOrder.id) continue; 
+        // 🔥🔥🔥 核心修正結束 🔥🔥🔥
 
         let outbidInfo = [];
         let hasChanged = false;
@@ -77,7 +95,7 @@ const handleBuyoutKicking = async (buyoutOrder) => {
             );
 
             if (match) {
-                // 只要撞期，直接判死刑 (狀態改為 outbid_by_buyout)
+                // 只要撞期，直接判死刑，狀態改為 outbid_by_buyout
                 if (oldSlot.slotStatus !== 'outbid_by_buyout') {
                     outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 (已被買斷)`);
                     hasChanged = true;
@@ -97,7 +115,7 @@ const handleBuyoutKicking = async (buyoutOrder) => {
                 lastUpdated: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // 發送通知 (如果是自己的舊單被踢，依然可以發信通知，或者你可以選擇在這裡加 userId 判斷不發信)
+            // 發送通知 (即使是自己的舊單，也會收到通知，讓用戶知道舊單已無效)
             if (outbidInfo.length > 0) {
                 await sendEmail(EMAIL_CFG.templates.OUTBID_BY_BUYOUT, {
                     to_name: oldOrder.userName || 'Customer',
@@ -120,7 +138,7 @@ const handleStandardBidding = async (newOrder) => {
 
     for (const doc of q.docs) {
         const oldOrder = doc.data();
-        if (oldOrder.userId === newOrder.userId) continue; // 一般競價還是要防止自己踢自己
+        if (oldOrder.userId === newOrder.userId) continue; // 一般競價：自己不踢自己，這是對的
 
         let outbidInfo = [];
         let hasChanged = false;
