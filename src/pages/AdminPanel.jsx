@@ -83,7 +83,6 @@ const AdminPanel = () => {
         setLoading(false);
       });
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
-          // 🔥 確保排序正確
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
           setScreens(sorted);
       });
@@ -165,7 +164,7 @@ const AdminPanel = () => {
                   if (isBidding) days[slot.date].bidding++;
                   else if (isReview) days[slot.date].pending++;
                   else if (isScheduled) days[slot.date].scheduled++;
-                  else if (isWon) days[slot.date].action++; 
+                  else if (isWon) days[slot.date].action++;
               } 
           }); 
       });
@@ -366,9 +365,10 @@ const AdminPanel = () => {
       setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); 
   };
 
-  // 🔥🔥🔥 修正版：安全儲存 Screen (解決 ID 重複) 🔥🔥🔥
+  // 🔥🔥🔥 修正版 saveScreenFull (解決 "No document to update" 錯誤) 🔥🔥🔥
   const saveScreenFull = async () => { 
       try {
+          // 1. 整理數據
           const p = { 
               ...newScreenData, 
               basePrice: parseFloat(newScreenData.basePrice), 
@@ -376,9 +376,13 @@ const AdminPanel = () => {
               lastUpdated: serverTimestamp() 
           };
 
+          // 刪除 firestoreId，避免將其作為欄位寫入 DB (保持資料庫整潔)
+          delete p.firestoreId; 
+
           if(editingScreenId) {
-              // 編輯模式：直接更新現有文件
-              await updateDoc(doc(db,"screens",editingScreenId), p);
+              // 🔥 核心修正：改用 setDoc + merge: true
+              // 這可以處理 "phantom document" (有子集合但本體不存在) 的情況
+              await setDoc(doc(db,"screens",editingScreenId), p, { merge: true });
           } else {
               // 新增模式：計算下一個不重複的 ID
               // 1. 找出目前所有佔用的 ID (包含 'screen_XXX' 文件名 和 data.id 欄位)
