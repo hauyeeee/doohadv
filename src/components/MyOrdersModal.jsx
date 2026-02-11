@@ -2,19 +2,16 @@ import React, { useState } from 'react';
 import { LogOut, X, Mail, History, ShoppingBag, Gavel, Clock, Monitor, CheckCircle, UploadCloud, Info, AlertTriangle, Lock, Trophy, Ban, Zap, CreditCard, Flag, Edit, Hourglass } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
-const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment }) => {
+const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout, onUploadClick, handleUpdateBid, onResumePayment, occupiedSlots }) => {
   const { t, lang } = useLanguage();
   const [updatingSlot, setUpdatingSlot] = useState(null);
   const [newBidPrice, setNewBidPrice] = useState('');
 
   if (!isOpen || !user) return null;
 
-  // 🔥 核心修復：加入錯誤捕捉和詳細 Log
   const onUpdateBidSubmit = (e, orderId, slotIndex, currentPrice, otherSlotsSum, isPendingPayment, marketHighestPrice) => {
-      e.preventDefault(); // 防止任何預設行為
-      e.stopPropagation(); // 防止事件冒泡
-
-      console.log("🟢 Submit Clicked:", { orderId, slotIndex, newBidPrice, currentPrice, isPendingPayment, marketHighestPrice });
+      e.preventDefault(); 
+      e.stopPropagation();
 
       try {
           const bidInt = parseInt(newBidPrice);
@@ -26,11 +23,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
               return;
           }
 
-          // 邏輯：待付款(Pending)只需高於市場價；已付款(Paid)必須高於自己舊價
           let floorPrice = isPendingPayment ? marketInt : currentInt;
-
-          // Debug Log
-          console.log(`🔍 Checking Price: Bid=${bidInt}, Floor=${floorPrice} (Pending? ${isPendingPayment})`);
 
           if (bidInt <= floorPrice) {
               const msg = lang === 'en' 
@@ -40,20 +33,14 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
               return;
           }
 
-          // 安全計算總額
           const safeOtherSum = parseInt(otherSlotsSum) || 0;
           const newTotal = safeOtherSum + bidInt;
           
-          console.log(`💰 New Total Calculation: ${safeOtherSum} + ${bidInt} = ${newTotal}`);
-
           const confirmMsg = lang === 'en' 
               ? `Confirm update? Total re-authorization: HK$${newTotal.toLocaleString()}` 
               : `確定修改出價？系統將重新預授權總額 HK$${newTotal.toLocaleString()}。`;
 
           if (window.confirm(confirmMsg)) {
-              if (typeof handleUpdateBid !== 'function') {
-                  throw new Error("System Error: handleUpdateBid is missing. Please refresh.");
-              }
               handleUpdateBid(orderId, slotIndex, bidInt, newTotal);
               setUpdatingSlot(null);
               setNewBidPrice('');
@@ -73,7 +60,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden" onClick={onClose}>
         <div className="bg-slate-50 rounded-2xl shadow-2xl max-w-3xl w-full h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            {/* Header */}
             <div className="p-5 border-b bg-white flex justify-between items-center shadow-sm shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative">
@@ -91,7 +77,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                 </div>
             </div>
             
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
                 <h4 className="font-bold text-slate-700 text-lg flex items-center gap-2 mb-2"><History size={20}/> {t('my_orders')}</h4>
                 
@@ -121,9 +106,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 const isRealTimeOutbidCheck = isOrderEffective && myBidPrice < marketHighestPrice;
                                 const isBackendOutbidCheck = slot.slotStatus === 'outbid';
                                 const isLostCheck = slot.slotStatus === 'lost';
+                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 新增
 
                                 if (isRealTimeOutbidCheck) hasRealTimeOutbid = true;
-                                if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck) {
+                                if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck && !isBuyoutLoss) {
                                     projectedAmount += myBidPrice;
                                 }
                             }); 
@@ -136,9 +122,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
 
                         const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
-                            const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
-                                return isLost ? sum : sum + (parseInt(s.bidPrice)||0);
+                                return (s.slotStatus === 'outbid' || s.slotStatus === 'lost' || s.slotStatus === 'outbid_by_buyout') ? sum : sum + (parseInt(s.bidPrice)||0);
                             }
                             return sum + (parseInt(s.bidPrice)||0);
                         }, 0) : 0;
@@ -228,16 +213,22 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isRealTimeOutbid = myBidPrice < marketHighestPrice;
                                                                 const isBackendOutbid = slot.slotStatus === 'outbid'; 
                                                                 const isLost = slot.slotStatus === 'lost';
-                                                                const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
+                                                                const isBuyoutLoss = slot.slotStatus === 'outbid_by_buyout'; // 🔥 後端標記
                                                                 
-                                                                const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid && !isOrderExpired;
+                                                                // 🔥 檢查是否被買斷 (後端標記 OR 市場標記)
+                                                                // occupiedSlots 是從 useDoohSystem 傳進來的，包含了所有 'won'/'paid' 的 slot
+                                                                const isSoldOutInMarket = occupiedSlots && occupiedSlots.has(slotKey) && order.status !== 'won' && order.status !== 'paid' && slot.slotStatus !== 'won';
+                                                                
+                                                                const isDead = isBuyoutLoss || isSoldOutInMarket;
+
+                                                                const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid && !isOrderExpired && !isDead;
                                                                 const isProcessingResult = isOrderEffective && !isSettled && isOrderExpired;
 
-                                                                const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
+                                                                const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired && !isDead;
                                                                 const showLost = isLost || ((isBackendOutbid || isRealTimeOutbid) && isOrderExpired);
                                                                 
-                                                                const showIncreaseButton = (showOutbidWarning || isLost) && !isOrderExpired && !isFinalWon;
-                                                                const showEditButton = isPendingPayment && !isOrderExpired;
+                                                                const showIncreaseButton = showOutbidWarning && !isDead;
+                                                                const showEditButton = isPendingPayment && !isOrderExpired && !isDead;
 
                                                                 const isEditing = updatingSlot === `${order.id}-${slot.originalIndex}`;
                                                                 
@@ -248,6 +239,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                     }
                                                                     if (isLeading) return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
                                                                     if (isProcessingResult) return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
+                                                                    if (isDead) return <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-700 animate-pulse"><Lock size={8}/> SOLD OUT</span>;
                                                                     if (showOutbidWarning) return <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-yellow-200 animate-pulse"><AlertTriangle size={8}/> 被超越</span>;
                                                                     if (showLost) return <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-red-200"><Ban size={8}/> LOST</span>;
                                                                     if (isPendingPayment) return <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-purple-200"><CreditCard size={8}/> 待付款</span>;
@@ -258,6 +250,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 let bgClass = "bg-white";
                                                                 if (isFinalWon) { borderClass = "border-green-200"; bgClass = "bg-green-50/30"; }
                                                                 else if (isLeading) { borderClass = "border-blue-200"; bgClass = "bg-blue-50/30"; } 
+                                                                else if (isDead) { borderClass = "border-red-300"; bgClass = "bg-red-50"; } // 🔥 買斷死刑
                                                                 else if (showOutbidWarning) { borderClass = "border-yellow-300"; bgClass = "bg-yellow-50"; }
                                                                 else if (showLost) { borderClass = "border-red-200"; bgClass = "bg-red-50/30"; }
                                                                 else if (isPendingPayment) { borderClass = "border-purple-300"; bgClass = "bg-purple-50"; } 
@@ -289,7 +282,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                             ) : (
                                                                                 <>
                                                                                     <div className="flex flex-col items-end">
-                                                                                        <span className={`text-xs font-bold ${isPendingPayment ? 'text-purple-600' : (showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
+                                                                                        <span className={`text-xs font-bold ${isDead ? 'text-slate-400 line-through' : isPendingPayment ? 'text-purple-600' : (showOutbidWarning || showLost) ? 'text-red-500 line-through' : 'text-slate-600'}`}>HK${slot.bidPrice}</span>
                                                                                         <span className="text-[8px] text-slate-400">最高: HK${marketHighestPrice}</span>
                                                                                     </div>
                                                                                     
@@ -299,8 +292,8 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                                     {showEditButton && (
                                                                                         <button onClick={() => { setUpdatingSlot(`${order.id}-${slot.originalIndex}`); setNewBidPrice(''); }} className="text-[9px] bg-purple-600 text-white px-2 py-1 rounded font-bold hover:bg-purple-700 flex items-center gap-1 shadow-sm transition-all"><Edit size={10}/> 修改</button>
                                                                                     )}
-                                                                                    {showLost && !showIncreaseButton && (
-                                                                                        <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200"><Lock size={10}/> {t('bid_closed')}</span>
+                                                                                    {(showLost || isDead) && !showIncreaseButton && (
+                                                                                        <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold flex items-center gap-1 cursor-not-allowed border border-slate-200"><Lock size={10}/> {isDead ? 'SOLD OUT' : t('bid_closed')}</span>
                                                                                     )}
                                                                                 </>
                                                                             )}
