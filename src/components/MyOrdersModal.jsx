@@ -83,6 +83,10 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         // 檢查訂單是否付款中
                         const isPendingPayment = order.status === 'pending_auth' || order.status === 'pending_reauth';
 
+                        // 🔥 1. 計算「動態預計金額」 (Projected Amount)
+                        // 只計算那些「贏」或「領先」的 slot，排除被超越的 slot
+                        let projectedAmount = 0;
+
                         if (order.detailedSlots) { 
                             order.detailedSlots.forEach((slot, index) => { 
                                 const slotWithIndex = { ...slot, originalIndex: index };
@@ -91,11 +95,23 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                 
                                 const slotKey = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                                 const marketHighestPrice = existingBids ? (existingBids[slotKey] || 0) : 0;
+                                const myBidPrice = parseInt(slot.bidPrice) || 0;
                                 
-                                if (isOrderEffective && (parseInt(slot.bidPrice) || 0) < marketHighestPrice) {
+                                // 判斷是否輸了
+                                const isRealTimeOutbidCheck = isOrderEffective && myBidPrice < marketHighestPrice;
+                                const isBackendOutbidCheck = slot.slotStatus === 'outbid';
+                                const isLostCheck = slot.slotStatus === 'lost';
+
+                                if (isRealTimeOutbidCheck) {
                                     hasRealTimeOutbid = true;
                                 }
+
+                                // 🔥 如果目前是領先或已贏，這筆錢就算在預計金額內
+                                if (!isRealTimeOutbidCheck && !isBackendOutbidCheck && !isLostCheck) {
+                                    projectedAmount += myBidPrice;
+                                }
                             }); 
+                            
                             if (order.detailedSlots.length > 0) {
                                 const d = new Date(order.detailedSlots[0].date); 
                                 d.setHours(parseInt(order.detailedSlots[0].hour), 0, 0, 0);
@@ -103,7 +119,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                             }
                         }
 
-                        const currentTotalAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => sum + (parseInt(s.bidPrice)||0), 0) : 0;
+                        // 後端結算金額 (如果已結算)
                         const actualWinningAmount = order.detailedSlots ? order.detailedSlots.reduce((sum, s) => {
                             const isLost = s.slotStatus === 'outbid' || s.slotStatus === 'lost';
                             if (['won', 'partially_won', 'paid', 'completed'].includes(order.status)) {
@@ -113,7 +129,19 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         }, 0) : 0;
 
                         const isSettled = ['won', 'paid', 'completed', 'lost', 'partially_won'].includes(order.status);
-                        const displayAmount = isSettled ? actualWinningAmount : (order.amount || 0);
+                        
+                        // 🔥 決定顯示哪個金額
+                        // 1. 如果已結算 -> 顯示後端算好的 wonAmount
+                        // 2. 如果待付款 -> 顯示全額 (Max)
+                        // 3. 如果競價中/結算中 -> 顯示前端動態算的 projectedAmount (只含領先部分)
+                        let displayAmount = 0;
+                        if (isSettled) {
+                            displayAmount = actualWinningAmount;
+                        } else if (isPendingPayment) {
+                            displayAmount = order.amount || 0;
+                        } else {
+                            displayAmount = projectedAmount;
+                        }
                         
                         const now = new Date();
                         let revealTimeStr = "---";
@@ -150,7 +178,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                         } else if (order.status === 'outbid_needs_action') {
                             statusConfig = { bg: 'bg-red-50', text: 'text-red-600', label: t('status_outbid_needs_action') };
                         } else if (isOrderExpired && ['paid_pending_selection', 'partially_outbid'].includes(order.status)) {
-                            // 🔥 修改：如果過期了但還沒變 Lost/Won，顯示 "結算中"
                             statusConfig = { bg: 'bg-slate-200', text: 'text-slate-600', label: lang === 'en' ? 'Finalizing...' : '⏳ 正在結算...' };
                         } else if (order.status === 'paid_pending_selection') {
                             if (hasRealTimeOutbid) {
@@ -206,10 +233,7 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                 const isLost = slot.slotStatus === 'lost';
                                                                 const isFinalWon = isSettled && (slot.slotStatus === 'won' || (!isBackendOutbid && !isLost));
                                                                 
-                                                                // 🔥 核心修正: 領先必須滿足 "已付款" + "未結算" + "未過期"
                                                                 const isLeading = isOrderEffective && !isSettled && !isBackendOutbid && !isLost && !isRealTimeOutbid && !isOrderExpired;
-                                                                
-                                                                // 🔥 新增：正在結算 (已過期但後端還沒改 DB)
                                                                 const isProcessingResult = isOrderEffective && !isSettled && isOrderExpired;
 
                                                                 const showOutbidWarning = isOrderEffective && (isBackendOutbid || isRealTimeOutbid) && !isOrderExpired;
@@ -228,7 +252,6 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                                                     if (isLeading) {
                                                                         return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-blue-200"><Flag size={8}/> {lang==='en'?'Leading':'領先'}</span>;
                                                                     }
-                                                                    // 🔥 新增：結算中 Badge
                                                                     if (isProcessingResult) {
                                                                         return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 border border-slate-200"><Hourglass size={8}/> 結算中</span>;
                                                                     }
@@ -309,12 +332,12 @@ const MyOrdersModal = ({ isOpen, user, myOrders, existingBids, onClose, onLogout
                                         <div>
                                             <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">{t('amount_paid')}</p>
                                             <p className="text-2xl font-bold text-slate-800">HK$ {displayAmount.toLocaleString()}</p>
+                                            {/* 🔥 根據狀態顯示不同的文字說明 */}
                                             <p className="text-xs text-slate-400 mt-1">
                                                 {isSettled ? (lang==='en'?'Paid (Final Settlement)':'已成功扣款 (最終結算)') : 
-                                                 isPendingPayment ? (lang==='en'?'Waiting for payment...':'⏳ 等待付款中...') : 
-                                                 ['paid_pending_selection', 'partially_outbid', 'outbid_needs_action'].includes(order.status) ? (lang==='en'?'Pre-auth held (Max)':'預授權已凍結 (最高)') : 
-                                                 order.status === 'lost' ? (lang==='en'?'Auth released':'已取消授權') : 
-                                                 (lang==='en'?'Processing...':'等待處理...')}
+                                                 isPendingPayment ? (lang==='en'?'Pre-auth will be held':'預授權將被凍結 (最高)') : 
+                                                 isOrderExpired ? (lang==='en'?'Estimated winning amount':'預計成交金額 (結算中)') :
+                                                 (lang==='en'?'Projected winning amount':'預計成交金額 (競價中)')}
                                             </p>
                                             
                                             {isPendingPayment && !isOrderExpired && (
