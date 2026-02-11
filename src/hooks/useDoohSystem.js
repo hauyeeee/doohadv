@@ -431,6 +431,27 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
+   // 🔥🔥🔥 【新增】方案 A：競價限制邏輯 (開始) 🔥🔥🔥
+    // 邏輯：如果是 'bid'，檢查所有有效時段是否屬於「同一日期」且「同一小時」
+    // 允許：不同屏幕 (Screens)，但必須是相同 Date + Hour
+    const validSlotsToCheck = generateAllSlots.filter(s => !s.isSoldOut);
+    
+    if (type === 'bid' && validSlotsToCheck.length > 0) {
+        const firstSlot = validSlotsToCheck[0];
+        
+        const isAllSameTime = validSlotsToCheck.every(slot => 
+            slot.dateStr === firstSlot.dateStr && slot.hour === firstSlot.hour
+        );
+
+        if (!isAllSameTime) {
+            alert("⚠️ 競價訂單限制 (Bidding Restriction)\n\n由於競價結算時間不同，一張競價訂單只能包含「同一日期 + 同一小時」。\n\n(您可以選擇多個屏幕，但必須是相同時間)\n如需競投不同時段，請分開兩張訂單結帳。");
+            return; // ⛔️ 阻止繼續，唔會建立訂單
+        }
+    }
+    // 🔥🔥🔥 【新增】競價限制邏輯 (結束) 🔥🔥🔥
+
+
+
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
