@@ -65,6 +65,10 @@ export const useDoohSystem = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isBuyoutModalOpen, setIsBuyoutModalOpen] = useState(false);
   const [isBidModalOpen, setIsBidModalOpen] = useState(false); 
+  
+  // 🔥 Added missing state definition here
+  const [isTimeMismatchModalOpen, setIsTimeMismatchModalOpen] = useState(false);
+
   const [emailStatus, setEmailStatus] = useState('idle'); 
   
   const [restrictionModalData, setRestrictionModalData] = useState(null);
@@ -160,10 +164,6 @@ export const useDoohSystem = () => {
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "partially_won"]));
       
       // 2. 競價中 (Bidding) 的單 
-      // 🔥 修改重點：這裡只保留 "肯定有錢" 的狀態
-      // ❌ 刪除 'pending_reauth' (加價中，未俾錢)
-      // ❌ 刪除 'pending_auth' (新單，未俾錢)
-      // ✅ 只有以下狀態才算有效出價：
       const qBidding = query(collection(db, "orders"), where("status", "in", [
           "paid_pending_selection", // ✅ Webhook 確認已付款
           "partially_outbid",       // ✅ 已付款但部分輸
@@ -208,7 +208,6 @@ export const useDoohSystem = () => {
               bidCount++;
           });
           
-          // 🛠 Debug: 打開 Console (F12) 看看現在抓到了什麼價格
           console.log(`📡 市場數據更新: 掃描了 ${bidCount} 張訂單，最新最高價分布:`, bids);
           
           setExistingBids(bids);
@@ -237,12 +236,7 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     const orderRef = doc(db, "orders", orderId);
 
     if (isUrlSuccess) { 
-        // 🔥 修改 1: 不要在這裡改 status！只改 UI 顯示 "驗證中"
-        // 刪除所有 updateDoc 改 status 的代碼
         setModalPaymentStatus('verifying'); 
-        
-        // 僅保留發送 Email 的觸發 (如果你想由前端發)，但建議最好連 Email 都由 Webhook 發
-        // 為安全起見，這裡只做 UI 狀態管理
     }
 
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
@@ -251,7 +245,6 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
             setCreativeStatus(orderData.hasVideo ? 'approved' : 'empty');
             setCreativeName(orderData.videoName || ''); 
             
-            // 🔥 修改 2: 只有當 DB 真的變成以下狀態，前端才顯示 "付款成功"
             const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid', 'partially_outbid', 'outbid_needs_action'].includes(orderData.status);
             
             if (isPaid) { 
@@ -259,7 +252,6 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
                 localStorage.removeItem('temp_txn_time'); 
                 showToast("✅ 付款已確認！");
             } else { 
-                // 如果 URL 說 success 但 DB 還是 pending_auth，證明 Webhook 還沒到，繼續轉圈圈
                 if (isUrlSuccess) setModalPaymentStatus('verifying'); 
             }
         }
@@ -427,30 +419,27 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
 
  const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
-    if (type === 'bid' && pricing.missingBids > 0) { showToast(⁠ ❌ 尚有 ${pricing.missingBids} 個時段未出價 ⁠); return; }
-    if (type === 'bid' && pricing.invalidBids > 0) { showToast(⁠ ❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價 ⁠); return; }
+    
+    // 🔥 FIXED: Added backticks around the template strings below
+    if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
+    if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
+    
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
-    // 🔥🔥🔥 方案 A：競價限制邏輯 (UI 優化版) 🔥🔥🔥
     const validSlotsToCheck = generateAllSlots.filter(s => !s.isSoldOut);
     
     if (type === 'bid' && validSlotsToCheck.length > 0) {
         const firstSlot = validSlotsToCheck[0];
         
-        // 檢查是否所有項目都跟第一個項目的日期和小時一樣
         const isAllSameTime = validSlotsToCheck.every(slot => 
             slot.dateStr === firstSlot.dateStr && slot.hour === firstSlot.hour
         );
 
         if (!isAllSameTime) {
-            // ❌ 唔好再用 alert，改用 State 開靚 Modal
             setIsTimeMismatchModalOpen(true);
-            return; // ⛔️ 阻止繼續
+            return; 
         }
     }
-    // 🔥🔥🔥 限制邏輯結束 🔥🔥🔥
-
-
 
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
@@ -517,7 +506,6 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
-          // 🔥 傳入虛擬訂單以觸發檢查
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
 
@@ -548,10 +536,11 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,  isTimeMismatchModalOpen,      // 👈 加呢個
-    setIsTimeMismatchModalOpen,   // 👈 加呢個
-
+    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted, 
     
+    isTimeMismatchModalOpen,      
+    setIsTimeMismatchModalOpen,   
+
     restrictionModalData, 
     setRestrictionModalData,
     handleProceedAfterRestriction,
@@ -565,7 +554,6 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     handleUpdateBid, 
     recalculateAllBids,
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
-    // 🔥 Export existingBids
     existingBids
   };
 };

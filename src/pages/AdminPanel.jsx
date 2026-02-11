@@ -358,11 +358,45 @@ const AdminPanel = () => {
       setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); 
       setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); 
   };
-  const saveScreenFull = async () => { 
-      const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), images: newScreenData.images.filter(x=>x), lastUpdated: new Date() };
-      if(editingScreenId) await updateDoc(doc(db,"screens",editingScreenId), p);
-      else { const maxId = screens.reduce((m,s)=>Math.max(m,Number(s.id)||0),0); await addDoc(collection(db,"screens"),{...p, id:String(maxId+1), createdAt:new Date(), isActive:true}); }
-      alert(t('alert_saved')); setIsAddScreenModalOpen(false); 
+const saveScreenFull = async () => { 
+      // 整理表單數據
+      const p = { 
+          ...newScreenData, 
+          basePrice: parseFloat(newScreenData.basePrice), 
+          images: newScreenData.images.filter(x=>x), 
+          lastUpdated: new Date() 
+      };
+
+      if(editingScreenId) {
+          // --- 編輯模式 (保持不變) ---
+          await updateDoc(doc(db,"screens",editingScreenId), p);
+      } else { 
+          // --- 新增模式 (修改這裡) ---
+          
+          // 1. 🔥 直接從資料庫獲取最新的所有螢幕，確保 ID 不會重複
+          const snapshot = await getDocs(collection(db, "screens"));
+          
+          // 2. 找出目前最大的 ID (過濾掉非數字的 ID)
+          const currentIds = snapshot.docs.map(d => {
+              const val = Number(d.data().id);
+              return isNaN(val) ? 0 : val;
+          });
+          
+          // 3. 計算下一個 ID
+          const maxId = Math.max(0, ...currentIds);
+          const nextId = String(maxId + 1);
+
+          // 4. 寫入資料庫
+          await addDoc(collection(db,"screens"), {
+              ...p, 
+              id: nextId, 
+              createdAt: new Date(), 
+              isActive: true
+          }); 
+      }
+      
+      alert(t('alert_saved')); 
+      setIsAddScreenModalOpen(false); 
   };
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db,"screens",s.firestoreId),{isActive:!s.isActive}); };
   const handleScreenChange = (fid,f,v) => setEditingScreens(p=>({...p, [fid]:{...p[fid], [f]:v}}));
