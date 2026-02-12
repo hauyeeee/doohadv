@@ -2,16 +2,20 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
+// 🔥 1. 新增 Storage 相關函數
+import { 
+  ref, uploadBytes, getDownloadURL 
+} from "firebase/storage"; 
 import { 
   LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe 
 } from 'lucide-react';
-import { db, auth } from '../firebase';
+// 🔥 2. 引入 storage
+import { db, auth, storage } from '../firebase'; 
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 import { useLanguage } from '../context/LanguageContext';
 
-// 引入拆分後的 UI 組件
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
@@ -54,6 +58,7 @@ const AdminPanel = () => {
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
+  const [isUploadingImage, setIsUploadingImage] = useState(false); // 🔥 上傳狀態
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
@@ -181,6 +186,33 @@ const AdminPanel = () => {
   const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
 
   // --- Handlers ---
+  
+  // 🔥 3. 新增：處理圖片上傳
+  const handleScreenImageUpload = async (file, index) => {
+      if (!file) return;
+      setIsUploadingImage(true);
+      try {
+          // 上傳到 Firebase Storage (路徑: screen_images/timestamp_filename)
+          const storageRef = ref(storage, `screen_images/${Date.now()}_${file.name}`);
+          await uploadBytes(storageRef, file);
+          const downloadURL = await getDownloadURL(storageRef);
+          
+          // 更新狀態
+          const newImages = [...newScreenData.images];
+          newImages[index] = downloadURL;
+          setNewScreenData({ ...newScreenData, images: newImages });
+          
+          alert("✅ 圖片上傳成功！");
+      } catch (error) {
+          console.error("Upload Error:", error);
+          alert("❌ 上傳失敗: " + error.message);
+      } finally {
+          setIsUploadingImage(false);
+      }
+  };
+
+  // --- Full Functions (No Code Cut) ---
+
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
       setLoading(true);
@@ -338,84 +370,29 @@ const AdminPanel = () => {
   const handleBundleRuleChange = (i,f,v) => { const n=[...localBundleRules]; n[i][f]=v; setLocalBundleRules(n); };
   const handleRemoveBundleRule = (i) => { const n=[...localBundleRules]; n.splice(i,1); setLocalBundleRules(n); };
   
-  // 🔥🔥🔥 新增功能：複製屏幕 (Copy) 🔥🔥🔥
-  const handleCopyScreen = (screenToCopy) => {
-      // 1. 深拷貝數據
-      const copiedData = JSON.parse(JSON.stringify(screenToCopy));
-      
-      // 2. 清除唯一標識符，讓系統識別為新文件
-      delete copiedData.firestoreId; // 清除 Firestore 文件 ID
-      delete copiedData.id;          // 清除內部數字 ID (稍後自動生成)
-      
-      // 3. 加上 (Copy) 標記
-      copiedData.name = `${copiedData.name} (Copy)`;
-      copiedData.isActive = true; // 預設為開啟
-
-      // 4. 設定為新增模式
-      setNewScreenData(copiedData);
-      setEditingScreenId(null); // null 代表新增
-      setIsAddScreenModalOpen(true);
-  };
-
+  // 複製功能
+  const handleCopyScreen = (screenToCopy) => { const copiedData = JSON.parse(JSON.stringify(screenToCopy)); delete copiedData.firestoreId; delete copiedData.id; copiedData.name = `${copiedData.name} (Copy)`; copiedData.isActive = true; setNewScreenData(copiedData); setEditingScreenId(null); setIsAddScreenModalOpen(true); };
   const handleAddScreen = () => { setIsAddScreenModalOpen(true); setEditingScreenId(null); setNewScreenData({name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }}); };
-  
-  const handleEditScreenFull = (s) => { 
-      let rules = s.tierRules || {}; if(rules.default && !rules[0]) { let r=rules.default; rules={}; for(let i=0;i<7;i++) rules[i]=r; }
-      setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); 
-      setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); 
-  };
+  const handleEditScreenFull = (s) => { let rules = s.tierRules || {}; if(rules.default && !rules[0]) { let r=rules.default; rules={}; for(let i=0;i<7;i++) rules[i]=r; } setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); };
 
-  // 🔥🔥🔥 修正版 saveScreenFull (解決 "No document to update" 錯誤) 🔥🔥🔥
+  // 🔥 4. 修正儲存邏輯 (解決 No Document Error)
   const saveScreenFull = async () => { 
       try {
-          // 1. 整理數據
-          const p = { 
-              ...newScreenData, 
-              basePrice: parseFloat(newScreenData.basePrice), 
-              images: newScreenData.images.filter(x=>x), 
-              lastUpdated: serverTimestamp() 
-          };
-
-          // 刪除 firestoreId，避免將其作為欄位寫入 DB (保持資料庫整潔)
+          const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), images: newScreenData.images.filter(x=>x), lastUpdated: serverTimestamp() };
           delete p.firestoreId; 
-
-          if(editingScreenId) {
-              // 🔥 核心修正：改用 setDoc + merge: true
-              // 這可以處理 "phantom document" (有子集合但本體不存在) 的情況
-              await setDoc(doc(db,"screens",editingScreenId), p, { merge: true });
-          } else {
-              // 新增模式：計算下一個不重複的 ID
-              // 1. 找出目前所有佔用的 ID (包含 'screen_XXX' 文件名 和 data.id 欄位)
-              const existingIds = screens.map(s => {
-                  const internalId = parseInt(s.id);
-                  // 嘗試從 firestoreId 解析 (例如 screen_006 -> 6)
-                  const docId = s.firestoreId && s.firestoreId.startsWith('screen_') 
-                      ? parseInt(s.firestoreId.replace('screen_', '')) 
-                      : 0;
-                  // 取兩者最大值，防止數據不一致
-                  return Math.max(isNaN(internalId)?0:internalId, isNaN(docId)?0:docId);
-              });
-
-              const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
-              const nextId = maxId + 1;
-              
-              // 2. 統一格式：ID 7 -> screen_007
-              const nextIdStr = String(nextId);
-              const newDocId = `screen_${nextIdStr.padStart(3, '0')}`;
-
-              // 3. 使用 setDoc 指定 ID 寫入
-              await setDoc(doc(db, "screens", newDocId), {
-                  ...p,
-                  id: nextIdStr, // 內部 ID 存 "7"
-                  createdAt: serverTimestamp(),
-                  isActive: true
-              });
+          
+          if(editingScreenId) { 
+              // 使用 setDoc merge 來確保即使文件是 "虛擬" 的也能寫入
+              await setDoc(doc(db,"screens",editingScreenId), p, { merge: true }); 
+          } 
+          else {
+              const existingIds = screens.map(s => { const internalId = parseInt(s.id); const docId = s.firestoreId && s.firestoreId.startsWith('screen_') ? parseInt(s.firestoreId.replace('screen_', '')) : 0; return Math.max(isNaN(internalId)?0:internalId, isNaN(docId)?0:docId); });
+              const nextId = (existingIds.length > 0 ? Math.max(...existingIds) : 0) + 1;
+              const newDocId = `screen_${String(nextId).padStart(3, '0')}`;
+              await setDoc(doc(db, "screens", newDocId), { ...p, id: String(nextId), createdAt: serverTimestamp(), isActive: true });
           }
           alert(t('alert_saved')); setIsAddScreenModalOpen(false); 
-      } catch (e) {
-          console.error("Save Error", e);
-          alert("Save Failed: " + e.message);
-      }
+      } catch (e) { console.error("Save Error", e); alert("Save Failed: " + e.message); }
   };
 
   const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db,"screens",s.firestoreId),{isActive:!s.isActive}); };
@@ -427,8 +404,6 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto space-y-6">
-        
-        {/* Header */}
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
             <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> {t('admin_title')}</h1>
             <div className="flex gap-2">
@@ -440,7 +415,6 @@ const AdminPanel = () => {
             </div>
         </div>
 
-        {/* Tab Nav */}
         <div className="flex flex-wrap gap-2">
             {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:t('tab_dashboard')}, {id:'calendar',icon:<Calendar size={16}/>,label:t('tab_calendar')}, {id:'orders',icon:<List size={16}/>,label:t('tab_orders')}, {id:'review',icon:<Video size={16}/>,label:`${t('tab_review')} (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:t('tab_rules')}, {id:'screens',icon:<Monitor size={16}/>,label:t('tab_screens')}, {id:'analytics',icon:<TrendingUp size={16}/>,label:t('tab_analytics')}, {id:'config',icon:<Settings size={16}/>,label:t('tab_config')} ].map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
@@ -449,7 +423,6 @@ const AdminPanel = () => {
             ))}
         </div>
 
-        {/* Views */}
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
@@ -463,7 +436,11 @@ const AdminPanel = () => {
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
 
         {/* Modals */}
-        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} />
+        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} 
+            // 🔥 新增 props
+            onImageUpload={handleScreenImageUpload}
+            isUploading={isUploadingImage}
+        />
         <SlotGroupModal group={selectedSlotGroup} onClose={()=>setSelectedSlotGroup(null)} onReview={handleReview} onMarkScheduled={handleMarkAsScheduled} />
       
       </div>

@@ -4,7 +4,7 @@ import {
   Copy, Save, CheckCircle, UploadCloud, AlertCircle, Trophy, Monitor, AlertTriangle 
 } from 'lucide-react';
 
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 
 // --- 基礎組件 ---
 
@@ -57,7 +57,6 @@ export const StatCard = ({ title, value, icon, bg, border }) => (
 
 export const StatusBadge = ({ status }) => {
   const safeStatus = status || 'unknown';
-  
   const map = {
     paid_pending_selection: { label: '競價中', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
     won: { label: '競價成功', cls: 'bg-green-100 text-green-700 border-green-200' },
@@ -67,19 +66,13 @@ export const StatusBadge = ({ status }) => {
     partially_outbid: { label: '部分被超越', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
     cancelled: { label: '已取消', cls: 'bg-red-50 text-red-500 border-red-100 line-through' }
   };
-  
   const s = map[safeStatus] || { label: safeStatus, cls: 'bg-gray-100 text-gray-600' };
-  
-  return (
-    <span className={`text-[10px] px-2 py-1 rounded border font-bold whitespace-nowrap ${s.cls}`}>
-      {s.label}
-    </span>
-  );
+  return <span className={`text-[10px] px-2 py-1 rounded border font-bold whitespace-nowrap ${s.cls}`}>{s.label}</span>;
 };
 
 // --- 彈出視窗 (Modals) ---
 
-export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImageChange, handleApplyToAllDays, toggleTierHour, activeDayTab, setActiveDayTab, onSave }) => {
+export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImageChange, handleApplyToAllDays, toggleTierHour, activeDayTab, setActiveDayTab, onSave, onImageUpload, isUploading }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-hidden">
@@ -90,13 +83,12 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">屏幕名稱</label><input type="text" value={data.name} onChange={e => setData({...data, name: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. 中環旗艦店 A"/></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">屏幕名稱</label><input type="text" value={data.name} onChange={e => setData({...data, name: e.target.value})} className="w-full border rounded px-3 py-2 text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all"/></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">底價 (Base Price)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><span className="text-slate-400">$</span><input type="number" value={data.basePrice} onChange={e => setData({...data, basePrice: e.target.value})} className="w-full text-sm outline-none font-bold"/></div></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">位置</label><div className="flex items-center gap-2 border rounded px-3 py-2"><MapPin size={14} className="text-slate-400"/><input type="text" value={data.location} onChange={e => setData({...data, location: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. 皇后大道中 100號"/></div></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">區域 (District)</label><input type="text" value={data.district} onChange={e => setData({...data, district: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Central"/></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Bundle Group (Optional)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Layers size={14} className="text-slate-400"/><input type="text" value={data.bundleGroup} onChange={e => setData({...data, bundleGroup: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. central_network"/></div><p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p></div>
                     
-                    {/* 🔥🔥🔥 圖片集 (完整修復版) 🔥🔥🔥 */}
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
                             <ImageIcon size={12}/> 圖片集 (最多 3 張)
@@ -124,44 +116,43 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                                 </div>
                             )}
 
-                            {/* 2. 圖片 URL 輸入框 (如果未滿 3 張) */}
+                            {/* 2. 上傳 / 輸入 (如果未滿 3 張) */}
                             {(!data.images || data.images.length < 3) && (
                                 <div className="flex items-center gap-2 border-2 border-dashed border-slate-300 rounded-lg px-3 py-2 bg-slate-50 hover:bg-white transition-colors">
                                     <ImageIcon size={16} className="text-slate-400"/>
                                     <input 
                                         type="text" 
-                                        placeholder="貼上圖片網址 (https://...) 並按 Enter" 
+                                        placeholder="貼上網址或點擊右側上傳 ->" 
                                         className="w-full text-sm outline-none bg-transparent placeholder-slate-400"
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') {
                                                 e.preventDefault();
                                                 const val = e.target.value.trim();
                                                 if (val) {
-                                                    setData(prev => ({
-                                                        ...prev,
-                                                        images: [...(prev.images || []), val]
-                                                    }));
-                                                    e.target.value = ''; // 清空輸入框
+                                                    setData(prev => ({ ...prev, images: [...(prev.images || []), val] }));
+                                                    e.target.value = '';
                                                 }
                                             }
                                         }}
-                                        onBlur={(e) => {
-                                            const val = e.target.value.trim();
-                                            if (val) {
-                                                setData(prev => ({
-                                                    ...prev,
-                                                    images: [...(prev.images || []), val]
-                                                }));
-                                                e.target.value = ''; 
-                                            }
-                                        }}
                                     />
+                                    {/* 上傳按鈕 */}
+                                    <div className="relative group">
+                                        <input 
+                                            type="file" 
+                                            accept="image/*"
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                            onChange={(e) => onImageUpload(e.target.files[0], data.images ? data.images.length : 0)}
+                                            disabled={isUploading}
+                                        />
+                                        <button className={`p-2 rounded border border-slate-200 hover:bg-blue-50 text-blue-600 transition-colors ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                            {isUploading ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16}/>}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
-                            <p className="text-[10px] text-slate-400">輸入網址後按 Enter 或點擊空白處以新增。</p>
+                            <p className="text-[10px] text-slate-400">輸入網址後按 Enter，或點擊雲端圖示上傳檔案。</p>
                         </div>
                     </div>
-                    {/* 🔥🔥🔥 圖片集修復結束 🔥🔥🔥 */}
 
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={data.mapUrl} onChange={e => setData({...data, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="http://maps.google.com..."/></div></div>
                     
@@ -186,7 +177,14 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                 </div>
                 <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4><button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1"><Copy size={12}/> 複製至所有日子</button></div>
-                    <div className="flex gap-1 mb-4 border-b border-slate-200">{WEEKDAYS.map((day, idx) => (<button key={idx} onClick={() => setActiveDayTab(idx)} className={`px-4 py-2 text-xs font-bold rounded-t-lg transition-colors ${activeDayTab === idx ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{day}</button>))}</div>
+                    
+                    {/* 🔥🔥🔥 修正：這裡改成 WEEKDAYS_ZH 避免崩潰 🔥🔥🔥 */}
+                    <div className="flex gap-1 mb-4 border-b border-slate-200">
+                        {WEEKDAYS_ZH.map((d, i) => (
+                            <button key={i} onClick={() => setActiveDayTab(i)} className={`flex-1 py-1.5 text-xs font-bold rounded-t-lg transition-colors ${activeDayTab === i ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{d}</button>
+                        ))}
+                    </div>
+
                     <div className="space-y-4">
                         <div><span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">🔥 Prime Time (3.5x)</span><div className="flex flex-wrap gap-1 mt-2">{Array.from({length: 24}, (_, i) => i).map(h => (<button key={h} onClick={() => toggleTierHour('prime', h)} className={`w-8 h-8 text-xs font-bold rounded border ${data.tierRules[activeDayTab]?.prime?.includes(h) ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-400 hover:bg-slate-50'}`}>{h}</button>))}</div></div>
                         <div><span className="text-xs font-bold text-yellow-600 bg-yellow-50 px-2 py-1 rounded">⭐ Gold Time (1.8x)</span><div className="flex flex-wrap gap-1 mt-2">{Array.from({length: 24}, (_, i) => i).map(h => (<button key={h} onClick={() => toggleTierHour('gold', h)} className={`w-8 h-8 text-xs font-bold rounded border ${data.tierRules[activeDayTab]?.gold?.includes(h) ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-slate-400 hover:bg-slate-50'}`}>{h}</button>))}</div></div>
