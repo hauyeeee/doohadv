@@ -72,6 +72,7 @@ export const StatusBadge = ({ status }) => {
 
 // --- 彈出視窗 (Modals) ---
 
+// 🔥 修改：ScreenModal 接收 onImageUpload 和 isUploading 🔥
 export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImageChange, handleApplyToAllDays, toggleTierHour, activeDayTab, setActiveDayTab, onSave, onImageUpload, isUploading }) => {
   if (!isOpen) return null;
   return (
@@ -89,6 +90,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">區域 (District)</label><input type="text" value={data.district} onChange={e => setData({...data, district: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Central"/></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Bundle Group (Optional)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Layers size={14} className="text-slate-400"/><input type="text" value={data.bundleGroup} onChange={e => setData({...data, bundleGroup: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. central_network"/></div><p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p></div>
                     
+                    {/* 🔥🔥🔥 圖片集 (含上傳功能 UI) 🔥🔥🔥 */}
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
                             <ImageIcon size={12}/> 圖片集 (最多 3 張)
@@ -135,7 +137,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                                             }
                                         }}
                                     />
-                                    {/* 上傳按鈕 */}
+                                    {/* 上傳按鈕區 */}
                                     <div className="relative group">
                                         <input 
                                             type="file" 
@@ -168,6 +170,10 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                     <div className="col-span-2 border-t pt-4 mt-2">
                         <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據</h4>
                         <div className="grid grid-cols-2 gap-4">
+                            {/* 🔥🔥🔥 新增 Size 和 Orientation 輸入框 🔥🔥🔥 */}
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">尺寸 (Size)</label><input type="text" value={data.size} onChange={e => setData({...data, size: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder='e.g. 32"' /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">方向 (Orientation)</label><input type="text" value={data.orientation} onChange={e => setData({...data, orientation: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Portrait" /></div>
+                            
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">每日人流</label><input type="text" value={data.footfall} onChange={e => setData({...data, footfall: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">受眾類型</label><input type="text" value={data.audience} onChange={e => setData({...data, audience: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">播放時間</label><input type="text" value={data.operatingHours} onChange={e => setData({...data, operatingHours: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
@@ -177,14 +183,10 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                 </div>
                 <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4><button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1"><Copy size={12}/> 複製至所有日子</button></div>
-                    
-                    {/* 🔥🔥🔥 修正：這裡改成 WEEKDAYS_ZH 避免崩潰 🔥🔥🔥 */}
-                    <div className="flex gap-1 mb-4 border-b border-slate-200">
-                        {WEEKDAYS_ZH.map((d, i) => (
-                            <button key={i} onClick={() => setActiveDayTab(i)} className={`flex-1 py-1.5 text-xs font-bold rounded-t-lg transition-colors ${activeDayTab === i ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{d}</button>
-                        ))}
-                    </div>
-
+                    {/* 🔥 使用正確的 WEEKDAYS_ZH */}
+                    <div className="flex gap-1 mb-4 border-b border-slate-200">{WEEKDAYS_ZH.map((d, i) => (
+                        <button key={i} onClick={() => setActiveDayTab(i)} className={`flex-1 py-1.5 text-xs font-bold rounded-t-lg transition-colors ${activeDayTab === i ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{d}</button>
+                    ))}</div>
                     <div className="space-y-4">
                         <div><span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">🔥 Prime Time (3.5x)</span><div className="flex flex-wrap gap-1 mt-2">{Array.from({length: 24}, (_, i) => i).map(h => (<button key={h} onClick={() => toggleTierHour('prime', h)} className={`w-8 h-8 text-xs font-bold rounded border ${data.tierRules[activeDayTab]?.prime?.includes(h) ? 'bg-red-500 text-white border-red-500' : 'bg-white text-slate-400 hover:bg-slate-50'}`}>{h}</button>))}</div></div>
                         <div><span className="text-xs font-bold text-yellow-600 bg-yellow-50 px-2 py-1 rounded">⭐ Gold Time (1.8x)</span><div className="flex flex-wrap gap-1 mt-2">{Array.from({length: 24}, (_, i) => i).map(h => (<button key={h} onClick={() => toggleTierHour('gold', h)} className={`w-8 h-8 text-xs font-bold rounded border ${data.tierRules[activeDayTab]?.gold?.includes(h) ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-slate-400 hover:bg-slate-50'}`}>{h}</button>))}</div></div>
