@@ -37,7 +37,8 @@ export const useDoohSystem = () => {
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [previewDate, setPreviewDate] = useState(new Date()); 
 
-  const [selectedScreens, setSelectedScreens] = useState(new Set([1])); 
+  // 🔥 修正 1: 初始狀態強制使用 String "1"，避免與 Number 1 混淆
+  const [selectedScreens, setSelectedScreens] = useState(new Set(['1'])); 
   const [selectedHours, setSelectedHours] = useState(new Set());
   
   const [mode, setMode] = useState('specific'); 
@@ -96,7 +97,7 @@ export const useDoohSystem = () => {
       if (selectedScreens.size === 0) return 'normal';
       const currentDayKey = String(previewDate.getDay());
       selectedScreens.forEach(id => {
-          const s = screens.find(sc => sc.id == id);
+          const s = screens.find(sc => String(sc.id) === String(id)); // Force string compare
           if (s && s.tierRules) {
               let rules = s.tierRules[currentDayKey];
               if (!rules) rules = s.tierRules["default"];
@@ -114,8 +115,8 @@ export const useDoohSystem = () => {
     const fetchScreens = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "screens"));
-        const screensData = querySnapshot.docs.map(doc => ({ id: doc.data().id, ...doc.data() }));
-        screensData.sort((a, b) => a.id - b.id);
+        const screensData = querySnapshot.docs.map(doc => ({ id: String(doc.data().id), ...doc.data() })); // Ensure ID is string
+        screensData.sort((a, b) => Number(a.id) - Number(b.id));
         setScreens(screensData.filter(s => s.isActive !== false));
       } catch (error) { console.error("Error fetching screens:", error); showToast("❌ 無法載入屏幕資料"); } finally { setIsScreensLoading(false); }
     };
@@ -387,11 +388,9 @@ export const useDoohSystem = () => {
     const queryParams = new URLSearchParams(window.location.search);
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
-        const id = parseInt(qrScreenId);
-        if (!isNaN(id)) {
-            setSelectedScreens(new Set([id]));
-            showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
-        }
+        // 🔥 修正 2: 來自 URL 的 ID 也強制轉 String
+        setSelectedScreens(new Set([String(qrScreenId)]));
+        showToast(`📍 歡迎！已自動定位到屏幕 #${qrScreenId}`);
     }
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
@@ -428,8 +427,25 @@ export const useDoohSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
-  // 🔥 核心修正 1：計算 Multiplier
+  const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
+  const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
+  
+  // 🔥 修正 3: toggleScreen 強制確保 ID 為 String
+  const toggleScreen = (id) => { 
+      const strId = String(id);
+      const newSet = new Set(selectedScreens); 
+      if (newSet.has(strId)) newSet.delete(strId); 
+      else newSet.add(strId); 
+      setSelectedScreens(newSet); 
+  };
+  
+  const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
+  const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
+  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
+  
+  // --- 關鍵計算 Multiplier (遵守 String 規則) ---
   const getMultiplierForScreen = (screenId) => {
+      // 現在 selectedScreens 肯定都是 String，這裡直接 map 只是保險
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
       
@@ -454,6 +470,7 @@ export const useDoohSystem = () => {
                       const g = s?.bundleGroup || s?.bundlegroup;
                       return g === myGroup;
                   }).length;
+                  // 再次確認必須 > 1 才算 bundle
                   if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
               }
           }
@@ -461,7 +478,7 @@ export const useDoohSystem = () => {
       return 1.0;
   };
 
-  // 🔥 核心修正 2：Bundle Mode 判定
+  // --- Bundle Mode 判定 ---
   const isBundleMode = useMemo(() => { 
       // 🛑 如果少於 2 個屏幕，直接 false
       if (selectedScreens.size < 2) return false; 
@@ -486,7 +503,7 @@ export const useDoohSystem = () => {
         const dayOfWeek = new Date(d).getDay(); 
         selectedHours.forEach(h => {
             selectedScreens.forEach(screenId => {
-                const screen = screens.find(s => s.id === screenId);
+                const screen = screens.find(s => String(s.id) === String(screenId));
                 if (!screen) return;
                 const key = `${dateStr}-${h}-${screenId}`; 
                 const isSoldOut = occupiedSlots.has(key);
@@ -522,7 +539,7 @@ export const useDoohSystem = () => {
     let maxAppliedMultiplier = 1.0; let futureDateText = null; 
     
     availableSlots.forEach(slot => {
-        // 🔥 核心修正 3：Pricing Summary 也遵守單屏幕不計 Bundle
+        // 🔥 確保這裡也只在多屏幕時計算 Max Multiplier
         if (selectedScreens.size > 1 && slot.activeMultiplier > maxAppliedMultiplier) {
             maxAppliedMultiplier = slot.activeMultiplier;
         }
@@ -549,17 +566,10 @@ export const useDoohSystem = () => {
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
         currentBundleMultiplier: maxAppliedMultiplier, futureDateText 
     };
-  }, [generateAllSlots, slotBids]);
+  }, [generateAllSlots, slotBids, selectedScreens]);
 
-  const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
-  const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
-  const toggleScreen = (id) => { const newSet = new Set(selectedScreens); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedScreens(newSet); };
-  const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
-  const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
-  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
-  
   const checkOrderRestrictions = (type) => {
-      const selectedScreenIds = Array.from(selectedScreens);
+      const selectedScreenIds = Array.from(selectedScreens).map(String);
       const restrictedScreens = screens.filter(s => selectedScreenIds.includes(String(s.id)) && s.restrictions && s.restrictions.trim().length > 0);
       if (restrictedScreens.length > 0) { setRestrictionModalData({ screens: restrictedScreens, type }); return false; }
       return true; 
@@ -587,14 +597,14 @@ export const useDoohSystem = () => {
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: slot.screenId, screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
+    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: String(slot.screenId), screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
     const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
-    const screenNamesStr = Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : `Screen ${id}`; }).join(', ');
+    const screenNamesStr = Array.from(selectedScreens).map(id => { const s = screens.find(sc => String(sc.id) === String(id)); return s ? s.name : `Screen ${id}`; }).join(', ');
     let slotSummary = "";
     if (mode === 'specific') { const datesStr = Array.from(selectedSpecificDates).join(', '); slotSummary = `日期: [${datesStr}] | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; } 
     else { const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(','); slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; }
     
-    const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(id => { const s = screens.find(sc => sc.id === id); return s ? s.name : String(id); }), timeSlotSummary: slotSummary };
+    const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(String), timeSlotSummary: slotSummary };
     
     setIsBidModalOpen(false); 
     setIsBuyoutModalOpen(false);
