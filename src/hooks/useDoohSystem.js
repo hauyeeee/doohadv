@@ -13,11 +13,14 @@ import {
     initEmailService, 
     sendBidReceivedEmail, 
     sendBuyoutSuccessEmail, 
-    sendStandardOutbidEmail
+    sendOutbidByBuyoutEmail,
+    sendStandardOutbidEmail,
+    sendPartialOutbidEmail
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
 
 export const useDoohSystem = () => {
+  // --- States ---
   const [user, setUser] = useState(null); 
   const [isAuthReady, setIsAuthReady] = useState(false); 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -65,17 +68,18 @@ export const useDoohSystem = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isBuyoutModalOpen, setIsBuyoutModalOpen] = useState(false);
   const [isBidModalOpen, setIsBidModalOpen] = useState(false); 
-  
-  // 🔥 Added missing state definition here
-  const [isTimeMismatchModalOpen, setIsTimeMismatchModalOpen] = useState(false);
-
   const [emailStatus, setEmailStatus] = useState('idle'); 
   
   const [restrictionModalData, setRestrictionModalData] = useState(null);
+  const [isTimeMismatchModalOpen, setIsTimeMismatchModalOpen] = useState(false);
 
+  const emailSentRef = useRef(false);
+
+  // --- Constants ---
   const HOURS = Array.from({ length: 24 }, (_, i) => ({ val: i, label: `${String(i).padStart(2, '0')}:00` }));
   const WEEKDAYS_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 
+  // --- Helpers ---
   const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -104,6 +108,7 @@ export const useDoohSystem = () => {
       if (hasPrime) return 'prime'; if (hasGold) return 'gold'; return 'normal';
   };
 
+  // --- Effects ---
   useEffect(() => {
     initEmailService(); 
     const fetchScreens = async () => {
@@ -158,61 +163,29 @@ export const useDoohSystem = () => {
     });
   }, []);
 
- // 只有真正 "Hold 左錢" (Stripe Webhook 確認) 的單，才有資格做 Highest Bid
   useEffect(() => {
-      // 1. 已鎖定 (Sold) 的單
       const qSold = query(collection(db, "orders"), where("status", "in", ["won", "paid", "completed", "partially_won"]));
-      
-      // 2. 競價中 (Bidding) 的單 
-      const qBidding = query(collection(db, "orders"), where("status", "in", [
-          "paid_pending_selection", // ✅ Webhook 確認已付款
-          "partially_outbid",       // ✅ 已付款但部分輸
-          "outbid_needs_action",    // ✅ 已付款但全輸 (佢個價錢依然係有效參考)
-          "won",                    // ✅ 已贏
-          "partially_won",          // ✅ 部分贏
-          "paid"                    // ✅ 已買斷
-      ]));
+      const qBidding = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid"]));
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
-          snapshot.docs.forEach(doc => { 
-              const data = doc.data();
-              if (data.detailedSlots) {
-                  data.detailedSlots.forEach(s => {
-                      if (['won', 'paid', 'completed'].includes(data.status) || (data.status === 'partially_won' && s.slotStatus === 'won')) {
-                          sold.add(`${s.date}-${s.hour}-${s.screenId}`);
-                      }
-                  });
-              }
-          });
+          snapshot.docs.forEach(doc => { if (doc.data().detailedSlots) doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${s.screenId}`)); });
           setOccupiedSlots(sold);
       });
 
       const unsubBidding = onSnapshot(qBidding, (snapshot) => {
           const bids = {};
-          let bidCount = 0;
           snapshot.docs.forEach(doc => {
               const data = doc.data();
               if (data.detailedSlots) {
                   data.detailedSlots.forEach(s => {
-                      // Key 生成 (確保格式與 MyOrdersModal 一致)
                       const key = `${s.date}-${parseInt(s.hour)}-${String(s.screenId)}`;
                       const thisBid = parseInt(s.bidPrice) || 0;
-                      
-                      // 比較大小，保留最高價
-                      if (!bids[key] || thisBid > bids[key]) {
-                          bids[key] = thisBid;
-                      }
+                      if (!bids[key] || thisBid > bids[key]) bids[key] = thisBid;
                   });
               }
-              bidCount++;
           });
-          
-          console.log(`📡 市場數據更新: 掃描了 ${bidCount} 張訂單，最新最高價分布:`, bids);
-          
           setExistingBids(bids);
-      }, (error) => {
-          console.error("❌ 無法獲取市場出價 (可能是權限問題):", error);
       });
       return () => { unsubSold(); unsubBidding(); };
   }, []);
@@ -228,32 +201,191 @@ export const useDoohSystem = () => {
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
   
-  const checkAndNotifyLosers = async (buyoutOrder) => { /* ... */ };
-  const checkAndNotifyStandardOutbid = async (newOrder) => { /* ... 保持原狀 ... */ };
+  const checkAndNotifyLosers = async (buyoutOrder) => {
+      if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
+      const slots = buyoutOrder.detailedSlots;
+      if (!slots || slots.length === 0) return;
+      const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
+      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      let losersFound = false;
+      snapshot.forEach(docSnap => {
+          const loserOrder = docSnap.data();
+          const loserId = docSnap.id;
+          const hasConflict = loserOrder.detailedSlots.some(s => s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`));
+          if (hasConflict) {
+              losersFound = true;
+              let lostSlotsInfo = [];
+              const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
+                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
+                      lostSlotsInfo.push(`${slot.date} ${String(slot.hour).padStart(2,'0')}:00 @ ${slot.screenName || 'Unknown Screen'}`);
+                      return { ...slot, slotStatus: 'outbid' }; 
+                  }
+                  return slot; 
+              });
+              const totalSlots = updatedDetailedSlots.length;
+              const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid').length;
+              let newStatus = 'paid_pending_selection'; 
+              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; else if (outbidCount > 0) newStatus = 'partially_outbid';
+              
+              if (lostSlotsInfo.length > 0) {
+                  const slotInfoStr = lostSlotsInfo.join(', ');
+                  if (newStatus === 'partially_outbid') {
+                      sendPartialOutbidEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
+                  } else {
+                      sendOutbidByBuyoutEmail(loserOrder.userEmail, loserOrder.userName, slotInfoStr);
+                  }
+              }
+              const loserRef = doc(db, "orders", loserId);
+              batch.update(loserRef, { detailedSlots: updatedDetailedSlots, status: newStatus, lastUpdated: serverTimestamp() });
+          }
+      });
+      if (losersFound) await batch.commit();
+  };
 
-const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
+  // 🔥🔥🔥 雙向 Outbid Check (完整版) 🔥🔥🔥
+  const checkAndNotifyStandardOutbid = async (newOrder) => {
+      if (newOrder.type === 'buyout') return;
+      const newSlots = newOrder.detailedSlots;
+      if (!newSlots || newSlots.length === 0) return;
+
+      console.log("🔍 [Outbid Check] Started for Order:", newOrder.id);
+
+      const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
+      
+      let snapshot;
+      try {
+          snapshot = await getDocs(q);
+      } catch (error) {
+          console.error("❌ [Outbid Check] Query Error:", error);
+          return;
+      }
+
+      const batch = writeBatch(db);
+      let isBatchUsed = false;
+      let isSelfOutbid = false;
+      let newOrderUpdatedSlots = [...newSlots];
+
+      snapshot.forEach(docSnap => {
+          const oldOrder = docSnap.data();
+          if (oldOrder.userId === newOrder.userId) return; 
+
+          let outbidInfo = [];
+          let hasOldOrderChanged = false;
+          let maxNewPrice = 0;
+
+          const updatedOldSlots = oldOrder.detailedSlots.map(oldSlot => {
+              const matchNewSlot = newSlots.find(ns => 
+                  ns.date === oldSlot.date && 
+                  parseInt(ns.hour, 10) === parseInt(oldSlot.hour, 10) && 
+                  String(ns.screenId).trim() === String(oldSlot.screenId).trim()
+              );
+
+              if (matchNewSlot) {
+                  const oldPrice = parseInt(oldSlot.bidPrice, 10) || 0;
+                  const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
+                  
+                  // 🔥 情況 1: 新單 > 舊單 (踢走對手)
+                  if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
+                      console.log(`⚡ Outbid Other! Old(${oldOrder.userEmail}) $${oldPrice} < New $${newPrice}`);
+                      
+                      outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
+                      if(newPrice > maxNewPrice) maxNewPrice = newPrice;
+
+                      hasOldOrderChanged = true;
+                      return { ...oldSlot, slotStatus: 'outbid' }; 
+                  }
+                  
+                  // 🔥 情況 2: 舊單 >= 新單 (新單自己輸了)
+                  else if (oldPrice >= newPrice) {
+                      console.log(`⚡ Self Outbid! Old $${oldPrice} >= New(${newOrder.userName}) $${newPrice}`);
+                      isSelfOutbid = true;
+                      
+                      const mySlotIndex = newOrderUpdatedSlots.findIndex(s => 
+                          s.date === oldSlot.date && 
+                          parseInt(s.hour, 10) === parseInt(oldSlot.hour, 10) && 
+                          String(s.screenId).trim() === String(oldSlot.screenId).trim()
+                      );
+                      if (mySlotIndex !== -1) {
+                          newOrderUpdatedSlots[mySlotIndex] = { ...newOrderUpdatedSlots[mySlotIndex], slotStatus: 'outbid' };
+                      }
+                  }
+              }
+              return oldSlot;
+          });
+
+          if (hasOldOrderChanged) {
+              isBatchUsed = true;
+              const totalSlots = updatedOldSlots.length;
+              const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
+              let newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
+
+              if (outbidInfo.length > 0) {
+                  const infoStr = outbidInfo.join('<br/>');
+                  const targetEmail = oldOrder.userEmail;
+                  if (targetEmail) {
+                      sendStandardOutbidEmail(targetEmail, oldOrder.userName || 'Customer', infoStr, maxNewPrice);
+                  }
+              }
+              const oldOrderRef = doc(db, "orders", docSnap.id);
+              batch.update(oldOrderRef, { detailedSlots: updatedOldSlots, status: newStatus, lastUpdated: serverTimestamp() });
+          }
+      });
+
+      if (isSelfOutbid) {
+          console.log("⚠️ New order has lost some slots immediately.");
+          const totalSlots = newOrderUpdatedSlots.length;
+          const outbidCount = newOrderUpdatedSlots.filter(s => s.slotStatus === 'outbid').length;
+          let selfStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
+          if (outbidCount === 0) selfStatus = newOrder.status;
+
+          const newOrderRef = doc(db, "orders", newOrder.id);
+          batch.update(newOrderRef, { detailedSlots: newOrderUpdatedSlots, status: selfStatus, lastUpdated: serverTimestamp() });
+          isBatchUsed = true;
+      }
+
+      if (isBatchUsed) {
+          await batch.commit();
+          console.log("✅ All Outbid updates committed (Both ways).");
+      }
+  };
+
+  const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
-
     if (isUrlSuccess) { 
-        setModalPaymentStatus('verifying'); 
+        setModalPaymentStatus('paid'); 
+        setTimeout(async () => { 
+            try { 
+                const docSnap = await getDoc(orderRef); 
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const userInfo = { email: data.userEmail, displayName: data.userName };
+                    if (data.status === 'pending_reauth') { await updateDoc(orderRef, { status: 'paid_pending_selection' }); }
+                    if (!data.emailSent) {
+                         if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
+                         await updateDoc(orderRef, { emailSent: true });
+                    }
+                    
+                    if (data.type === 'buyout') {
+                        checkAndNotifyLosers(data);
+                    } else {
+                        await checkAndNotifyStandardOutbid(data);
+                    }
+                }
+            } catch(e) { console.error(e); } 
+        }, 1500); 
     }
-
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
             setCreativeStatus(orderData.hasVideo ? 'approved' : 'empty');
             setCreativeName(orderData.videoName || ''); 
-            
-            const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid', 'partially_outbid', 'outbid_needs_action'].includes(orderData.status);
-            
-            if (isPaid) { 
-                setModalPaymentStatus('paid'); 
-                localStorage.removeItem('temp_txn_time'); 
-                showToast("✅ 付款已確認！");
-            } else { 
-                if (isUrlSuccess) setModalPaymentStatus('verifying'); 
-            }
+            const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid'].includes(orderData.status);
+            if (isPaid) { setModalPaymentStatus('paid'); localStorage.removeItem('temp_txn_time'); } 
+            else { if (!isUrlSuccess) setModalPaymentStatus('verifying'); }
         }
     });
     return unsubscribe;
@@ -264,7 +396,10 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
         const id = parseInt(qrScreenId);
-        if (!isNaN(id)) { setSelectedScreens(new Set([id])); showToast(`📍 歡迎！已自動定位到屏幕 #${id}`); }
+        if (!isNaN(id)) {
+            setSelectedScreens(new Set([id]));
+            showToast(`📍 歡迎！已自動定位到屏幕 #${id}`);
+        }
     }
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
@@ -301,12 +436,14 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     });
   }, [screenSearchTerm, screens]);
 
+  // 🔥 核心修正：計算 Multiplier 時，確保規則適用於多屏幕
   const getMultiplierForScreen = (screenId) => {
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
       bundleRules.forEach(rule => {
           const ruleIds = rule.screens.map(String);
-          if (ruleIds.every(rid => selectedIds.includes(rid)) && ruleIds.includes(String(screenId))) {
+          // 🛠️ 只有當規則包含 >1 個屏幕時，才視為 Bundle 加價
+          if (ruleIds.length > 1 && ruleIds.every(rid => selectedIds.includes(rid)) && ruleIds.includes(String(screenId))) {
               const m = parseFloat(rule.multiplier);
               if (m > maxRuleMultiplier) maxRuleMultiplier = m;
           }
@@ -326,15 +463,15 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       return 1.0;
   };
 
-// 🛠️ 修正：只有當 multiplier 明顯大於 1.0 時才算 Bundle Mode
+  // 🔥 核心修正：只有選了 > 1 個屏幕，才允許進入 Bundle Mode
   const isBundleMode = useMemo(() => { 
+      if (selectedScreens.size < 2) return false; // 🛑 強制阻擋單屏幕
       for (const id of selectedScreens) { 
-          // 容許微小誤差 (floating point)，例如 1.00001
-          if (getMultiplierForScreen(id) > 1.01) return true; 
+          if (getMultiplierForScreen(id) > 1.0) return true; 
       } 
       return false; 
   }, [selectedScreens, screens, bundleRules, pricingConfig]);
-  
+
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
     let slots = [];
@@ -424,20 +561,16 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       return true; 
   };
 
- const initiateTransaction = async (type = 'bid', forceProceed = false) => {
+  const initiateTransaction = async (type = 'bid', forceProceed = false) => {
     if (!user) { showToast("請先登入"); return; }
-    
-    // 🔥 FIXED: Added backticks around the template strings below
     if (type === 'bid' && pricing.missingBids > 0) { showToast(`❌ 尚有 ${pricing.missingBids} 個時段未出價`); return; }
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
-    
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
+    // 🔥 Time mismatch check
     const validSlotsToCheck = generateAllSlots.filter(s => !s.isSoldOut);
-    
     if (type === 'bid' && validSlotsToCheck.length > 0) {
         const firstSlot = validSlotsToCheck[0];
-        
         const isAllSameTime = validSlotsToCheck.every(slot => 
             slot.dateStr === firstSlot.dateStr && slot.hour === firstSlot.hour
         );
@@ -513,6 +646,7 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
+          // 🔥 傳入虛擬訂單以觸發檢查
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
 
@@ -543,16 +677,15 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted, 
+    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     
-    isTimeMismatchModalOpen,      
-    setIsTimeMismatchModalOpen,   
-
     restrictionModalData, 
     setRestrictionModalData,
     handleProceedAfterRestriction,
     
     resumePayment,
+    isTimeMismatchModalOpen,
+    setIsTimeMismatchModalOpen,
 
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
