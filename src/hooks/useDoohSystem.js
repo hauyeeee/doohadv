@@ -245,7 +245,6 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
-  // 🔥🔥🔥 雙向 Outbid Check (完整版) 🔥🔥🔥
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -287,22 +286,16 @@ export const useDoohSystem = () => {
                   const oldPrice = parseInt(oldSlot.bidPrice, 10) || 0;
                   const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
                   
-                  // 🔥 情況 1: 新單 > 舊單 (踢走對手)
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
                       console.log(`⚡ Outbid Other! Old(${oldOrder.userEmail}) $${oldPrice} < New $${newPrice}`);
-                      
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
-
                       hasOldOrderChanged = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
-                  
-                  // 🔥 情況 2: 舊單 >= 新單 (新單自己輸了)
                   else if (oldPrice >= newPrice) {
                       console.log(`⚡ Self Outbid! Old $${oldPrice} >= New(${newOrder.userName}) $${newPrice}`);
                       isSelfOutbid = true;
-                      
                       const mySlotIndex = newOrderUpdatedSlots.findIndex(s => 
                           s.date === oldSlot.date && 
                           parseInt(s.hour, 10) === parseInt(oldSlot.hour, 10) && 
@@ -368,7 +361,6 @@ export const useDoohSystem = () => {
                          if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
                          await updateDoc(orderRef, { emailSent: true });
                     }
-                    
                     if (data.type === 'buyout') {
                         checkAndNotifyLosers(data);
                     } else {
@@ -436,36 +428,43 @@ export const useDoohSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
-  // 🔥 核心修正：計算 Multiplier 時，確保規則適用於多屏幕
+  // 🔥 核心修正 1：計算 Multiplier
   const getMultiplierForScreen = (screenId) => {
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
-      bundleRules.forEach(rule => {
-          const ruleIds = rule.screens.map(String);
-          // 🛠️ 只有當規則包含 >1 個屏幕時，才視為 Bundle 加價
-          if (ruleIds.length > 1 && ruleIds.every(rid => selectedIds.includes(rid)) && ruleIds.includes(String(screenId))) {
-              const m = parseFloat(rule.multiplier);
-              if (m > maxRuleMultiplier) maxRuleMultiplier = m;
+      
+      // 只有當選了 > 1 個屏幕時，才檢查 bundleRules
+      if (selectedIds.length > 1) {
+          bundleRules.forEach(rule => {
+              const ruleIds = rule.screens.map(String);
+              if (ruleIds.every(rid => selectedIds.includes(rid)) && ruleIds.includes(String(screenId))) {
+                  const m = parseFloat(rule.multiplier);
+                  if (m > maxRuleMultiplier) maxRuleMultiplier = m;
+              }
+          });
+          
+          if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
+          
+          const currentScreen = screens.find(s => String(s.id) === String(screenId));
+          if (currentScreen) {
+              const myGroup = currentScreen.bundleGroup || currentScreen.bundlegroup;
+              if (myGroup) {
+                  const countInGroup = Array.from(selectedScreens).filter(id => {
+                      const s = screens.find(sc => String(sc.id) === String(id));
+                      const g = s?.bundleGroup || s?.bundlegroup;
+                      return g === myGroup;
+                  }).length;
+                  if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
+              }
           }
-      });
-      if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
-      const currentScreen = screens.find(s => String(s.id) === String(screenId));
-      if (!currentScreen) return 1.0;
-      const myGroup = currentScreen.bundleGroup || currentScreen.bundlegroup;
-      if (myGroup) {
-          const countInGroup = Array.from(selectedScreens).filter(id => {
-              const s = screens.find(sc => String(sc.id) === String(id));
-              const g = s?.bundleGroup || s?.bundlegroup;
-              return g === myGroup;
-          }).length;
-          if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
       }
       return 1.0;
   };
 
-  // 🔥 核心修正：只有選了 > 1 個屏幕，才允許進入 Bundle Mode
+  // 🔥 核心修正 2：Bundle Mode 判定
   const isBundleMode = useMemo(() => { 
-      if (selectedScreens.size < 2) return false; // 🛑 強制阻擋單屏幕
+      // 🛑 如果少於 2 個屏幕，直接 false
+      if (selectedScreens.size < 2) return false; 
       for (const id of selectedScreens) { 
           if (getMultiplierForScreen(id) > 1.0) return true; 
       } 
@@ -521,8 +520,13 @@ export const useDoohSystem = () => {
     let hasRestrictedBuyout = false, hasRestrictedBid = false, hasUrgentRisk = false;
     let hasDateRestrictedBid = false; let hasPrimeFarFutureLock = false; 
     let maxAppliedMultiplier = 1.0; let futureDateText = null; 
+    
     availableSlots.forEach(slot => {
-        if (slot.activeMultiplier > maxAppliedMultiplier) maxAppliedMultiplier = slot.activeMultiplier;
+        // 🔥 核心修正 3：Pricing Summary 也遵守單屏幕不計 Bundle
+        if (selectedScreens.size > 1 && slot.activeMultiplier > maxAppliedMultiplier) {
+            maxAppliedMultiplier = slot.activeMultiplier;
+        }
+        
         if (!slot.canBid && slot.isBuyoutDisabled) hasPrimeFarFutureLock = true;
         if (!(!slot.canBid && slot.isBuyoutDisabled)) { buyoutTotal += slot.buyoutPrice; minBidTotal += slot.minBid; }
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
@@ -567,7 +571,6 @@ export const useDoohSystem = () => {
     if (type === 'bid' && pricing.invalidBids > 0) { showToast(`❌ 有 ${pricing.invalidBids} 個時段出價低於現有最高價`); return; }
     if (!termsAccepted) { showToast('❌ 請先同意條款'); return; }
 
-    // 🔥 Time mismatch check
     const validSlotsToCheck = generateAllSlots.filter(s => !s.isSoldOut);
     if (type === 'bid' && validSlotsToCheck.length > 0) {
         const firstSlot = validSlotsToCheck[0];
@@ -646,7 +649,6 @@ export const useDoohSystem = () => {
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
           
-          // 🔥 傳入虛擬訂單以觸發檢查
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
 
