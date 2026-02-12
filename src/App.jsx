@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'; 
-import { Loader2, UploadCloud, AlertTriangle, Monitor } from 'lucide-react'; 
+import ReactGA from "react-ga4"; 
+import ReactPixel from 'react-facebook-pixel'; 
+import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // Components
@@ -17,6 +19,13 @@ import BiddingModal from './components/BiddingModal';
 import BuyoutModal from './components/BuyoutModal';
 import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
+
+// 2. 設定 ID
+const GA_MEASUREMENT_ID = "G-N9L2TJMQC8";
+const FB_PIXEL_ID = "1744389019702374"; // 🔥 已更新為你的 Pixel ID
+
+// 初始化 GA4
+ReactGA.initialize(GA_MEASUREMENT_ID);
 
 const DOOHBiddingSystem = () => {
   const {
@@ -42,19 +51,45 @@ const DOOHBiddingSystem = () => {
     HOURS, getHourTier,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    occupiedSlots, existingBids, // 🔥 獲取市場實時出價
+    occupiedSlots, existingBids, 
     
     // New Props
     restrictionModalData, 
     setRestrictionModalData, 
     handleProceedAfterRestriction,
     resumePayment,
-    isTimeMismatchModalOpen,      // 👈 新增
-    setIsTimeMismatchModalOpen,   // 👈 新增
+    isTimeMismatchModalOpen,      
+    setIsTimeMismatchModalOpen,   
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
   const [restrictionAgreed, setRestrictionAgreed] = useState(false); 
+
+  // 3. 追蹤邏輯 (GA4 + Pixel PageView & Purchase)
+  useEffect(() => {
+    // A. 追蹤 GA4 Pageview
+    ReactGA.send({ hitType: "pageview", page: window.location.pathname + window.location.search });
+
+    // B. 初始化 Meta Pixel
+    const options = { autoConfig: true, debug: false };
+    ReactPixel.init(FB_PIXEL_ID, undefined, options);
+    ReactPixel.pageView(); 
+
+    // C. 🔥 追蹤 Purchase 事件 (當網址包含 success=true)
+    const queryParams = new URLSearchParams(window.location.search);
+    if (queryParams.get('success') === 'true') {
+        // 觸發 Purchase 事件
+        // 注意：由於這是從 Stripe 跳轉回來，我們暫時用 1 作為預設價值。
+        // 如果需要精確金額，需要從 Database 取回或在 URL 傳遞，但這已足夠讓 Facebook 知道「有人俾咗錢」。
+        ReactPixel.track('Purchase', { 
+            value: 1, 
+            currency: 'HKD',
+            content_name: 'DOOH Advertising Slot' 
+        });
+        console.log("💰 Pixel Purchase Event Fired!");
+    }
+
+  }, []);
 
   // Reset agreement when modal opens
   useEffect(() => {
@@ -187,52 +222,51 @@ const DOOHBiddingSystem = () => {
           </div>
       )}
 
-{isTimeMismatchModalOpen && (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
-        <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center relative overflow-hidden">
-            
-            {/* 背景裝飾 */}
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-red-500"></div>
+      {isTimeMismatchModalOpen && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center relative overflow-hidden">
+                  
+                  {/* 背景裝飾 */}
+                  <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-red-500"></div>
 
-            <div className="mb-5 flex justify-center">
-                <div className="bg-orange-50 p-4 rounded-full border border-orange-100">
-                    <Clock size={40} className="text-orange-500" />
-                </div>
-            </div>
+                  <div className="mb-5 flex justify-center">
+                      <div className="bg-orange-50 p-4 rounded-full border border-orange-100">
+                          <Clock size={40} className="text-orange-500" />
+                      </div>
+                  </div>
 
-            <h3 className="text-xl font-bold text-slate-800 mb-2">競價時段限制</h3>
-            <p className="text-slate-500 text-sm mb-6 leading-relaxed">
-                由於競價需要在特定時間進行結算，<br/>
-                一張競價訂單只能包含 <strong>「同一日期 + 同一小時」</strong>。
-            </p>
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">競價時段限制</h3>
+                  <p className="text-slate-500 text-sm mb-6 leading-relaxed">
+                      由於競價需要在特定時間進行結算，<br/>
+                      一張競價訂單只能包含 <strong>「同一日期 + 同一小時」</strong>。
+                  </p>
 
-            <div className="bg-slate-50 rounded-xl p-4 mb-6 text-left space-y-3 border border-slate-100">
-                <div className="flex items-start gap-3">
-                    <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={18}/>
-                    <div>
-                        <p className="text-sm font-bold text-slate-700">正確做法</p>
-                        <p className="text-xs text-slate-500">同時競投 Screen A, B, C (全部都在 15:00)</p>
-                    </div>
-                </div>
-                <div className="flex items-start gap-3">
-                    <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={18}/>
-                    <div>
-                        <p className="text-sm font-bold text-slate-700">不支援</p>
-                        <p className="text-xs text-slate-500">一張單同時包含 15:00 和 16:00</p>
-                    </div>
-                </div>
-            </div>
+                  <div className="bg-slate-50 rounded-xl p-4 mb-6 text-left space-y-3 border border-slate-100">
+                      <div className="flex items-start gap-3">
+                          <CheckCircle className="text-green-500 shrink-0 mt-0.5" size={18}/>
+                          <div>
+                              <p className="text-sm font-bold text-slate-700">正確做法</p>
+                              <p className="text-xs text-slate-500">同時競投 Screen A, B, C (全部都在 15:00)</p>
+                          </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                          <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={18}/>
+                          <div>
+                              <p className="text-sm font-bold text-slate-700">不支援</p>
+                              <p className="text-xs text-slate-500">一張單同時包含 15:00 和 16:00</p>
+                          </div>
+                      </div>
+                  </div>
 
-            <button 
-                onClick={() => setIsTimeMismatchModalOpen(false)} 
-                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
-            >
-                明白了，我會分開結帳
-            </button>
-        </div>
-    </div>
-)}
-
+                  <button 
+                      onClick={() => setIsTimeMismatchModalOpen(false)} 
+                      className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
+                  >
+                      明白了，我會分開結帳
+                  </button>
+              </div>
+          </div>
+      )}
 
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
