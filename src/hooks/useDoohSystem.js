@@ -326,8 +326,15 @@ const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
       return 1.0;
   };
 
-  const isBundleMode = useMemo(() => { for (const id of selectedScreens) { if (getMultiplierForScreen(id) > 1.0) return true; } return false; }, [selectedScreens, screens, bundleRules, pricingConfig]);
-
+// 🛠️ 修正：只有當 multiplier 明顯大於 1.0 時才算 Bundle Mode
+  const isBundleMode = useMemo(() => { 
+      for (const id of selectedScreens) { 
+          // 容許微小誤差 (floating point)，例如 1.00001
+          if (getMultiplierForScreen(id) > 1.01) return true; 
+      } 
+      return false; 
+  }, [selectedScreens, screens, bundleRules, pricingConfig]);
+  
   const generateAllSlots = useMemo(() => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
     let slots = [];

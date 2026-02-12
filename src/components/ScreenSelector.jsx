@@ -1,6 +1,6 @@
 import React from 'react';
-import { MapPin, Info } from 'lucide-react';
-import { useLanguage } from '../context/LanguageContext'; // 🔥 1. Hook
+import { MapPin, Info, Search } from 'lucide-react'; // 🔥 加回 Search Icon
+import { useLanguage } from '../context/LanguageContext';
 
 const ScreenSelector = ({ 
   selectedScreens, 
@@ -11,25 +11,41 @@ const ScreenSelector = ({
   toggleScreen, 
   setViewingScreen 
 }) => {
-  const { t } = useLanguage(); // 🔥 2. t()
+  const { t, lang } = useLanguage();
+
+  // 🔥 安全翻譯函數：如果 t() 返回 key 本身 (代表無翻譯)，就用預設值
+  const safeT = (key, defaultText) => {
+      const text = t(key);
+      return text === key ? defaultText : text;
+  };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      {/* Search Bar (Optional to add back if missing from your snippet, assuming handled in parent or here) */}
       
+      {/* 🔥 搜尋欄 (如果你需要的話，這裡加回去了) */}
+      <div className="p-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
+          <Search size={16} className="text-slate-400"/>
+          <input 
+            type="text" 
+            placeholder={lang === 'en' ? "Search screens..." : "搜尋屏幕..."}
+            value={screenSearchTerm}
+            onChange={(e) => setScreenSearchTerm(e.target.value)}
+            className="bg-transparent text-sm outline-none w-full placeholder-slate-400"
+          />
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
             <tr>
-              {/* 🔥 3. Translate Headers */}
-              <th className="p-4 w-16 text-center">{t('filter_selected')}</th>
-              <th className="p-4">{t('screen_name')}</th> 
-              <th className="p-4 text-right">{t('view_details')}</th>
+              <th className="p-4 w-16 text-center">{safeT('filter_selected', lang==='en'?'Selected':'已選')}</th>
+              <th className="p-4">{safeT('screen_name', lang==='en'?'Screen Name':'屏幕名稱')}</th> 
+              <th className="p-4 text-right"></th> 
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isScreensLoading ? (
-               <tr><td colSpan="3" className="p-8 text-center text-slate-400">{t('loading')}</td></tr>
+               <tr><td colSpan="3" className="p-8 text-center text-slate-400">{safeT('loading', 'Loading...')}</td></tr>
             ) : filteredScreens.length === 0 ? (
                <tr><td colSpan="3" className="p-8 text-center text-slate-400">No screens found</td></tr>
             ) : (
@@ -56,9 +72,9 @@ const ScreenSelector = ({
                   <td className="p-4 text-right">
                     <button 
                       onClick={(e) => { e.stopPropagation(); setViewingScreen(screen); }} 
-                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors flex items-center justify-end gap-1 ml-auto font-bold text-xs"
+                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors flex items-center justify-end gap-1 ml-auto font-bold text-xs whitespace-nowrap"
                     >
-                      <Info size={16}/> {t('view_details')}
+                      <Info size={16}/> {lang === 'en' ? 'Details' : '詳情'}
                     </button>
                   </td>
                 </tr>
