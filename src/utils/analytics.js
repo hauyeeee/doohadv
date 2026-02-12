@@ -2,8 +2,8 @@ import ReactGA from "react-ga4";
 import ReactPixel from 'react-facebook-pixel';
 
 // 🔥 請換成你自己的 ID
-const GA_MEASUREMENT_ID = "G-XXXXXXXXXX"; 
-const FB_PIXEL_ID = "123456789012345"; 
+const GA_MEASUREMENT_ID = "G-VRKLQ7YK5G"; 
+const FB_PIXEL_ID = "1744389019702374"; 
 
 export const initAnalytics = () => {
   // Initialize GA4
