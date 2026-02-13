@@ -29,7 +29,7 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import AdminPanel from './pages/AdminPanel';
 
-// 🔥 Language
+// Language
 import { useLanguage } from './context/LanguageContext';
 
 const MainDashboard = () => {
@@ -55,8 +55,8 @@ const MainDashboard = () => {
     initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
     resumePayment, handleUpdateBid, recalculateAllBids,
     
-    // 🔥🔥🔥 修正：這裡補回了 isDateAllowed，否則會報 ReferenceError 🔥🔥🔥
-    HOURS, getHourTier, existingBids, isDateAllowed 
+    // 🔥🔥🔥 絕對關鍵修正：補回 isDateAllowed 🔥🔥🔥
+    HOURS, getHourTier, existingBids, isDateAllowed
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
@@ -142,19 +142,7 @@ const MainDashboard = () => {
               handleBuyoutClick={handleBuyoutClick} 
             />
             
-            {/* Privacy & Terms Links */}
-            <div className="mt-6 pt-6 border-t border-slate-200 text-center">
-              <p className="text-xs text-slate-400 mb-2">{t('sidebar_info')}</p>
-              <div className="flex justify-center gap-4 text-xs font-bold text-slate-500">
-                <Link to="/terms" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
-                  <FileText size={12}/> {t('term_link')}
-                </Link>
-                <span className="text-slate-300">|</span>
-                <Link to="/privacy" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
-                  <Shield size={12}/> {t('privacy_link')}
-                </Link>
-              </div>
-            </div>
+            {/* Removed Duplicate Terms Links Here */}
           </aside>
         </div>
       </main>
