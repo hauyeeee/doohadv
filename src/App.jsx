@@ -13,7 +13,6 @@ import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
 import PricingSummary from './components/PricingSummary';
 import Footer from './components/Footer';
-
 import TutorialModal from './components/TutorialModal';
 
 // Modals

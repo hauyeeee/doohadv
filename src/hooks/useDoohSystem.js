@@ -37,6 +37,7 @@ export const useDoohSystem = () => {
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [previewDate, setPreviewDate] = useState(new Date()); 
 
+  // 🔥 修正 1: 初始狀態強制使用 String "1"，避免與 Number 1 混淆
   const [selectedScreens, setSelectedScreens] = useState(new Set(['1'])); 
   const [selectedHours, setSelectedHours] = useState(new Set());
   
@@ -84,26 +85,10 @@ export const useDoohSystem = () => {
   const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
   const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   
-  // 🔥🔥🔥 修復：放寬日期檢查邏輯，解決全灰問題 🔥🔥🔥
-  const isDateAllowed = (dateObj) => { 
-      // 兼容舊版傳參數 (year, month, day) 或者新版直接傳 Date Object
-      let checkDate;
-      if (arguments.length === 3) {
-          checkDate = new Date(arguments[0], arguments[1], arguments[2]);
-      } else {
-          checkDate = new Date(dateObj);
-      }
-      
-      // 清除時間，只比較日期
-      checkDate.setHours(0,0,0,0);
-      
-      const today = new Date(); 
-      today.setHours(0,0,0,0); 
-      
-      const maxDate = new Date(); 
-      maxDate.setDate(today.getDate() + 90); // 放寬到 90 日，避免太緊
-      maxDate.setHours(23,59,59,999);
-
+  const isDateAllowed = (year, month, day) => { 
+      const checkDate = new Date(year, month, day); 
+      const today = new Date(); today.setHours(0,0,0,0); 
+      const maxDate = new Date(); maxDate.setDate(today.getDate() + 60); 
       return checkDate >= today && checkDate <= maxDate; 
   };
 
@@ -403,6 +388,7 @@ export const useDoohSystem = () => {
     const queryParams = new URLSearchParams(window.location.search);
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
+        // 🔥 修正 2: 來自 URL 的 ID 也強制轉 String
         setSelectedScreens(new Set([String(qrScreenId)]));
         showToast(`📍 歡迎！已自動定位到屏幕 #${qrScreenId}`);
     }
@@ -444,6 +430,7 @@ export const useDoohSystem = () => {
   const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
   const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
   
+  // 🔥 修正 3: toggleScreen 強制確保 ID 為 String
   const toggleScreen = (id) => { 
       const strId = String(id);
       const newSet = new Set(selectedScreens); 
@@ -456,10 +443,13 @@ export const useDoohSystem = () => {
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
   const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
   
+  // --- 關鍵計算 Multiplier (遵守 String 規則) ---
   const getMultiplierForScreen = (screenId) => {
+      // 現在 selectedScreens 肯定都是 String，這裡直接 map 只是保險
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
       
+      // 只有當選了 > 1 個屏幕時，才檢查 bundleRules
       if (selectedIds.length > 1) {
           bundleRules.forEach(rule => {
               const ruleIds = rule.screens.map(String);
@@ -480,6 +470,7 @@ export const useDoohSystem = () => {
                       const g = s?.bundleGroup || s?.bundlegroup;
                       return g === myGroup;
                   }).length;
+                  // 再次確認必須 > 1 才算 bundle
                   if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
               }
           }
@@ -487,7 +478,9 @@ export const useDoohSystem = () => {
       return 1.0;
   };
 
+  // --- Bundle Mode 判定 ---
   const isBundleMode = useMemo(() => { 
+      // 🛑 如果少於 2 個屏幕，直接 false
       if (selectedScreens.size < 2) return false; 
       for (const id of selectedScreens) { 
           if (getMultiplierForScreen(id) > 1.0) return true; 
@@ -546,6 +539,7 @@ export const useDoohSystem = () => {
     let maxAppliedMultiplier = 1.0; let futureDateText = null; 
     
     availableSlots.forEach(slot => {
+        // 🔥 確保這裡也只在多屏幕時計算 Max Multiplier
         if (selectedScreens.size > 1 && slot.activeMultiplier > maxAppliedMultiplier) {
             maxAppliedMultiplier = slot.activeMultiplier;
         }
