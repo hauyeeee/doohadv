@@ -8,7 +8,6 @@ import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } f
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // 修正 Import 路徑 (指向 src/pages/)
-import { LanguageProvider } from './context/LanguageContext';
 import AdminPanel from './pages/AdminPanel';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
@@ -310,8 +309,6 @@ const DOOHBiddingSystem = () => {
 // =================================================================
 const App = () => {
   return (
-    <LanguageProvider>
-      {/* 移除了 BrowserRouter */}
       <Routes>
         <Route path="/" element={<DOOHBiddingSystem />} />
         <Route path="/admin" element={<AdminPanel />} />
@@ -319,7 +316,6 @@ const App = () => {
         <Route path="/terms" element={<Terms />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </LanguageProvider>
   );
 };
 
