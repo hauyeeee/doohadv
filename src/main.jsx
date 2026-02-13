@@ -1,29 +1,24 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async'; // 🔥 1. 必須引入這個
 import App from './App';
-import AdminPanel from './pages/AdminPanel';
 import './index.css';
-// 🔥 引入 LanguageProvider
 import { LanguageProvider } from './context/LanguageContext';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {/* 🔥 1. 開始 LanguageProvider */}
-    <LanguageProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* 一般用戶頁面 */}
-          <Route path="/" element={<App />} />
-          
-          {/* 管理員後台 */}
-          <Route path="/admin" element={<AdminPanel />} />
-          
-          {/* 處理其他路徑 (Optional: Redirect to Home) */}
-          <Route path="*" element={<App />} />
-        </Routes>
-      </BrowserRouter>
-    </LanguageProvider> 
-    {/* 🔥 2. 記得要在這裡關閉 LanguageProvider，不能漏！ */}
+    {/* 🔥 2. 最外層必須包 HelmetProvider，否則會白屏報錯 'add' undefined */}
+    <HelmetProvider>
+      <LanguageProvider>
+        <BrowserRouter>
+          {/* 🔥 3. 這裡只需要放 <App /> 
+             因為你在 App.jsx 裡面已經設定好了 <Routes> 和所有頁面路徑 
+             如果在這邊再寫 Route，會導致路由重複或混亂 
+          */}
+          <App />
+        </BrowserRouter>
+      </LanguageProvider>
+    </HelmetProvider>
   </React.StrictMode>,
 );
