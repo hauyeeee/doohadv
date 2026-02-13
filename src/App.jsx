@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Routes, Route, Link } from 'react-router-dom';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X, FileText, Shield } from 'lucide-react';
 import { useDoohSystem } from './hooks/useDoohSystem';
 
-// 🚀 引入 Analytics
+// 🚀 Analytics
 import { initAnalytics, trackPageView } from './utils/analytics';
 
 // Components
 import Header from './components/Header';
-import HeroSection from './components/HeroSection'; // ✅ 補回 Hero
-import InfoBox from './components/InfoBox';       // ✅ 補回 InfoBox
+import HeroSection from './components/HeroSection';
+import InfoBox from './components/InfoBox';
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
 import PricingSummary from './components/PricingSummary';
 import Footer from './components/Footer';
-import SEO from './components/SEO';               // ✅ 補回 SEO
+import SEO from './components/SEO';
 import TutorialModal from './components/TutorialModal';
 
 // Modals
@@ -26,10 +26,15 @@ import BuyoutModal from './components/BuyoutModal';
 import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
-const DOOHBiddingSystem = () => {
-  const location = useLocation();
-  
-  // 🔥 完整解構所有 Hook 回傳值 (包含你最新加的邏輯)
+// Pages
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
+import AdminPanel from './pages/AdminPanel';
+
+// ==========================================
+// 1. 主頁面組件 (原本的 DOOHBiddingSystem)
+// ==========================================
+const MainDashboard = () => {
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
     isScreensLoading, filteredScreens,
@@ -51,7 +56,7 @@ const DOOHBiddingSystem = () => {
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, 
     handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, 
     initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
-    resumePayment, handleUpdateBid, recalculateAllBids, // ✅ 確保包含這些新函數
+    resumePayment, handleUpdateBid, recalculateAllBids,
     
     // Helpers
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
@@ -60,22 +65,6 @@ const DOOHBiddingSystem = () => {
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [restrictionAgreed, setRestrictionAgreed] = useState(false);
-
-  // ==========================================
-  // 🔥 Analytics 系統初始化
-  // ==========================================
-  useEffect(() => {
-    initAnalytics();
-  }, []);
-
-  useEffect(() => {
-    trackPageView(location.pathname + location.search);
-  }, [location]);
-
-  // Reset agreement when modal opens
-  useEffect(() => {
-    if (restrictionModalData) setRestrictionAgreed(false);
-  }, [restrictionModalData]);
 
   // 隱藏的文件上傳觸發器
   const handleUploadClick = (orderId) => {
@@ -88,10 +77,13 @@ const DOOHBiddingSystem = () => {
     }
   };
 
+  // Reset agreement when modal opens
+  useEffect(() => {
+    if (restrictionModalData) setRestrictionAgreed(false);
+  }, [restrictionModalData]);
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      <SEO />
-      
+    <>
       <Header 
         user={user} 
         onLoginClick={() => setIsLoginModalOpen(true)} 
@@ -99,12 +91,10 @@ const DOOHBiddingSystem = () => {
         onHelpClick={() => setIsTutorialOpen(true)}
       />
 
-      {/* ✅ 補回 Hero Section */}
       <HeroSection />
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-8 animate-in fade-in duration-500">
         
-        {/* ✅ 補回 InfoBox */}
         <InfoBox />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -168,18 +158,17 @@ const DOOHBiddingSystem = () => {
               handleBuyoutClick={handleBuyoutClick} 
             />
             
-            {/* 🔥 NEW: Privacy & Terms Links Position 🔥 */}
-            {/* 這裡加了一個顯眼的區塊，讓用戶在 Sidebar 下方也能看到條款連結 */}
+            {/* 🔥 NEW: Privacy & Terms Links Position */}
             <div className="mt-6 pt-6 border-t border-slate-200 text-center">
               <p className="text-xs text-slate-400 mb-2">了解更多平台規則</p>
               <div className="flex justify-center gap-4 text-xs font-bold text-slate-500">
-                <a href="/terms" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
+                <Link to="/terms" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
                   <FileText size={12}/> 條款及細則
-                </a>
+                </Link>
                 <span className="text-slate-300">|</span>
-                <a href="/privacy" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
+                <Link to="/privacy" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
                   <Shield size={12}/> 私隱政策
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -308,8 +297,36 @@ const DOOHBiddingSystem = () => {
       <BuyoutModal isOpen={isBuyoutModalOpen} onClose={() => setIsBuyoutModalOpen(false)} pricing={pricing} selectedSpecificDates={selectedSpecificDates} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('buyout')} />
       <BiddingModal isOpen={isBidModalOpen} onClose={() => setIsBidModalOpen(false)} generateAllSlots={generateAllSlots} slotBids={slotBids} handleSlotBidChange={handleSlotBidChange} batchBidInput={batchBidInput} setBatchBidInput={setBatchBidInput} handleBatchBid={handleBatchBid} isBundleMode={isBundleMode} pricing={pricing} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('bid')} />
       <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} />
+    </>
+  );
+};
+
+// ==========================================
+// 2. App Root Component (路由設定)
+// ==========================================
+const App = () => {
+  const location = useLocation();
+
+  // 全域 Analytics 追蹤
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
+  useEffect(() => {
+    trackPageView(location.pathname + location.search);
+  }, [location]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      <SEO />
+      <Routes>
+        <Route path="/" element={<MainDashboard />} />
+        <Route path="/admin" element={<AdminPanel />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+      </Routes>
     </div>
   );
 };
 
-export default DOOHBiddingSystem;
+export default App;

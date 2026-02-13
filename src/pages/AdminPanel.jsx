@@ -2,20 +2,19 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
-// 🔥 1. 新增 Storage 相關函數
 import { 
   ref, uploadBytes, getDownloadURL 
-} from "firebase/storage"; 
+} from "firebase/storage";
 import { 
   LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe 
 } from 'lucide-react';
-// 🔥 2. 引入 storage
-import { db, auth, storage } from '../firebase'; 
+import { db, auth, storage } from '../firebase';
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 import { useLanguage } from '../context/LanguageContext';
 
+// 引入拆分後的 UI 組件
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
@@ -58,12 +57,12 @@ const AdminPanel = () => {
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
-  const [isUploadingImage, setIsUploadingImage] = useState(false); 
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
     footfall: '', audience: '', operatingHours: '', resolution: '',
-    // 🔥🔥🔥 這裡加入了 size 和 orientation 🔥🔥🔥
+    // 🔥 確保這裡有 size 和 orientation
     size: '', orientation: '',
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
@@ -90,6 +89,7 @@ const AdminPanel = () => {
         setLoading(false);
       });
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
+          // 確保 ID 排序正確
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
           setScreens(sorted);
       });
@@ -189,6 +189,7 @@ const AdminPanel = () => {
 
   // --- Handlers ---
   
+  // 🔥 上傳功能 (完整)
   const handleScreenImageUpload = async (file, index) => {
       if (!file) return;
       setIsUploadingImage(true);
@@ -210,6 +211,7 @@ const AdminPanel = () => {
       }
   };
 
+  // 🔥 AutoResolve (完整)
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
       setLoading(true);
@@ -304,6 +306,7 @@ const AdminPanel = () => {
       } catch (error) { console.error("Auto Resolve Error:", error); alert(`Error: ${error.message}`); } finally { setLoading(false); }
   };
 
+  // 🔥 Finalize (完整)
   const handleFinalizeAuction = async () => {
       if(!confirm(t('alert_confirm_finalize'))) return; 
       setLoading(true);
@@ -329,6 +332,7 @@ const AdminPanel = () => {
       } catch(e) { console.error(e); alert("Failed"); } finally { setLoading(false); }
   };
 
+  // 🔥 Review (完整)
   const handleReview = async (id, action) => { 
       if(!confirm(action)) return; 
       try { 
@@ -371,10 +375,8 @@ const AdminPanel = () => {
       const copiedData = JSON.parse(JSON.stringify(screenToCopy));
       delete copiedData.firestoreId; 
       delete copiedData.id;          
-      
       copiedData.name = `${copiedData.name} (Copy)`;
       copiedData.isActive = true; 
-
       setNewScreenData(copiedData);
       setEditingScreenId(null); 
       setIsAddScreenModalOpen(true);
@@ -388,6 +390,7 @@ const AdminPanel = () => {
       setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); 
   };
 
+  // 🔥 saveScreenFull (完整，包含 setDoc merge 修復)
   const saveScreenFull = async () => { 
       try {
           const p = { 
@@ -468,14 +471,13 @@ const AdminPanel = () => {
         {activeTab === 'config' && <ConfigView config={activeConfig} setConfig={setActiveConfig} globalConfig={globalPricingConfig} setGlobal={setGlobalPricingConfig} target={selectedConfigTarget} setTarget={setSelectedConfigTarget} screens={screens} localRules={localBundleRules} setLocalRules={setLocalBundleRules} onSave={savePricingConfig} onAddRule={handleAddBundleRule} onRuleChange={handleBundleRuleChange} onRemoveRule={handleRemoveBundleRule} />}
         {activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} />}
         
-        {/* 🔥🔥🔥 這裡傳入 onCopy, onImageUpload, isUploading */}
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
         
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
 
         {/* Modals */}
         <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} 
-            // 🔥 props
+            // 🔥 新增 props
             onImageUpload={handleScreenImageUpload}
             isUploading={isUploadingImage}
         />
