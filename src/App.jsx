@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, Routes, Route, Link } from 'react-router-dom';
-import { Loader2, AlertTriangle, Monitor, Clock, CheckCircle, FileText, Shield } from 'lucide-react';
+import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X, FileText, Shield } from 'lucide-react';
 import { useDoohSystem } from './hooks/useDoohSystem';
-
-// 🔥 1. 引入 Language Context
-import { useLanguage } from './context/LanguageContext';
 
 // Analytics
 import { initAnalytics, trackPageView } from './utils/analytics';
@@ -32,13 +29,11 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import AdminPanel from './pages/AdminPanel';
 
-// ==========================================
-// 1. 主頁面組件 (用戶端 Dashboard)
-// ==========================================
-const MainDashboard = () => {
-  // 🔥 2. 使用翻譯 Hook
-  const { t } = useLanguage();
+// 🔥 Language
+import { useLanguage } from './context/LanguageContext';
 
+const MainDashboard = () => {
+  const { t } = useLanguage();
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
     isScreensLoading, filteredScreens,
@@ -49,11 +44,9 @@ const MainDashboard = () => {
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
     occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     
-    // 限制與警報相關
     restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction,
     isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,
 
-    // Setters & Handlers
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted, setCurrentOrderId,
@@ -62,27 +55,20 @@ const MainDashboard = () => {
     initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
     resumePayment, handleUpdateBid, recalculateAllBids,
     
-    // Helpers
     HOURS, getHourTier, existingBids
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [restrictionAgreed, setRestrictionAgreed] = useState(false);
 
-  // 隱藏的文件上傳觸發器
   const handleUploadClick = (orderId) => {
     if (setCurrentOrderId) setCurrentOrderId(orderId);
     localStorage.setItem('temp_order_id', orderId);
     const fileInput = document.getElementById('hidden-file-input');
-    if (fileInput) {
-        fileInput.value = ''; 
-        fileInput.click();
-    }
+    if (fileInput) { fileInput.value = ''; fileInput.click(); }
   };
 
-  useEffect(() => {
-    if (restrictionModalData) setRestrictionAgreed(false);
-  }, [restrictionModalData]);
+  useEffect(() => { if (restrictionModalData) setRestrictionAgreed(false); }, [restrictionModalData]);
 
   return (
     <>
@@ -102,7 +88,6 @@ const MainDashboard = () => {
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shadow-lg shadow-blue-200">1</div>
-                {/* 🔥 翻譯 */}
                 <h2 className="text-xl font-bold text-slate-800">{t('step_1_title')}</h2>
               </div>
               <ScreenSelector 
@@ -121,7 +106,6 @@ const MainDashboard = () => {
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shadow-lg shadow-blue-200">2</div>
-                  {/* 🔥 翻譯 */}
                   <h2 className="text-xl font-bold text-slate-800">{t('step_2_title')}</h2>
                 </div>
                 <DateSelector 
@@ -136,7 +120,6 @@ const MainDashboard = () => {
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shadow-lg shadow-blue-200">3</div>
-                  {/* 🔥 翻譯 */}
                   <h2 className="text-xl font-bold text-slate-800">{t('step_3_title')}</h2>
                 </div>
                 <TimeSlotSelector 
@@ -158,28 +141,13 @@ const MainDashboard = () => {
               handleBuyoutClick={handleBuyoutClick} 
             />
             
-            {/* Privacy & Terms Links */}
-            <div className="mt-6 pt-6 border-t border-slate-200 text-center">
-              {/* 🔥 翻譯 */}
-              <p className="text-xs text-slate-400 mb-2">{t('sidebar_info')}</p>
-              <div className="flex justify-center gap-4 text-xs font-bold text-slate-500">
-                <Link to="/terms" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
-                  <FileText size={12}/> {t('term_link')}
-                </Link>
-                <span className="text-slate-300">|</span>
-                <Link to="/privacy" className="flex items-center gap-1 hover:text-slate-900 hover:underline transition-colors">
-                  <Shield size={12}/> {t('privacy_link')}
-                </Link>
-              </div>
-            </div>
-
+            {/* ❌ 這裡移除了重複的 Terms & Privacy 連結，保持介面乾淨 */}
           </aside>
         </div>
       </main>
 
       <Footer />
 
-      {/* Hidden File Input */}
       <input type="file" id="hidden-file-input" style={{ display: 'none' }} accept="video/*" onChange={handleRealUpload} />
 
       {/* --- Modals --- */}
@@ -188,7 +156,6 @@ const MainDashboard = () => {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center relative overflow-hidden">
              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-red-500"></div>
              <div className="mb-5 flex justify-center"><div className="bg-orange-50 p-4 rounded-full border border-orange-100"><Clock size={40} className="text-orange-500" /></div></div>
-              {/* 🔥 翻譯 */}
               <h3 className="text-xl font-bold text-slate-800 mb-2">{t('modal_time_mismatch_title')}</h3>
               <p className="text-slate-500 text-sm mb-6 leading-relaxed">{t('modal_time_mismatch_desc')}</p>
               <button onClick={() => setIsTimeMismatchModalOpen(false)} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200">{t('btn_understand')}</button>
@@ -199,19 +166,11 @@ const MainDashboard = () => {
       {restrictionModalData && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border-2 border-red-100 flex flex-col gap-4">
-            <div className="flex items-center gap-3 border-b pb-4"><div className="bg-red-100 p-2 rounded-full"><AlertTriangle className="text-red-600" size={24}/></div>
-              {/* 🔥 翻譯 */}
-              <h3 className="text-xl font-bold text-red-700">{t('modal_restriction_title')}</h3>
-            </div>
+            <div className="flex items-center gap-3 border-b pb-4"><div className="bg-red-100 p-2 rounded-full"><AlertTriangle className="text-red-600" size={24}/></div><h3 className="text-xl font-bold text-red-700">{t('modal_restriction_title')}</h3></div>
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">{restrictionModalData.screens.map(s => (<div key={s.id} className="bg-red-50 p-4 rounded-lg border border-red-100"><h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2"><Monitor size={16}/> {s.name}</h4><p className="text-sm text-red-600 leading-relaxed font-bold">{s.restrictions}</p></div>))}</div>
             <div className="pt-4 border-t flex flex-col gap-3">
-              <label className="flex items-start gap-3 cursor-pointer group"><input type="checkbox" className="mt-1 w-4 h-4" checked={restrictionAgreed} onChange={(e) => setRestrictionAgreed(e.target.checked)} />
-              {/* 🔥 翻譯 */}
-              <span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">{t('modal_restriction_agree')}</span></label>
-              <div className="flex gap-3 mt-2">
-                <button onClick={() => setRestrictionModalData(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-200">{t('btn_cancel')}</button>
-                <button onClick={() => { if(restrictionAgreed) handleProceedAfterRestriction(); else alert("請先勾選同意條款"); }} className={`flex-1 py-3 rounded-lg font-bold shadow-lg transition-all ${restrictionAgreed ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>{t('btn_confirm_continue')}</button>
-              </div>
+              <label className="flex items-start gap-3 cursor-pointer group"><input type="checkbox" className="mt-1 w-4 h-4" checked={restrictionAgreed} onChange={(e) => setRestrictionAgreed(e.target.checked)} /><span className="text-sm text-slate-600 group-hover:text-slate-800 transition-colors">{t('modal_restriction_agree')}</span></label>
+              <div className="flex gap-3 mt-2"><button onClick={() => setRestrictionModalData(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-200">{t('btn_cancel')}</button><button onClick={() => { if(restrictionAgreed) handleProceedAfterRestriction(); else alert("請先勾選同意條款"); }} className={`flex-1 py-3 rounded-lg font-bold shadow-lg transition-all ${restrictionAgreed ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>{t('btn_confirm_continue')}</button></div>
             </div>
           </div>
         </div>
@@ -223,26 +182,20 @@ const MainDashboard = () => {
             {transactionStep === 'summary' && pendingTransaction ? (
                 <>
                     <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle size={32} /></div>
-                    {/* 🔥 翻譯 */}
                     <h3 className="text-xl font-bold text-slate-800 mb-2">{t('txn_confirm_title')}</h3>
-                    <p className="text-slate-500 text-sm mb-6">
-                      {t('txn_type_label')}: <span className="font-bold text-slate-700">{pendingTransaction.type === 'buyout' ? t('txn_type_buyout') : t('txn_type_bid')}</span><br/>
-                      {t('txn_slot_count', { count: pendingTransaction.slotCount })}
-                    </p>
+                    <p className="text-slate-500 text-sm mb-6">{t('txn_type_label')}: <span className="font-bold text-slate-700">{pendingTransaction.type === 'buyout' ? t('txn_type_buyout') : t('txn_type_bid')}</span><br/>{t('txn_slot_count', { count: pendingTransaction.slotCount })}</p>
                     <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100"><span className="text-xs text-slate-400 block mb-1">{t('txn_total')}</span><span className="text-3xl font-black text-blue-600">HK$ {pendingTransaction.amount.toLocaleString()}</span></div>
                     <button onClick={processPayment} className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-slate-200 transition-all active:scale-95 mb-3">{t('btn_pay')}</button>
                     <button onClick={closeTransaction} className="text-sm text-slate-400 font-bold hover:text-slate-600">{t('btn_back_edit')}</button>
                 </>
             ) : (
-                <div className="py-10"><Loader2 className="animate-spin text-blue-600 mx-auto mb-6" size={48}/>
-                <h3 className="text-lg font-bold text-slate-800 mb-2">{t('processing_title')}</h3>
-                <p className="text-slate-500 text-sm">{t('processing_desc')}</p></div>
+                <div className="py-10"><Loader2 className="animate-spin text-blue-600 mx-auto mb-6" size={48}/><h3 className="text-lg font-bold text-slate-800 mb-2">{t('processing_title')}</h3><p className="text-slate-500 text-sm">{t('processing_desc')}</p></div>
             )}
           </div>
         </div>
       )}
 
-      {/* Modals - 無需修改，因為主要 UI 在內部處理 */}
+      {/* Modals */}
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
       <MyOrdersModal 
@@ -259,19 +212,10 @@ const MainDashboard = () => {
   );
 };
 
-// ==========================================
-// 2. App Root Component
-// ==========================================
 const App = () => {
   const location = useLocation();
-
-  useEffect(() => {
-    initAnalytics();
-  }, []);
-
-  useEffect(() => {
-    trackPageView(location.pathname + location.search);
-  }, [location]);
+  useEffect(() => { initAnalytics(); }, []);
+  useEffect(() => { trackPageView(location.pathname + location.search); }, [location]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
