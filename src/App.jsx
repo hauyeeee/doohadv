@@ -5,12 +5,11 @@ import ReactPixel from 'react-facebook-pixel';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
-// 🔥 2. 加呢幾行：引入 Context 同埋其他頁面
-// (請確保路徑正確，AdminPanel 係用 ../context，所以 App.jsx 應該係 ./context)
+// 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
 import { LanguageProvider } from './context/LanguageContext';
-import AdminPanel from './AdminPanel';
-import Privacy from './Privacy';
-import Terms from './Terms';
+import AdminPanel from './pages/AdminPanel'; // 改咗呢度
+import Privacy from './pages/Privacy';       // 改咗呢度
+import Terms from './pages/Terms';           // 改咗呢度
 
 // Components
 import Header from './components/Header';
@@ -319,33 +318,23 @@ const DOOHBiddingSystem = () => {
 // 🔥 重點修改：在檔案最底部，加入這個新的 App 組件
 // =================================================================
 
+// =================================================================
+// 🔥 3. 新的 APP 組件：負責路由控制
+// =================================================================
 const App = () => {
   return (
-    // 1. 包裹 LanguageProvider (AdminPanel 需要用)
     <LanguageProvider>
-      
-      {/* 2. 包裹 BrowserRouter (啟用路由) */}
       <BrowserRouter>
         <Routes>
-          
-          {/* 設定首頁 (顯示原本的競價系統) */}
           <Route path="/" element={<DOOHBiddingSystem />} />
-          
-          {/* 設定 Admin 頁面 */}
           <Route path="/admin" element={<AdminPanel />} />
-          
-          {/* 設定條款頁面 */}
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
-          
-          {/* 404 處理：亂打網址就跳回首頁 */}
           <Route path="*" element={<Navigate to="/" replace />} />
-          
         </Routes>
       </BrowserRouter>
     </LanguageProvider>
   );
 };
 
-// 🔥 最後 export 的是新的 App，而不是原本的 DOOHBiddingSystem
 export default App;
