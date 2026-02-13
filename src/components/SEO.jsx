@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react'; 
-import { Routes, Route, Navigate } from 'react-router-dom'; // 1. 引入路由
+// 1. 移除 BrowserRouter，只保留 Routes, Route, Navigate
+import { Routes, Route, Navigate } from 'react-router-dom'; 
 
 import ReactGA from "react-ga4"; 
 import ReactPixel from 'react-facebook-pixel'; 
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
-// 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
+// 修正 Import 路徑 (指向 src/pages/)
 import { LanguageProvider } from './context/LanguageContext';
-import AdminPanel from './pages/AdminPanel'; // 改咗呢度
-import Privacy from './pages/Privacy';       // 改咗呢度
-import Terms from './pages/Terms';           // 改咗呢度
+import AdminPanel from './pages/AdminPanel';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 
 // Components
 import Header from './components/Header';
@@ -28,7 +29,7 @@ import BuyoutModal from './components/BuyoutModal';
 import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
-// 2. 設定 ID
+// 設定 ID
 const GA_MEASUREMENT_ID = "G-N9L2TJMQC8";
 const FB_PIXEL_ID = "1744389019702374";
 
@@ -305,17 +306,19 @@ const DOOHBiddingSystem = () => {
 
 // =================================================================
 // 🔥 3. 新的 APP 組件：負責路由控制
+// ⚠️ 注意：這裡移除了 <BrowserRouter>，因為你的 main.jsx 已經有了
 // =================================================================
 const App = () => {
   return (
     <LanguageProvider>
-        <Routes>
-          <Route path="/" element={<DOOHBiddingSystem />} />
-          <Route path="/admin" element={<AdminPanel />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+      {/* 移除了 BrowserRouter */}
+      <Routes>
+        <Route path="/" element={<DOOHBiddingSystem />} />
+        <Route path="/admin" element={<AdminPanel />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </LanguageProvider>
   );
 };
