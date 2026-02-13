@@ -3,6 +3,8 @@ import ReactGA from "react-ga4";
 import ReactPixel from 'react-facebook-pixel'; 
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
+import { initAnalytics } from './utils/analytics';
+
 
 // Components
 import Header from './components/Header';
@@ -21,7 +23,7 @@ import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
 // 2. 設定 ID
-const GA_MEASUREMENT_ID = "G-N9L2TJMQC8";
+const GA_MEASUREMENT_ID = "G-VRKLQ7YK5G";
 const FB_PIXEL_ID = "1744389019702374"; // 🔥 已更新為你的 Pixel ID
 
 // 初始化 GA4
@@ -88,6 +90,7 @@ const DOOHBiddingSystem = () => {
         });
         console.log("💰 Pixel Purchase Event Fired!");
     }
+initAnalytics();
 
   }, []);
 
