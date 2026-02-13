@@ -57,7 +57,7 @@ const MainDashboard = () => {
     resumePayment, handleUpdateBid, recalculateAllBids,
     
     // Helpers
-    HOURS, getHourTier, existingBids
+    HOURS, getHourTier, existingBids, isDateAllowed
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
