@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react'; 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import ReactGA from "react-ga4"; 
 import ReactPixel from 'react-facebook-pixel'; 
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
 // 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
-import { LanguageProvider } from './context/LanguageContext';
 import AdminPanel from './pages/AdminPanel'; // 改咗呢度
 import Privacy from './pages/Privacy';       // 改咗呢度
 import Terms from './pages/Terms';           // 改咗呢度
@@ -315,6 +314,8 @@ const DOOHBiddingSystem = () => {
 };
 
 // =================================================================
+// 🔥 3. 新的 APP 組件：負責路由控制
+// =================================================================
 // 🔥 重點修改：在檔案最底部，加入這個新的 App 組件
 // =================================================================
 
@@ -323,8 +324,7 @@ const DOOHBiddingSystem = () => {
 // =================================================================
 const App = () => {
   return (
-    <LanguageProvider>
-      <BrowserRouter>
+
         <Routes>
           <Route path="/" element={<DOOHBiddingSystem />} />
           <Route path="/admin" element={<AdminPanel />} />
@@ -332,8 +332,6 @@ const App = () => {
           <Route path="/terms" element={<Terms />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </BrowserRouter>
-    </LanguageProvider>
   );
 };
 
