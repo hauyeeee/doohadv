@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'; 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'; // 1. 引入路由
+import { Routes, Route, Navigate } from 'react-router-dom'; // 1. 引入路由
 
 import ReactGA from "react-ga4"; 
 import ReactPixel from 'react-facebook-pixel'; 
@@ -309,7 +309,6 @@ const DOOHBiddingSystem = () => {
 const App = () => {
   return (
     <LanguageProvider>
-      <BrowserRouter>
         <Routes>
           <Route path="/" element={<DOOHBiddingSystem />} />
           <Route path="/admin" element={<AdminPanel />} />
@@ -317,7 +316,6 @@ const App = () => {
           <Route path="/terms" element={<Terms />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </BrowserRouter>
     </LanguageProvider>
   );
 };
