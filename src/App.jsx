@@ -13,7 +13,7 @@ import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
 import PricingSummary from './components/PricingSummary';
 import Footer from './components/Footer';
-import SEO from './components/SEO';
+
 import TutorialModal from './components/TutorialModal';
 
 // Modals
@@ -250,7 +250,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      <SEO />
+     
       <Routes>
         <Route path="/" element={<MainDashboard />} />
         <Route path="/admin" element={<AdminPanel />} />

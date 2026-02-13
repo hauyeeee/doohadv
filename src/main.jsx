@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { HelmetProvider } from 'react-helmet-async'; // 🔥 1. 必須引入這個
+
 import App from './App';
 import './index.css';
 import { LanguageProvider } from './context/LanguageContext';
