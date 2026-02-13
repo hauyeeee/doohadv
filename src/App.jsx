@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'; 
 import ReactGA from "react-ga4"; 
 import ReactPixel from 'react-facebook-pixel'; 
+import { useLocation } from 'react-router-dom'; // 👈 確保你有用 Router，用來追蹤頁面跳轉
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { initAnalytics } from './utils/analytics';
@@ -30,6 +31,7 @@ const FB_PIXEL_ID = "1744389019702374"; // 🔥 已更新為你的 Pixel ID
 ReactGA.initialize(GA_MEASUREMENT_ID);
 
 const DOOHBiddingSystem = () => {
+    const location = useLocation(); // 👈 獲取當前路徑
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
     isScreensLoading, filteredScreens,
