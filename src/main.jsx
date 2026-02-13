@@ -9,7 +9,7 @@ import { LanguageProvider } from './context/LanguageContext';
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {/* 🔥 2. 最外層必須包 HelmetProvider，否則會白屏報錯 'add' undefined */}
-    <HelmetProvider>
+    
       <LanguageProvider>
         <BrowserRouter>
           {/* 🔥 3. 這裡只需要放 <App /> 
