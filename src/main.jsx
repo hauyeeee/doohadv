@@ -1,23 +1,19 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-
-import App from './App';
-import './index.css';
-import { LanguageProvider } from './context/LanguageContext';
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css' // 確保你有引入 Tailwind 嘅 CSS
+import { BrowserRouter } from 'react-router-dom'
+import { HelmetProvider } from 'react-helmet-async' // 🔥 必須：為 SEO.jsx 提供 Context
+import { LanguageProvider } from './context/LanguageContext' // 🔥 必須：為翻譯功能提供 Context
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {/* 🔥 2. 最外層必須包 HelmetProvider，否則會白屏報錯 'add' undefined */}
-    
+    <HelmetProvider>
       <LanguageProvider>
         <BrowserRouter>
-          {/* 🔥 3. 這裡只需要放 <App /> 
-             因為你在 App.jsx 裡面已經設定好了 <Routes> 和所有頁面路徑 
-             如果在這邊再寫 Route，會導致路由重複或混亂 
-          */}
           <App />
         </BrowserRouter>
       </LanguageProvider>
+    </HelmetProvider>
   </React.StrictMode>,
-);
+)
