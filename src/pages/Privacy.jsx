@@ -5,7 +5,7 @@ const Privacy = () => {
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl p-8 sm:p-12 border border-slate-100">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">私隱政策</h1>
-        <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月11日</p>
+        <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月14日</p>
 
         <div className="space-y-8 text-slate-700 leading-relaxed">
           <p>Huntarmpeople Limited ("本公司") 重視閣下的私隱。本政策說明我們如何收集及使用閣下的資料。</p>
@@ -44,8 +44,14 @@ const Privacy = () => {
             <p>我們使用業界標準的加密技術（SSL）及安全的雲端服務（Google Firebase）來保護閣下的資料。</p>
           </section>
 
+          {/* 🔥 新增資料保留段落 */}
           <section>
-            <h2 className="text-xl font-bold text-slate-900 mb-3 border-b pb-2">5. 聯絡我們</h2>
+            <h2 className="text-xl font-bold text-slate-900 mb-3 border-b pb-2">5. 資料保留與刪除</h2>
+            <p>我們只會在達成本政策所述目的之必要期間內保留閣下的個人資料。播放完成的廣告影片素材將於播放期結束後 30 天內自動從我們的伺服器中刪除。如閣下希望刪除帳戶及相關資料，請透過電郵與我們聯絡。</p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-bold text-slate-900 mb-3 border-b pb-2">6. 聯絡我們</h2>
             <p>如對本政策有任何疑問，請聯絡 Huntarmpeople Limited。</p>
           </section>
         </div>

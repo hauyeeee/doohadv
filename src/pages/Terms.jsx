@@ -5,7 +5,7 @@ const Terms = () => {
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl p-8 sm:p-12 border border-slate-100">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">條款及細則</h1>
-        <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月11日</p>
+        <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月14日</p>
 
         <div className="space-y-8 text-slate-700 leading-relaxed">
           <section>
@@ -29,7 +29,7 @@ const Terms = () => {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-slate-900 mb-3 border-b pb-2">3. 廣告內容政策</h2>
+            <h2 className="text-xl font-bold text-slate-900 mb-3 border-b pb-2">3. 廣告內容政策與審核</h2>
             <p className="mb-2">為保障公眾利益及屏幕擁有者權益，所有上傳之影片必須經過審核。<strong>嚴禁上傳以下內容：</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-red-600 font-medium">
               <li>色情、暴力、血腥、恐怖內容。</li>
@@ -37,7 +37,10 @@ const Terms = () => {
               <li>侵犯版權（如未經授權的音樂、商標）的內容。</li>
               <li>虛假或誤導性內容。</li>
             </ul>
-            <p className="mt-2 text-sm bg-slate-100 p-3 rounded"><strong>權利保留：</strong> Huntarmpeople Limited 保留最終決定權。如廣告內容被判定違規，我們有權拒絕播放並取消訂單，且不承擔任何因此造成的損失。</p>
+            {/* 🔥 優化退款與重交通知 */}
+            <p className="mt-2 text-sm bg-slate-100 p-3 rounded">
+              <strong>權利保留與審核失敗處理：</strong> Huntarmpeople Limited 保留最終決定權。如廣告內容被判定違規，我們有權拒絕播放。<strong>若因素材違規被拒，閣下將有一次機會於播放前重新提交修改後的素材。</strong> 若最終仍未能通過審核或逾期未交，該訂單將被取消，且款項將不予退還。
+            </p>
           </section>
 
           <section>
