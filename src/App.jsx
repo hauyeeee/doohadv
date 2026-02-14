@@ -11,6 +11,7 @@ import AdminPanel from './pages/AdminPanel'; // 改咗呢度
 import Privacy from './pages/Privacy';       // 改咗呢度
 import Terms from './pages/Terms';           // 改咗呢度
 import SEO from './components/SEO';
+import Footer from './components/Footer';
 
 
 // Components
@@ -174,6 +175,10 @@ const DOOHBiddingSystem = () => {
         />
       </main>
 
+      {/* 🔥 在這裡加入 Footer！緊貼在 main 下方，Modals 之前 */}
+      <Footer />
+
+{/* 隱藏的檔案上傳區塊 */}
       <input 
         type="file" 
         id="hidden-file-input" 
