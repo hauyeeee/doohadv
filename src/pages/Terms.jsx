@@ -1,8 +1,13 @@
 import React from 'react';
+import SEO from '../components/SEO';
 
 const Terms = () => {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
+      <SEO 
+        title="條款及細則" 
+        description="Huntarmpeople Limited DOOH Advertising Platform 的服務條款及細則。" 
+      />
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl p-8 sm:p-12 border border-slate-100">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">條款及細則</h1>
         <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月14日</p>

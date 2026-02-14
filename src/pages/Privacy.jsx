@@ -1,8 +1,13 @@
 import React from 'react';
+import SEO from '../components/SEO';
 
 const Privacy = () => {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6">
+      <SEO 
+        title="私隱政策" 
+        description="了解 Huntarmpeople Limited 如何收集及使用閣下的資料。" 
+      />
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl p-8 sm:p-12 border border-slate-100">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">私隱政策</h1>
         <p className="text-slate-500 text-sm mb-8">最後更新日期：2026年2月14日</p>
