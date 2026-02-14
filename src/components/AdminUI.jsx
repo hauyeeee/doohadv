@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { 
   Loader2, X, MapPin, Layers, Image as ImageIcon, FileText, Map, Clock, 
-  Copy, Save, CheckCircle, UploadCloud, AlertCircle, Trophy, Monitor, AlertTriangle, Eye, EyeOff, Edit
+  Copy, Save, CheckCircle, UploadCloud, AlertCircle, Trophy, Monitor, AlertTriangle
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '../firebase'; // 確保路徑正確指向你的 firebase.js
+import { storage } from '../firebase'; 
 
 const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -74,16 +73,13 @@ export const StatusBadge = ({ status }) => {
 
 // --- 彈出視窗 (Modals) ---
 export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleApplyToAllDays, toggleTierHour, activeDayTab, setActiveDayTab, onSave, onImageUpload, isUploading }) => {
-  // 🔥 新增：管理影片上傳狀態
   const [uploadingField, setUploadingField] = useState(null);
 
-  // 🔥 新增：直接上傳影片到 Firebase Storage 的功能
   const uploadVideoFile = async (e, fieldName) => {
     const file = e.target.files[0];
     if (!file) return;
     setUploadingField(fieldName);
     try {
-      // 將影片存放在 screens_videos 資料夾，檔名加上 timestamp 防重複
       const storageRef = ref(storage, `screens_videos/${Date.now()}_${file.name}`);
       const uploadTask = uploadBytesResumable(storageRef, file);
 
@@ -96,7 +92,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
         },
         async () => {
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          setData({ ...data, [fieldName]: downloadURL }); // 上傳完自動填入網址
+          setData({ ...data, [fieldName]: downloadURL }); 
           setUploadingField(null);
         }
       );
@@ -125,7 +121,6 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">區域 (District)</label><input type="text" value={data.district} onChange={e => setData({...data, district: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Central"/></div>
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Bundle Group (Optional)</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Layers size={14} className="text-slate-400"/><input type="text" value={data.bundleGroup} onChange={e => setData({...data, bundleGroup: e.target.value})} className="w-full text-sm outline-none" placeholder="e.g. central_network"/></div><p className="text-[10px] text-slate-400 mt-1">相同 Bundle Group ID 的屏幕會自動組成聯播網。</p></div>
                     
-                    {/* 圖片集上傳 */}
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
                             <ImageIcon size={12}/> 圖片集 (最多 3 張)
@@ -209,7 +204,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                         </div>
                     </div>
 
-                    {/* 🔥🔥🔥 全新：播片控制項 + 一鍵上傳 🔥🔥🔥 */}
+                    {/* 播片控制項 + 一鍵上傳 */}
                     <div className="col-span-2 border-t pt-4 mt-2">
                         <h4 className="text-xs font-bold text-slate-400 mb-3 uppercase flex items-center gap-1">
                           播片控制 (Player Control)
@@ -229,7 +224,6 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                                         className="flex-1 border rounded px-3 py-2 text-sm bg-white outline-none focus:ring-2 ring-blue-100" 
                                         placeholder="輸入 mp4 網址或按右方上傳..."
                                     />
-                                    {/* 🔥 新增的上傳按鈕 */}
                                     <div className="relative group shrink-0">
                                         <input 
                                             type="file" 
@@ -239,7 +233,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                                             disabled={uploadingField === 'defaultVideo'}
                                         />
                                         <button type="button" className={`h-full px-3 rounded border border-slate-200 bg-white hover:bg-blue-50 text-blue-600 transition-colors flex items-center justify-center gap-1 ${uploadingField === 'defaultVideo' ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                            {uploadingField === 'defaultVideo' ? <Loader2 size={16} className="animate-spin"/> : <><UploadCloud size={16}/> <span className="text-xs font-bold">上傳影片</span></>}
+                                            {uploadingField === 'defaultVideo' ? <Loader2 size={16} className="animate-spin"/> : <><UploadCloud size={16}/> <span className="text-xs font-bold">上傳</span></>}
                                         </button>
                                     </div>
                                 </div>
@@ -258,7 +252,6 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                                         className="flex-1 border border-red-300 rounded px-3 py-2 text-sm bg-white text-red-700 outline-none focus:ring-2 ring-red-200" 
                                         placeholder="留空代表全自動運作。輸入網址即強制轉播！"
                                     />
-                                    {/* 🔥 新增的上傳按鈕 */}
                                     <div className="relative group shrink-0">
                                         <input 
                                             type="file" 
@@ -268,7 +261,7 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                                             disabled={uploadingField === 'emergencyOverride'}
                                         />
                                         <button type="button" className={`h-full px-3 rounded border border-red-200 bg-white hover:bg-red-50 text-red-600 transition-colors flex items-center justify-center gap-1 ${uploadingField === 'emergencyOverride' ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                            {uploadingField === 'emergencyOverride' ? <Loader2 size={16} className="animate-spin"/> : <><UploadCloud size={16}/> <span className="text-xs font-bold">上傳影片</span></>}
+                                            {uploadingField === 'emergencyOverride' ? <Loader2 size={16} className="animate-spin"/> : <><UploadCloud size={16}/> <span className="text-xs font-bold">上傳</span></>}
                                         </button>
                                     </div>
                                 </div>
@@ -297,6 +290,49 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                 <button onClick={onSave} className="px-6 py-2 rounded text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-2">
                     <Save size={16}/> {isEdit ? '儲存變更' : '建立屏幕'}
                 </button>
+            </div>
+        </div>
+    </div>
+  );
+};
+
+// 🔥 原本遺失的 SlotGroupModal 🔥
+export const SlotGroupModal = ({ group, onClose, onReview, onMarkScheduled }) => {
+  if (!group) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+                <h3 className="font-bold flex items-center gap-2 text-sm">
+                    <Clock size={16}/> 時段詳情: {group[0].date} {group[0].hour}:00
+                    <span className="bg-blue-600 px-2 py-0.5 rounded text-xs ml-2">{group.length} 個出價</span>
+                </h3>
+                <button onClick={onClose} className="hover:bg-slate-700 p-1 rounded"><span className="text-xl">×</span></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {group.map((slot, index) => (
+                    <div key={slot.orderId} className={`border rounded-lg p-4 flex gap-4 ${index===0 ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-200' : 'border-slate-200'}`}>
+                        <div className="flex flex-col items-center justify-center min-w-[50px] border-r border-slate-200 pr-4">
+                            {index === 0 ? <Trophy className="text-yellow-500 mb-1" size={24}/> : <span className="text-slate-400 font-bold text-lg">#{index+1}</span>}
+                            <div className="text-xs font-bold text-slate-500">{slot.price === 'Buyout' ? 'Buyout' : `$${slot.price}`}</div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start mb-2">
+                                <div><div className="font-bold text-slate-800 text-sm">{slot.userEmail}</div><div className="text-xs text-slate-500 font-mono">#{slot.orderId.slice(0,8)}</div></div>
+                                <StatusBadge status={slot.status} />
+                            </div>
+                            <div className="flex gap-4 mt-3">
+                                <div className="w-32 aspect-video bg-black rounded flex items-center justify-center overflow-hidden shrink-0">{slot.videoUrl ? <video src={slot.videoUrl} className="w-full h-full object-cover"/> : <span className="text-[10px] text-white/50">No Video</span>}</div>
+                                <div className="flex-1 flex flex-col justify-center gap-2">
+                                    {slot.displayStatus === 'review_needed' && (<button onClick={() => onReview(slot.orderId, 'approve')} className="w-full bg-red-600 hover:bg-red-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><CheckCircle size={14}/> 審核通過</button>)}
+                                    {slot.displayStatus === 'action_needed' && (<button onClick={() => onMarkScheduled(slot.orderId)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-bold flex items-center justify-center gap-2"><UploadCloud size={14}/> 確認已編排</button>)}
+                                    {slot.displayStatus === 'bidding' && (<div className="text-xs text-yellow-600 font-bold flex items-center gap-1"><Clock size={12}/> 等待結算中...</div>)}
+                                    {slot.displayStatus === 'scheduled' && (<div className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle size={12}/> Ready</div>)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     </div>
