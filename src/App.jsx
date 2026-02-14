@@ -5,10 +5,13 @@ import ReactPixel from 'react-facebook-pixel';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 
+
 // 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
 import AdminPanel from './pages/AdminPanel'; // 改咗呢度
 import Privacy from './pages/Privacy';       // 改咗呢度
 import Terms from './pages/Terms';           // 改咗呢度
+import SEO from './components/SEO';
+
 
 // Components
 import Header from './components/Header';
@@ -114,7 +117,7 @@ const DOOHBiddingSystem = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-0">
-      
+      <SEO title="DOOH Adv Platform - 自己廣告自己投平台" />
       <Header 
         user={user} 
         onLoginClick={() => setIsLoginModalOpen(true)} 
