@@ -12,6 +12,7 @@ import Privacy from './pages/Privacy';       // 改咗呢度
 import Terms from './pages/Terms';           // 改咗呢度
 import SEO from './components/SEO';
 import Footer from './components/Footer';
+import Player from './pages/Player';
 
 
 // Components
@@ -338,7 +339,9 @@ const App = () => {
           <Route path="/admin" element={<AdminPanel />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/player/:screenId" element={<Player />} />
           <Route path="*" element={<Navigate to="/" replace />} />
+          
         </Routes>
   );
 };

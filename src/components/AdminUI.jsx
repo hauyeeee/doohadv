@@ -180,6 +180,47 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleImag
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">解析度</label><input type="text" value={data.resolution} onChange={e => setData({...data, resolution: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
                         </div>
                     </div>
+{/* 🔥🔥🔥 新增：播放器控制項 (Priority 1 & 3) 🔥🔥🔥 */}
+                    <div className="col-span-2 border-t pt-4 mt-2">
+                        <h4 className="text-xs font-bold text-slate-400 mb-3 uppercase flex items-center gap-1">
+                          播片控制 (Player Control)
+                        </h4>
+                        <div className="grid grid-cols-1 gap-4">
+                            {/* Priority 3: 預設影片 */}
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                <label className="block text-xs font-bold text-slate-600 mb-1">
+                                    預設宣傳片 URL (Priority 3 - 沒人買時播放)
+                                </label>
+                                <input 
+                                    type="text" 
+                                    value={data.defaultVideo || ''} 
+                                    onChange={e => setData({...data, defaultVideo: e.target.value})} 
+                                    className="w-full border rounded px-3 py-2 text-sm bg-white outline-none focus:ring-2 ring-blue-100" 
+                                    placeholder="輸入 mp4 網址..."
+                                />
+                            </div>
+
+                            {/* Priority 1: 緊急插播 */}
+                            <div className="bg-red-50 p-3 rounded-lg border border-red-200 shadow-inner">
+                                <label className="block text-xs font-bold text-red-600 mb-1 flex items-center gap-1">
+                                    <AlertTriangle size={14}/> 緊急插播 URL (Priority 1 - 強制覆蓋)
+                                </label>
+                                <input 
+                                    type="text" 
+                                    value={data.emergencyOverride || ''} 
+                                    onChange={e => setData({...data, emergencyOverride: e.target.value})} 
+                                    className="w-full border-red-300 rounded px-3 py-2 text-sm bg-white text-red-700 outline-none focus:ring-2 ring-red-200" 
+                                    placeholder="留空代表全自動運作。輸入網址即刻全畫面強制轉播！"
+                                />
+                                <p className="text-[10px] text-red-500 mt-1">⚠️ 警告：一旦輸入，將無視所有客人的訂單，強制播放此影片直至清空為止。</p>
+                            </div>
+                        </div>
+                    </div>
+
+
+
+
+
                 </div>
                 <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700 flex items-center gap-2"><Clock size={16}/> 時段設定</h4><button onClick={handleApplyToAllDays} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold hover:bg-blue-100 flex items-center gap-1"><Copy size={12}/> 複製至所有日子</button></div>
