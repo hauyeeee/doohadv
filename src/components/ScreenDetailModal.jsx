@@ -1,5 +1,5 @@
 import React from 'react';
-import { Monitor, MapPin, X, Info, Map as MapIcon, AlertTriangle } from 'lucide-react';
+import { Monitor, MapPin, X, Info, AlertTriangle } from 'lucide-react';
 
 const ScreenDetailModal = ({ screen, onClose }) => {
   if (!screen) return null;
@@ -37,8 +37,6 @@ const ScreenDetailModal = ({ screen, onClose }) => {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-0">
-            
-            {/* 警告條 */}
             {screen.restrictions && (
                 <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
                     <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={20}/>
@@ -86,34 +84,23 @@ const ScreenDetailModal = ({ screen, onClose }) => {
             {/* Map & Specs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
                 
-                {/* 🔥 智能 Google Map 區塊 (已修復變數 $ 錯誤與 URL) 🔥 */}
+                {/* 簡單穩定版 Google Map */}
                 <div className="lg:col-span-2 h-[350px] bg-slate-100 rounded-2xl relative overflow-hidden group shadow-sm">
-                   {(() => {
-                       const mapKeyword = screen.mapEmbedUrl || screen.mapUrl || `${screen.name} ${screen.location} ${screen.district}`;
-                       
-                       if (mapKeyword && mapKeyword.trim() !== '') {
-                           // 這裡修復了 $ 符號，並使用了最標準安全的 Google Maps URL
-                           const autoEmbedUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapKeyword)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-                           
-                           return (
-                               <iframe 
-                                   src={autoEmbedUrl} 
-                                   width="100%" 
-                                   height="100%" 
-                                   className="absolute inset-0 border-0 grayscale-[20%] group-hover:grayscale-0 transition-all duration-500"
-                                   loading="lazy"
-                                   title="Google Map"
-                               ></iframe>
-                           );
-                       }
-                       
-                       return (
-                           <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">
-                               <MapIcon size={48} className="opacity-20 mb-2"/>
-                               <span>⚠️ 無法載入地圖</span>
-                           </div>
-                       );
-                   })()}
+                   {screen.mapUrl && screen.mapUrl.includes('http') ? (
+                       <iframe 
+                           src={screen.mapUrl} 
+                           width="100%" 
+                           height="100%" 
+                           className="absolute inset-0 border-0 grayscale-[20%] group-hover:grayscale-0 transition-all duration-500"
+                           loading="lazy"
+                           title="Google Map"
+                       ></iframe>
+                   ) : (
+                       <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">
+                           <MapPin size={48} className="opacity-20 mb-2"/>
+                           <span>暫無地圖資訊</span>
+                       </div>
+                   )}
                 </div>
 
                 <div className="lg:col-span-1 bg-white p-5 border rounded-2xl h-full flex flex-col justify-center shadow-sm">

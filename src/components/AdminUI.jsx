@@ -181,87 +181,37 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                         </div>
                     </div>
 
-            
+                    {/* 簡單版 Google Map Link 輸入框 */}
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1">
-                            Google Map 搜尋字眼 (選填)
+                            Google Map Embed 網址
                         </label>
-                        <div className="flex items-center gap-2 border rounded px-3 py-2">
+                        <div className="flex items-center gap-2 border rounded px-3 py-2 bg-slate-50">
                             <Map size={14} className="text-slate-400"/>
                             <input 
                                 type="text" 
                                 value={data.mapUrl || ''} 
                                 onChange={e => setData({...data, mapUrl: e.target.value})} 
-                                className="w-full text-sm outline-none" 
-                                placeholder="例如：銅鑼灣時代廣場 (留空則自動以屏幕名稱及地址搜尋)"
+                                className="w-full text-sm outline-none bg-transparent" 
+                                placeholder="例如: https://www.google.com/maps/embed?pb=..."
                             />
                         </div>
-                    </div>
-
-                    
-                    <div className="col-span-2">
-                        <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 text-red-500"><AlertTriangle size={12}/> 注意事項 / 限制條款 (Important Notes)</label>
-                        <div className="flex items-start gap-2 border border-red-200 bg-red-50 rounded px-3 py-2">
-                            <textarea rows="2" value={data.restrictions || ''} onChange={e => setData({...data, restrictions: e.target.value})} className="w-full text-sm outline-none resize-none bg-transparent text-red-700 placeholder-red-300" placeholder="例如：此屏幕位於清真餐廳旁，禁止播放豬肉相關廣告。"/>
-                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                            請在 Google Maps 點擊「分享」 {'>'} 「嵌入地圖」，並只複製 src="..." 裡面的網址。
+                        </p>
                     </div>
 
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={data.specifications} onChange={e => setData({...data, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px..."/></div></div>
                     
-                   {/* 🔥🔥🔥 全新：Google Map 即時預覽區塊 🔥🔥🔥 */}
-                    <div className="col-span-2 border p-3 rounded-xl bg-slate-50">
-                        <label className="block text-xs font-bold text-slate-600 mb-2 flex justify-between items-center">
-                            <span className="flex items-center gap-1"><Map size={14} className="text-blue-500"/> Google Map 智能定位</span>
-                            <span className="text-[10px] text-blue-600 bg-blue-100 px-2 py-0.5 rounded font-bold animate-pulse">Live Preview (即時預覽)</span>
-                        </label>
-                        
-                        <div className="flex flex-col md:flex-row gap-4">
-                            {/* 左邊：輸入框 */}
-                            <div className="flex-1 flex flex-col justify-center">
-                                <div className="flex items-center gap-2 border border-slate-300 rounded-lg px-3 py-2 bg-white focus-within:ring-2 ring-blue-100 transition-all">
-                                    <MapIcon size={16} className="text-slate-400"/>
-                                    <input 
-                                        type="text" 
-                                        value={data.mapUrl || ''} 
-                                        onChange={e => setData({...data, mapUrl: e.target.value})} 
-                                        className="w-full text-sm outline-none bg-transparent" 
-                                        placeholder="例如：銅鑼灣時代廣場"
-                                    />
-                                </div>
-                                <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                                    💡 <b>留空：</b>系統會自動用「屏幕名稱 + 位置 + 區域」去搵。<br/>
-                                    💡 <b>唔準確：</b>如果右邊預覽錯咗，請直接喺度輸入大廈名或地標。
-                                </p>
-                            </div>
-                            
-                            {/* 右邊：即時預覽地圖 */}
-                            <div className="w-full md:w-[250px] h-[150px] bg-white rounded-lg overflow-hidden border border-slate-300 relative shrink-0 shadow-inner">
-                                {(() => {
-                                    // 即時組合關鍵字：有輸入就用輸入，無就自動組合
-                                    const previewKeyword = data.mapUrl || `${data.name || ''} ${data.location || ''} ${data.district || ''}`.trim();
-                                    
-                                    if (previewKeyword) {
-                                        // 最標準、最安全嘅 Google Maps Embed URL
-                                        const previewUrl = `https://maps.google.com/maps?q=${encodeURIComponent(previewKeyword)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-                                        return (
-                                            <iframe 
-                                                src={previewUrl} 
-                                                width="100%" 
-                                                height="100%" 
-                                                className="absolute inset-0 border-0"
-                                                loading="lazy"
-                                                title="Map Preview"
-                                            ></iframe>
-                                        );
-                                    }
-                                    return (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-xs bg-slate-100">
-                                            <MapIcon size={24} className="opacity-20 mb-1"/>
-                                            <span>請輸入資料以預覽地圖</span>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
+                    <div className="col-span-2 border-t pt-4 mt-2">
+                        <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase">營銷數據</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">尺寸 (Size)</label><input type="text" value={data.size} onChange={e => setData({...data, size: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder='e.g. 32"' /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">方向 (Orientation)</label><input type="text" value={data.orientation} onChange={e => setData({...data, orientation: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g. Portrait" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">每日人流</label><input type="text" value={data.footfall} onChange={e => setData({...data, footfall: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">受眾類型</label><input type="text" value={data.audience} onChange={e => setData({...data, audience: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">播放時間</label><input type="text" value={data.operatingHours} onChange={e => setData({...data, operatingHours: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">解析度</label><input type="text" value={data.resolution} onChange={e => setData({...data, resolution: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" /></div>
                         </div>
                     </div>
 
