@@ -18,6 +18,8 @@ import {
     sendPartialOutbidEmail
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
+// 在最上方的 import 區域加入這行：
+import { trackEvent } from '../utils/analytics'; // 或者 '../analytics'
 
 export const useDoohSystem = () => {
   // --- States ---
@@ -196,6 +198,7 @@ export const useDoohSystem = () => {
   const handleGoogleLogin = async () => { 
     setIsLoginLoading(true); 
     try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`); } 
+    trackEvent("User", "Login", "Google_Login");
     catch (error) { console.error("Login Error", error); showToast(`❌ 登入失敗: ${error.message}`); } 
     finally { setIsLoginLoading(false); } 
   };
@@ -441,7 +444,8 @@ export const useDoohSystem = () => {
   
   const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
-  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); setSelectedSpecificDates(newSet); };
+  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); trackEvent("Interaction", "Select_Date", key);
+    setSelectedSpecificDates(newSet); };
   
   // --- 關鍵計算 Multiplier (遵守 String 規則) ---
   const getMultiplierForScreen = (screenId) => {
@@ -673,8 +677,15 @@ export const useDoohSystem = () => {
 
   const recalculateAllBids = async () => { console.log("Recalc"); };
 
-  const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } setTermsAccepted(false); setIsBuyoutModalOpen(true); };
+  const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
+  
+  setTermsAccepted(false); setIsBidModalOpen(true); };
+  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } 
+  if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
+  trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
+  
+  setTermsAccepted(false); setIsBuyoutModalOpen(true); };
+trackEvent("E-commerce", "Initiate_Checkout", "Bidding", pricing.currentBidTotal);
 
   const handleProceedAfterRestriction = () => {
       const type = restrictionModalData?.type || 'bid';
