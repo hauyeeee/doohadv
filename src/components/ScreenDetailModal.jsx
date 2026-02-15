@@ -99,8 +99,37 @@ const ScreenDetailModal = ({ screen, onClose }) => {
             {/* Map & Specs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
                 <div className="lg:col-span-2 h-[350px] bg-slate-100 rounded-2xl relative overflow-hidden group shadow-sm">
-                   {screen.mapEmbedUrl && screen.mapEmbedUrl.includes("google") ? 
-                      <iframe src={screen.mapEmbedUrl} width="100%" height="100%" className="absolute inset-0 border-0 grayscale-[20%] group-hover:grayscale-0 transition-all duration-500"></iframe> : 
+                   {(() => {
+                       // 🔥 自動智能搜尋邏輯 🔥
+                       // 優先使用 admin 輸入的地圖關鍵字，如果無，就自動用「屏幕名+位置+區域」去 Google 搜尋
+                       const mapKeyword = screen.mapEmbedUrl || screen.mapUrl || `${screen.name} ${screen.location} ${screen.district}`;
+                       
+                       if (mapKeyword) {
+                           // 自動轉換成 Google Maps Embed 格式 (將中文字和空格安全編碼)
+                           const autoEmbedUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapKeyword)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                           
+                           return (
+                               <iframe 
+                                   src={autoEmbedUrl} 
+                                   width="100%" 
+                                   height="100%" 
+                                   className="absolute inset-0 border-0 grayscale-[20%] group-hover:grayscale-0 transition-all duration-500"
+                                   loading="lazy"
+                                   title="Google Map"
+                               ></iframe>
+                           );
+                       }
+                       
+                       return (
+                           <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">
+                               <MapIcon size={48} className="opacity-20 mb-2"/>
+                               <span>⚠️ 無法載入地圖</span>
+                           </div>
+                       );
+                   })()}
+                </div>
+
+                
                       <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">
                          <MapIcon size={48} className="opacity-20 mb-2"/>
                          <span>⚠️ 地圖設定錯誤或未設定</span>

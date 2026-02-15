@@ -181,7 +181,23 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                         </div>
                     </div>
 
-                    <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">Google Map Link</label><div className="flex items-center gap-2 border rounded px-3 py-2"><Map size={14} className="text-slate-400"/><input type="text" value={data.mapUrl} onChange={e => setData({...data, mapUrl: e.target.value})} className="w-full text-sm outline-none" placeholder="http://maps.google.com..."/></div></div>
+            
+                    <div className="col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">
+                            Google Map 搜尋字眼 (選填)
+                        </label>
+                        <div className="flex items-center gap-2 border rounded px-3 py-2">
+                            <Map size={14} className="text-slate-400"/>
+                            <input 
+                                type="text" 
+                                value={data.mapUrl || ''} 
+                                onChange={e => setData({...data, mapUrl: e.target.value})} 
+                                className="w-full text-sm outline-none" 
+                                placeholder="例如：銅鑼灣時代廣場 (留空則自動以屏幕名稱及地址搜尋)"
+                            />
+                        </div>
+                    </div>
+
                     
                     <div className="col-span-2">
                         <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1 text-red-500"><AlertTriangle size={12}/> 注意事項 / 限制條款 (Important Notes)</label>
