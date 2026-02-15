@@ -197,8 +197,10 @@ export const useDoohSystem = () => {
   
   const handleGoogleLogin = async () => { 
     setIsLoginLoading(true); 
-    try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`); } 
-    trackEvent("User", "Login", "Google_Login");
+    try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`);
+trackEvent("User", "Login", "Google_Login");
+    } 
+    
     catch (error) { console.error("Login Error", error); showToast(`❌ 登入失敗: ${error.message}`); } 
     finally { setIsLoginLoading(false); } 
   };
@@ -683,7 +685,7 @@ export const useDoohSystem = () => {
   const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } 
   if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
   trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
-  
+
   setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 trackEvent("E-commerce", "Initiate_Checkout", "Bidding", pricing.currentBidTotal);
 
