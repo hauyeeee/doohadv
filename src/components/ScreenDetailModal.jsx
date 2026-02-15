@@ -4,19 +4,13 @@ import { Monitor, MapPin, X, Info, Map as MapIcon, AlertTriangle } from 'lucide-
 const ScreenDetailModal = ({ screen, onClose }) => {
   if (!screen) return null;
 
-  // 🔥🔥🔥 核心修復：兼容圖片讀取邏輯 🔥🔥🔥
-  // 優先嘗試讀取 images 陣列 (Admin Panel 新格式)
-  // 如果失敗，則讀取 photo1/photo2 (舊格式)
   const getImg = (index, legacyKey) => {
-      // 1. 檢查是否存在 images 陣列且該 index 有值
       if (screen.images && Array.isArray(screen.images) && screen.images[index]) {
           return screen.images[index];
       }
-      // 2. 如果沒有，嘗試讀取舊的單一欄位
       return screen[legacyKey];
   };
 
-  // 預先獲取圖片 URL
   const img1 = getImg(0, 'photo1');
   const img2 = getImg(1, 'photo2');
   const img3 = getImg(2, 'photo3');
@@ -44,7 +38,7 @@ const ScreenDetailModal = ({ screen, onClose }) => {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-0">
             
-            {/* 警告條 (如有 restrictions) */}
+            {/* 警告條 */}
             {screen.restrictions && (
                 <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
                     <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={20}/>
@@ -55,9 +49,8 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                 </div>
             )}
 
-            {/* Gallery (已修復圖片來源) */}
+            {/* Gallery */}
             <div className="grid grid-cols-1 md:grid-cols-4 md:grid-rows-2 gap-2 h-[400px] bg-black">
-                {/* 主圖 (左側大圖) */}
                 <div className="md:col-span-2 md:row-span-2 relative group">
                     {img1 ? (
                         <img src={img1} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt="Main View"/>
@@ -68,8 +61,6 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                         </div>
                     )}
                 </div>
-
-                {/* 右上小圖 */}
                 <div className="relative group">
                     {img2 ? (
                         <img src={img2} className="w-full h-full object-cover" alt="View 2"/>
@@ -79,8 +70,6 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                         </div>
                     )}
                 </div>
-
-                {/* 右下小圖 */}
                 <div className="relative group">
                     {img3 ? (
                         <img src={img3} className="w-full h-full object-cover" alt="View 3"/>
@@ -90,22 +79,20 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                         </div>
                     )}
                 </div>
-
-                {/* 裝飾用黑塊 (當螢幕變寬時填充佈局) */}
                 <div className="hidden md:block bg-slate-900"></div>
                 <div className="hidden md:block bg-slate-900"></div>
             </div>
 
             {/* Map & Specs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+                
+                {/* 🔥 智能 Google Map 區塊 (已修復變數 $ 錯誤與 URL) 🔥 */}
                 <div className="lg:col-span-2 h-[350px] bg-slate-100 rounded-2xl relative overflow-hidden group shadow-sm">
                    {(() => {
-                       // 🔥 自動智能搜尋邏輯 🔥
-                       // 優先使用 admin 輸入的地圖關鍵字，如果無，就自動用「屏幕名+位置+區域」去 Google 搜尋
                        const mapKeyword = screen.mapEmbedUrl || screen.mapUrl || `${screen.name} ${screen.location} ${screen.district}`;
                        
-                       if (mapKeyword) {
-                           // 自動轉換成 Google Maps Embed 格式 (將中文字和空格安全編碼)
+                       if (mapKeyword && mapKeyword.trim() !== '') {
+                           // 這裡修復了 $ 符號，並使用了最標準安全的 Google Maps URL
                            const autoEmbedUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapKeyword)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
                            
                            return (
@@ -129,13 +116,6 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                    })()}
                 </div>
 
-                
-                      <div className="absolute inset-0 flex items-center justify-center flex-col text-slate-400">
-                         <MapIcon size={48} className="opacity-20 mb-2"/>
-                         <span>⚠️ 地圖設定錯誤或未設定</span>
-                      </div>
-                   }
-                </div>
                 <div className="lg:col-span-1 bg-white p-5 border rounded-2xl h-full flex flex-col justify-center shadow-sm">
                     <h4 className="font-bold mb-4 flex items-center gap-2 text-lg text-slate-700"><Info size={20}/> 屏幕規格</h4>
                     <div className="space-y-4 text-sm">
@@ -158,6 +138,7 @@ const ScreenDetailModal = ({ screen, onClose }) => {
                     </div>
                 </div>
             </div>
+
         </div>
       </div>
     </div>
