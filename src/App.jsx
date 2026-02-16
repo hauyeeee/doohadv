@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react'; 
 import { Routes, Route, Navigate } from 'react-router-dom';
-import ReactGA from "react-ga4"; 
-import ReactPixel from 'react-facebook-pixel'; 
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { useLocation } from 'react-router-dom';
@@ -37,8 +35,6 @@ import UrgentUploadModal from './components/UrgentUploadModal';
 const GA_MEASUREMENT_ID = "G-BQHMNDZT2C";
 const FB_PIXEL_ID = "1744389019702374"; // 🔥 已更新為你的 Pixel ID
 
-// 初始化 GA4
-ReactGA.initialize(GA_MEASUREMENT_ID);
 
 const DOOHBiddingSystem = () => {
   const {
