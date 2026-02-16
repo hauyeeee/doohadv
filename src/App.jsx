@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { useLocation } from 'react-router-dom';
-import { initAnalytics, trackPageView } from './analytics';
+import { initAnalytics, trackPageView } from './utils/analytics';
 
 
 // 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
