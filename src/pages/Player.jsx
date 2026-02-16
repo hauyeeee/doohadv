@@ -108,10 +108,13 @@ const Player = () => {
 
   }, [screenData, activeOrders, screenId, currentMediaUrl]);
 
-  // UI 渲染
+  
+  // ... (上面所有 useEffect 邏輯保留不變) ...
+
+  // UI 渲染：載入中畫面
   if (!currentMediaUrl) {
     return (
-      <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white/50 text-sm font-mono">
+      <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white/50 text-sm font-mono fixed inset-0">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4"></div>
         Waiting for Signal...
         {!screenData && <span className="text-[10px] text-red-400 mt-2">Connecting to DB...</span>}
@@ -119,15 +122,24 @@ const Player = () => {
     );
   }
 
+  // UI 渲染：正式播放器 (加入防彈機制)
   return (
     <div className="w-screen h-screen bg-black overflow-hidden fixed inset-0">
       <video 
+        key={currentMediaUrl} // 🔥 保險 1：強迫 React 每次轉 URL 都重新建構 Video 元件
         src={currentMediaUrl} 
         autoPlay 
         loop 
-        muted 
+        muted // ⚠️ 充電寶屏幕多數無聲，muted 可確保突破瀏覽器自動播放限制
         playsInline
         className="w-full h-full object-cover" 
+        onError={(e) => {
+            // 🔥 保險 2：萬一條片死 Link 或斷網，自動 Refresh 網頁自救
+            console.error("❌ 影片載入失敗，嘗試重新載入...", e);
+            setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+        }}
       />
     </div>
   );
