@@ -4,6 +4,8 @@ import ReactGA from "react-ga4";
 import ReactPixel from 'react-facebook-pixel'; 
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
+import { useLocation } from 'react-router-dom';
+import { initAnalytics, trackPageView } from './analytics';
 
 
 // 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
@@ -322,27 +324,41 @@ const DOOHBiddingSystem = () => {
   );
 };
 
-// =================================================================
-// 🔥 3. 新的 APP 組件：負責路由控制
-// =================================================================
-// 🔥 重點修改：在檔案最底部，加入這個新的 App 組件
+/// =================================================================
+// 🔥 3. 新的 APP 組件：負責路由控制及統一觸發 GA4
 // =================================================================
 
-// =================================================================
-// 🔥 3. 新的 APP 組件：負責路由控制
-// =================================================================
+// 呢個小組件負責「每次轉網址」就話俾 GA4 同 Pixel 聽
+const AnalyticsTracker = () => {
+  const location = useLocation();
+  
+  useEffect(() => {
+    trackPageView(location.pathname + location.search);
+  }, [location]);
+  
+  return null;
+};
+
 const App = () => {
-  return (
+  // 🔥 網站一打開，即刻啟動 GA4 同 Pixel
+  useEffect(() => {
+    initAnalytics();
+  }, []);
 
-        <Routes>
-          <Route path="/" element={<DOOHBiddingSystem />} />
-          <Route path="/admin" element={<AdminPanel />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="/player/:screenId" element={<Player />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-          
-        </Routes>
+  return (
+    <>
+      {/* 必須放喺 BrowserRouter 入面 (因為你 index.jsx 應該包咗 BrowserRouter) */}
+      <AnalyticsTracker />
+      
+      <Routes>
+        <Route path="/" element={<DOOHBiddingSystem />} />
+        <Route path="/admin" element={<AdminPanel />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/player/:screenId" element={<Player />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 };
 
