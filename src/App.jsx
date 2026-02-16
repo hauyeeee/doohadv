@@ -32,7 +32,7 @@ import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
 // 2. 設定 ID
-const GA_MEASUREMENT_ID = "G-VRKLQ7YK5G";
+const GA_MEASUREMENT_ID = "G-BQHMNDZT2C";
 const FB_PIXEL_ID = "1744389019702374"; // 🔥 已更新為你的 Pixel ID
 
 // 初始化 GA4

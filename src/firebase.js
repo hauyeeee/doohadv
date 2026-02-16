@@ -11,7 +11,7 @@ const firebaseConfig = {
   storageBucket: "lkf-ad-bid.firebasestorage.app",
   messagingSenderId: "198839759397",
   appId: "1:198839759397:web:c6d8835754159a564605cc",
-  measurementId: "G-VRKLQ7YK5G"
+  measurementId: "G-BQHMNDZT2C"
 };
 
 // Initialize Firebase
