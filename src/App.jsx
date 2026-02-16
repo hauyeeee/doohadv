@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { useLocation } from 'react-router-dom';
-import { initAnalytics, trackPageView } from './utils/analytics';
+import { initAnalytics, trackPageView, trackEvent} from './utils/analytics';
 
 
 // 🔥 2. 修正 Import 路徑 (因為檔案在 pages 資料夾)
@@ -87,17 +87,10 @@ const DOOHBiddingSystem = () => {
     // C. 🔥 追蹤 Purchase 事件 (當網址包含 success=true)
     const queryParams = new URLSearchParams(window.location.search);
     if (queryParams.get('success') === 'true') {
-        // 觸發 Purchase 事件
-        // 注意：由於這是從 Stripe 跳轉回來，我們暫時用 1 作為預設價值。
-        // 如果需要精確金額，需要從 Database 取回或在 URL 傳遞，但這已足夠讓 Facebook 知道「有人俾咗錢」。
-        ReactPixel.track('Purchase', { 
-            value: 1, 
-            currency: 'HKD',
-            content_name: 'DOOH Advertising Slot' 
-        });
-        console.log("💰 Pixel Purchase Event Fired!");
+     // 統一呼叫 trackEvent，同時射俾 GA4 同 Facebook Pixel！
+        trackEvent("E-commerce", "Purchase", "DOOH_Ad_Slot", 1);
+        console.log("💰 Purchase Event Fired!");
     }
-
   }, []);
 
   // Reset agreement when modal opens
