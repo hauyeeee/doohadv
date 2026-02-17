@@ -65,6 +65,18 @@ const ScreenSelector = ({
           }
         });
 
+        // 🔥 無論有無 10米內，只要成功拎到 GPS，就先射上 GA，紀錄佢最近邊部機！
+        if (window.gtag && closestScreen) {
+          window.gtag('event', 'location_matched', {
+            'event_category': 'Offline_Tracking',
+            'screen_name': closestScreen.name,
+            'distance_meters': Math.round(minDistance),
+            'is_within_range': minDistance <= 10 ? 'yes' : 'no' // 加個參數分辦佢係咪喺現場
+          });
+          console.log(`📡 發送定位數據：最近 ${closestScreen.name}，距離 ${Math.round(minDistance)} 米`);
+        }
+
+
         if (closestScreen && minDistance <= 10) {
           if (!selectedScreens.has(closestScreen.id)) {
              toggleScreen(closestScreen.id); 
@@ -177,7 +189,16 @@ const ScreenSelector = ({
                 <tr 
                   key={screen.id} 
                   className={`transition-colors cursor-pointer hover:bg-slate-50 ${selectedScreens.has(screen.id) ? 'bg-blue-50/60' : ''}`}
-                  onClick={() => toggleScreen(screen.id)}
+                  onClick={() => {
+                     toggleScreen(screen.id);
+                     // 🔥 紀錄客人手動點擊選擇了哪個屏幕
+                     if (window.gtag && !selectedScreens.has(screen.id)) {
+                        window.gtag('event', 'select_screen', {
+                            'event_category': 'Interaction',
+                            'screen_name': screen.name
+                        });
+                     }
+                  }}
                 >
                   <td className="p-4 text-center">
                     <div className={`w-5 h-5 rounded border flex items-center justify-center mx-auto transition-all ${selectedScreens.has(screen.id) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white'}`}>
