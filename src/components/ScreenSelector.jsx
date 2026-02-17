@@ -1,21 +1,17 @@
-import React, { useState } from 'react'; // 🔥 加咗 useState
+import React, { useState, useEffect } from 'react'; // 🔥 確保 import 咗 useEffect
 import { MapPin, Info, Search } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 // 計算兩個 GPS 坐標之間嘅直線距離 (單位：米)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371e3; // 地球半徑 (米)
+  const R = 6371e3;
   const φ1 = lat1 * Math.PI / 180;
   const φ2 = lat2 * Math.PI / 180;
   const Δφ = (lat2 - lat1) * Math.PI / 180;
   const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c; // 傳回距離 (米)
+  return R * c;
 };
 
 const ScreenSelector = ({ 
@@ -23,31 +19,27 @@ const ScreenSelector = ({
   screenSearchTerm, 
   setScreenSearchTerm, 
   isScreensLoading, 
-  filteredScreens, // 👉 呢個就係屏幕列表
-  toggleScreen,    // 👉 呢個就係揀屏幕嘅 Function
+  filteredScreens, 
+  toggleScreen, 
   setViewingScreen 
 }) => {
   const { t, lang } = useLanguage();
-  
-  // 🔥 1. 加個 State 記住係咪 Load 緊 GPS
   const [isLocating, setIsLocating] = useState(false);
 
-  // 安全翻譯函數
   const safeT = (key, defaultText) => {
       const text = t(key);
       return text === key ? defaultText : text;
   };
 
-  // 🔥 2. 尋找最近屏幕嘅核心邏輯
-  const handleFindNearestScreen = () => {
+  // 🔥 尋找最近屏幕嘅核心邏輯 (抽離出嚟方便隨時 Call)
+  const handleFindNearestScreen = (isAutoTrigger = false) => {
     if (!navigator.geolocation) {
-      alert(lang === 'en' ? "Your browser does not support GPS." : "你的瀏覽器不支援 GPS 定位功能！");
+      if (!isAutoTrigger) alert(lang === 'en' ? "Your browser does not support GPS." : "你的瀏覽器不支援 GPS 定位功能！");
       return;
     }
 
-    setIsLocating(true); // 轉圈圈動畫開始
+    setIsLocating(true);
 
-    // 強制開啟高精度模式 (要求精準到幾米內)
     const options = {
       enableHighAccuracy: true,
       timeout: 10000,
@@ -56,14 +48,13 @@ const ScreenSelector = ({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setIsLocating(false); // 轉圈圈動畫完結
+        setIsLocating(false);
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
 
         let closestScreen = null;
         let minDistance = Infinity;
 
-        // 逐部機對比距離 (用你傳入嚟嘅 filteredScreens)
         filteredScreens.forEach((screen) => {
           if (screen.lat && screen.lng) {
             const distance = calculateDistance(userLat, userLng, screen.lat, screen.lng);
@@ -74,20 +65,20 @@ const ScreenSelector = ({
           }
         });
 
-        // 判斷：設定 50 米內先算係「喺現場」(你可以自己調較呢個數字)
-        if (closestScreen && minDistance <= 50) {
-          
-          // 👉 動作 1：自動幫客揀定呢部機！(如果未揀嘅話)
+        if (closestScreen && minDistance <= 10) {
           if (!selectedScreens.has(closestScreen.id)) {
              toggleScreen(closestScreen.id); 
           }
           
-          alert(lang === 'en' 
-            ? `📍 Found the nearest screen: ${closestScreen.name} (${Math.round(minDistance)}m away)`
-            : `📍 已為你定位到最近的屏幕：${closestScreen.name} (相距 ${Math.round(minDistance)} 米)`
-          );
+          // 如果係手動撳掣先彈 Alert，自動彈就靜靜雞幫佢揀就得，費事煩
+          if (!isAutoTrigger) {
+             alert(lang === 'en' 
+                ? `📍 Found the nearest screen: ${closestScreen.name} (${Math.round(minDistance)}m away)`
+                : `📍 已為你定位到最近的屏幕：${closestScreen.name} (相距 ${Math.round(minDistance)} 米)`
+             );
+          }
 
-          // 👉 動作 2：靜靜雞射個 Event 上 GA4
+          // 👉 動作 2：射個 Event 上 GA4
           if (window.gtag) {
             window.gtag('event', 'location_matched', {
               'event_category': 'Offline_Tracking',
@@ -96,34 +87,44 @@ const ScreenSelector = ({
             });
             console.log(`✅ 成功射上 GA4：${closestScreen.name}`);
           }
-          
         } else {
-          alert(lang === 'en'
-            ? "No screens found within 50 meters. Please select from the list."
-            : "你附近 50 米內暫時未有屏幕，請在列表自行選擇！"
-          );
+          if (!isAutoTrigger) {
+             alert(lang === 'en' ? "No screens found within 50 meters. Please select from the list." : "你附近 50 米內暫時未有屏幕，請在列表自行選擇！");
+          }
         }
       },
       (error) => {
         setIsLocating(false);
         console.error("定位失敗", error);
-        if (error.code === 1) {
-          alert(lang === 'en' ? "Location permission denied." : "你拒絕了提供位置權限，無法使用自動定位功能。");
-        } else {
-          alert(lang === 'en' ? "Failed to get location. Is GPS turned on?" : "無法獲取你的位置，請確保手機 GPS 功能已開啟。");
+        if (!isAutoTrigger) {
+           if (error.code === 1) alert(lang === 'en' ? "Location permission denied." : "你拒絕了提供位置權限，無法使用自動定位功能。");
+           else alert(lang === 'en' ? "Failed to get location. Is GPS turned on?" : "無法獲取你的位置，請確保手機 GPS 功能已開啟。");
         }
       },
       options
     );
   };
 
+  // 🔥 新增：一入網頁就自動觸發 (配合 SessionStorage 記憶)
+  useEffect(() => {
+    // 確保屏幕資料已經 Load 完，而且未試過自動定位
+    if (!isScreensLoading && filteredScreens.length > 0) {
+      const hasAutoLocated = sessionStorage.getItem('hasAutoLocated');
+      if (!hasAutoLocated) {
+        console.log("📍 首次載入，自動觸發尋找附近屏幕...");
+        sessionStorage.setItem('hasAutoLocated', 'true'); // 記低「已經問過」
+        handleFindNearestScreen(true); // 傳入 true 代表係「自動觸發」，唔好亂彈 Alert 煩客
+      }
+    }
+  }, [isScreensLoading, filteredScreens]);
+
+  // UI 渲染 (同之前一樣)
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       
-      {/* 🔥 3. 新增的自動定位按鈕 */}
       <div className="p-4 border-b border-slate-100 bg-white">
         <button 
-            onClick={handleFindNearestScreen}
+            onClick={() => handleFindNearestScreen(false)}
             disabled={isLocating}
             className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-2 font-bold transition-all shadow-sm border
                 ${isLocating 
@@ -146,7 +147,6 @@ const ScreenSelector = ({
         </button>
       </div>
 
-      {/* 原本的搜尋欄 */}
       <div className="p-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
           <Search size={16} className="text-slate-400"/>
           <input 
