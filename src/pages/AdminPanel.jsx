@@ -62,7 +62,7 @@ const AdminPanel = () => {
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
-    footfall: '', audience: '', operatingHours: '', resolution: '',
+    footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', // 🔥 加咗呢度
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
 
@@ -372,13 +372,16 @@ const AdminPanel = () => {
   
   // 複製功能
   const handleCopyScreen = (screenToCopy) => { const copiedData = JSON.parse(JSON.stringify(screenToCopy)); delete copiedData.firestoreId; delete copiedData.id; copiedData.name = `${copiedData.name} (Copy)`; copiedData.isActive = true; setNewScreenData(copiedData); setEditingScreenId(null); setIsAddScreenModalOpen(true); };
-  const handleAddScreen = () => { setIsAddScreenModalOpen(true); setEditingScreenId(null); setNewScreenData({name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }}); };
+  const handleAddScreen = () => { setIsAddScreenModalOpen(true); setEditingScreenId(null); setNewScreenData({name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }}); };
   const handleEditScreenFull = (s) => { let rules = s.tierRules || {}; if(rules.default && !rules[0]) { let r=rules.default; rules={}; for(let i=0;i<7;i++) rules[i]=r; } setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); };
 
   // 🔥 4. 修正儲存邏輯 (解決 No Document Error)
   const saveScreenFull = async () => { 
       try {
-          const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), images: newScreenData.images.filter(x=>x), lastUpdated: serverTimestamp() };
+          const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), 
+        lat: parseFloat(newScreenData.lat) || null, // 🔥 加咗呢行 (轉做數字，如果無就入 null)
+        lng: parseFloat(newScreenData.lng) || null, // 🔥 加咗呢行
+        images: newScreenData.images.filter(x=>x), lastUpdated: serverTimestamp() };
           delete p.firestoreId; 
           
           if(editingScreenId) { 

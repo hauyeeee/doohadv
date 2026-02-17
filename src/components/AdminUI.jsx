@@ -181,25 +181,61 @@ export const ScreenModal = ({ isOpen, onClose, isEdit, data, setData, handleAppl
                         </div>
                     </div>
 
-                    {/* 簡單版 Google Map Link 輸入框 */}
-                    <div className="col-span-2">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">
-                            Google Map Embed 網址
-                        </label>
-                        <div className="flex items-center gap-2 border rounded px-3 py-2 bg-slate-50">
-                            <Map size={14} className="text-slate-400"/>
-                            <input 
-                                type="text" 
-                                value={data.mapUrl || ''} 
-                                onChange={e => setData({...data, mapUrl: e.target.value})} 
-                                className="w-full text-sm outline-none bg-transparent" 
-                                placeholder="例如: https://www.google.com/maps/embed?pb=..."
-                            />
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-1">
-                            請在 Google Maps 點擊「分享」 {'>'} 「嵌入地圖」，並只複製 src="..." 裡面的網址。
-                        </p>
-                    </div>
+                    {/* 智能 Google Map Link 輸入框 + 自動提取經緯度 */}
+<div className="col-span-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
+    <label className="block text-xs font-bold text-slate-700 mb-1">
+        Google Map 網址 (自動提取經緯度)
+    </label>
+    <div className="flex items-center gap-2 border rounded px-3 py-2 bg-white mb-2">
+        <Map size={14} className="text-slate-400"/>
+        <input 
+            type="text" 
+            value={data.mapUrl || ''} 
+            onChange={(e) => {
+                const url = e.target.value;
+                let newLat = data.lat || '';
+                let newLng = data.lng || '';
+
+                // 魔術時間：用 Regex 喺網址入面搵經緯度
+                // 情況 1: 網址入面有 @緯度,經度 (例如一般長網址)
+                const matchAt = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+                if (matchAt) {
+                    newLat = matchAt[1];
+                    newLng = matchAt[2];
+                } else {
+                    // 情況 2: Embed 網址入面有 !3d(緯度) !2d(經度) 或者 !4d(經度)
+                    const matchLat = url.match(/!3d(-?\d+\.\d+)/);
+                    const matchLng2d = url.match(/!2d(-?\d+\.\d+)/);
+                    const matchLng4d = url.match(/!4d(-?\d+\.\d+)/);
+                    
+                    if (matchLat) newLat = matchLat[1];
+                    if (matchLng2d) newLng = matchLng2d[1];
+                    else if (matchLng4d) newLng = matchLng4d[1];
+                }
+
+                // 同步更新 mapUrl, lat, lng
+                setData({...data, mapUrl: url, lat: newLat, lng: newLng});
+            }} 
+            className="w-full text-sm outline-none bg-transparent" 
+            placeholder="貼上 Google Maps 長網址或 Embed src..."
+        />
+    </div>
+    
+    {/* 顯示提取出嚟嘅 GPS 坐標，亦允許手動修改 */}
+    <div className="grid grid-cols-2 gap-3 mt-2">
+        <div>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">緯度 (Latitude - lat)</label>
+            <input type="number" step="any" value={data.lat || ''} onChange={e => setData({...data, lat: e.target.value})} className="w-full border rounded px-2 py-1 text-xs bg-white text-blue-700 font-bold" placeholder="e.g. 22.2818"/>
+        </div>
+        <div>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">經度 (Longitude - lng)</label>
+            <input type="number" step="any" value={data.lng || ''} onChange={e => setData({...data, lng: e.target.value})} className="w-full border rounded px-2 py-1 text-xs bg-white text-blue-700 font-bold" placeholder="e.g. 114.1553"/>
+        </div>
+    </div>
+    <p className="text-[10px] text-slate-400 mt-2">
+        💡 貼士：貼上網址後，系統會嘗試自動拆解 GPS 坐標。如果拆唔到，你可以喺 Google Maps 對住間餐廳 Right-Click (右鍵)，直接手動 Copy 嗰兩個數字填入去。
+    </p>
+</div>
 
                     <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">屏幕規格</label><div className="flex items-start gap-2 border rounded px-3 py-2"><FileText size={14} className="text-slate-400 mt-1"/><textarea rows="3" value={data.specifications} onChange={e => setData({...data, specifications: e.target.value})} className="w-full text-sm outline-none resize-none" placeholder="e.g. 1920x1080px..."/></div></div>
                     
