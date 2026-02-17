@@ -89,7 +89,7 @@ const ScreenSelector = ({
           }
         } else {
           if (!isAutoTrigger) {
-             alert(lang === 'en' ? "No screens found within 50 meters. Please select from the list." : "你附近 50 米內暫時未有屏幕，請在列表自行選擇！");
+             alert(lang === 'en' ? "No screens found within 10 meters. Please select from the list." : "你附近 10 米內暫時未有屏幕，請在列表自行選擇！");
           }
         }
       },
