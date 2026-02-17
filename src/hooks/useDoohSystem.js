@@ -679,12 +679,22 @@ trackEvent("User", "Login", "Google_Login");
 
   const recalculateAllBids = async () => { console.log("Recalc"); };
 
-  const handleBidClick = () => { if (!user) { setIsLoginModalOpen(true); return; } if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
-  
+ const handleBidClick = () => { 
+      if (!user) { setIsLoginModalOpen(true); return; } 
+      if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
+      
+      // 👇 正確寫法：客真係撳掣先射上 GA
+      trackEvent("E-commerce", "Initiate_Checkout", "Bidding", pricing.currentBidTotal);
+
   setTermsAccepted(false); setIsBidModalOpen(true); };
-  const handleBuyoutClick = () => { if (!user) { setIsLoginModalOpen(true); return; } 
-  if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
-  trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
+  
+  const handleBuyoutClick = () => { 
+      if (!user) { setIsLoginModalOpen(true); return; } 
+      if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
+      if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
+      
+      // 👇 這個本來就正確
+      trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
 
   setTermsAccepted(false); setIsBuyoutModalOpen(true); };
 trackEvent("E-commerce", "Initiate_Checkout", "Bidding", pricing.currentBidTotal);
