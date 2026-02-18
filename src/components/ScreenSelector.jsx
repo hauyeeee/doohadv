@@ -65,41 +65,32 @@ const ScreenSelector = ({
           }
         });
 
-        // 🔥 無論有無 10米內，只要成功拎到 GPS，就先射上 GA，紀錄佢最近邊部機！
+        // 🔥 乾淨版：只會喺度射一次上 GA (紀錄距離同埋係咪 10米內)
         if (window.gtag && closestScreen) {
           window.gtag('event', 'location_matched', {
             'event_category': 'Offline_Tracking',
             'screen_name': closestScreen.name,
             'distance_meters': Math.round(minDistance),
-            'is_within_range': minDistance <= 10 ? 'yes' : 'no' // 加個參數分辦佢係咪喺現場
+            'is_within_range': minDistance <= 10 ? 'yes' : 'no'
           });
           console.log(`📡 發送定位數據：最近 ${closestScreen.name}，距離 ${Math.round(minDistance)} 米`);
         }
 
-
+        // 判斷係咪 10米內，決定自動揀機定係彈 Alert
         if (closestScreen && minDistance <= 10) {
           if (!selectedScreens.has(closestScreen.id)) {
              toggleScreen(closestScreen.id); 
           }
           
-          // 如果係手動撳掣先彈 Alert，自動彈就靜靜雞幫佢揀就得，費事煩
           if (!isAutoTrigger) {
              alert(lang === 'en' 
                 ? `📍 Found the nearest screen: ${closestScreen.name} (${Math.round(minDistance)}m away)`
                 : `📍 已為你定位到最近的屏幕：${closestScreen.name} (相距 ${Math.round(minDistance)} 米)`
              );
           }
-
-          // 👉 動作 2：射個 Event 上 GA4
-          if (window.gtag) {
-            window.gtag('event', 'location_matched', {
-              'event_category': 'Offline_Tracking',
-              'screen_name': closestScreen.name,
-              'distance_meters': Math.round(minDistance)
-            });
-            console.log(`✅ 成功射上 GA4：${closestScreen.name}`);
-          }
         } else {
+
+
           if (!isAutoTrigger) {
              alert(lang === 'en' ? "No screens found within 10 meters. Please select from the list." : "你附近 10 米內暫時未有屏幕，請在列表自行選擇！");
           }
