@@ -116,7 +116,7 @@ const AdminManualOrder = ({ screens }) => {
           </div>
           <div onClick={() => setOrderCategory('internal_promo')} className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${orderCategory === 'internal_promo' ? 'border-green-600 bg-green-50' : 'border-slate-200 hover:border-green-300'}`}>
             <h3 className="font-bold text-slate-800 text-lg">📢 內部免費宣傳 / 造市</h3>
-            <p className="text-sm text-slate-500">自家廣告、合作宣傳、假客造市</p>
+            <p className="text-sm text-slate-500">自家廣告、合作宣傳</p>
           </div>
         </div>
 
