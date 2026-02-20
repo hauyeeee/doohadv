@@ -17,6 +17,7 @@ import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
 import PricingSummary from './components/PricingSummary';
+import ScanCheck from './pages/ScanCheck'; // 確保路徑同你擺嘅位置一樣
 
 // Modals
 import ScreenDetailModal from './components/ScreenDetailModal';
@@ -284,6 +285,7 @@ const App = () => {
       <AnalyticsTracker />
       <Routes>
         <Route path="/" element={<DOOHBiddingSystem />} />
+        <Route path="/scan-check" element={<ScanCheck />} />
         <Route path="/admin" element={<AdminPanel />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
