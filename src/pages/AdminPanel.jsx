@@ -16,10 +16,13 @@ import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 import { useLanguage } from '../context/LanguageContext';
 
+
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
 } from '../components/AdminTabs';
+import AdminManualOrder from '../components/AdminManualOrder'; // 路徑按你實際擺位調整
+import { Plus } from 'lucide-react'; // 確保有 Plus Icon
 
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
@@ -419,7 +422,7 @@ const AdminPanel = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
-            {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:t('tab_dashboard')}, {id:'calendar',icon:<Calendar size={16}/>,label:t('tab_calendar')}, {id:'orders',icon:<List size={16}/>,label:t('tab_orders')}, {id:'review',icon:<Video size={16}/>,label:`${t('tab_review')} (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:t('tab_rules')}, {id:'screens',icon:<Monitor size={16}/>,label:t('tab_screens')}, {id:'analytics',icon:<TrendingUp size={16}/>,label:t('tab_analytics')}, {id:'config',icon:<Settings size={16}/>,label:t('tab_config')} ].map(t => (
+            {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:t('tab_dashboard')}, {id:'calendar',icon:<Calendar size={16}/>,label:t('tab_calendar')}, {id:'orders',icon:<List size={16}/>,label:t('tab_orders')}, {id:'manualOrder', icon:<Plus size={16}/>, label:'手動加單/排期'}, {id:'review',icon:<Video size={16}/>,label:`${t('tab_review')} (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:t('tab_rules')}, {id:'screens',icon:<Monitor size={16}/>,label:t('tab_screens')}, {id:'analytics',icon:<TrendingUp size={16}/>,label:t('tab_analytics')}, {id:'config',icon:<Settings size={16}/>,label:t('tab_config')} ].map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
                     {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                 </button>
@@ -437,6 +440,8 @@ const AdminPanel = () => {
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
         
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
+{activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
+
 
         {/* Modals */}
         <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} 
