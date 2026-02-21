@@ -11,6 +11,7 @@ const WEEKDAYS = [
 
 const AdminManualOrder = ({ screens }) => {
   const [memo, setMemo] = useState('');
+  const [manualAmount, setManualAmount] = useState(0); // <-- 新增這一行
   const [orderCategory, setOrderCategory] = useState('offline_paid'); 
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -24,23 +25,36 @@ const AdminManualOrder = ({ screens }) => {
   const [selectedHours, setSelectedHours] = useState(Array.from({length: 24}, (_, i) => i)); // 預設 24 小時全選
 
   // 產生符合條件嘅日期 Array ('YYYY-MM-DD')
-  const generateDates = () => {
-    if (!startDate) return [];
-    const dates = [];
-    const start = new Date(startDate);
+ const generateDates = () => {
+  if (!startDate) return [];
+  const slots = [];
+  const start = new Date(startDate);
+  
+  // 修正：weekCount 如果是 1，就跑 7 天；如果是 0，我們當作「只排當天」
+  const totalDays = weekCount * 7 || 1; 
+
+  for (let i = 0; i < totalDays; i++) {
+    const current = new Date(start);
+    current.setDate(start.getDate() + i);
     
-    // 計算總日數 (星期數 * 7)
-    for (let i = 0; i < weekCount * 7; i++) {
-      const current = new Date(start);
-      current.setDate(start.getDate() + i);
+    // 檢查這一天是否在勾選的「星期」內
+    if (selectedWeekdays.includes(current.getDay())) {
+      const dateStr = current.toISOString().split('T')[0];
       
-      // 檢查呢一日嘅星期幾，係咪被選中咗
-      if (selectedWeekdays.includes(current.getDay())) {
-        dates.push(current.toISOString().split('T')[0]);
-      }
+      selectedScreens.forEach(screenId => {
+        selectedHours.forEach(hour => {
+          slots.push({
+            date: dateStr,
+            hour: hour,
+            screenId: screenId,
+            isBuyout: true
+          });
+        });
+      });
     }
-    return dates;
-  };
+  }
+  return slots;
+};
 
   const handleToggleScreen = (id) => setSelectedScreens(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   const handleToggleWeekday = (day) => setSelectedWeekdays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
@@ -86,25 +100,27 @@ const AdminManualOrder = ({ screens }) => {
       });
 
       // 4. 寫入 Firestore
-      await addDoc(collection(db, 'orders'), {
-        memo: memo || 'Admin 手動排期',
-        type: 'buyout',
-        orderType: 'manual',
-        paymentStatus: orderCategory,
-        status: 'paid', 
-        creativeStatus: 'approved', 
-        isApproved: true,
-        hasVideo: true,
-        videoUrl: downloadURL,
-        videoName: file.name,
-        screenIds: selectedScreens,
-        detailedSlots: generatedSlots,
-        userEmail: orderCategory === 'internal_promo' ? 'admin@doohadv.com' : 'offline_client@doohadv.com',
-        userName: orderCategory === 'internal_promo' ? '系統內部宣傳' : '線下客戶',
-        amount: 0,
-        createdAt: serverTimestamp(),
-        adminId: 'admin_dashboard'
-      });
+     await addDoc(collection(db, 'orders'), {
+  userId: 'ADMIN_MANUAL',
+  userName: 'Admin 手動排單',
+  userEmail: 'admin@system.com',
+  memo: memo || 'Admin 手動排期',
+  type: 'buyout',
+  amount: Number(manualAmount), // <-- 這裡改為讀取你輸入的金額
+  status: 'approved', 
+  paymentStatus: 'paid_offline', 
+  creativeStatus: file ? 'pending_review' : 'empty',
+  videoUrl: downloadURL,
+  hasVideo: !!downloadURL,
+  createdAt: serverTimestamp(),
+  
+  // 為了讓 Dashboard 正確計算利潤，我們平攤每個 Slot 的價格
+  detailedSlots: generatedSlots.map(slot => ({
+    ...slot,
+    bidPrice: manualAmount > 0 ? (Number(manualAmount) / generatedSlots.length).toFixed(2) : 0
+  })),
+  timeSlotSummary: `Admin 手動排期: ${generatedSlots.length} 個時段`
+});
 
       alert(`✅ 排期成功！共排入 ${generatedSlots.length} 個時段。`);
       
@@ -222,6 +238,25 @@ const AdminManualOrder = ({ screens }) => {
                 </div>
             </div>
         </div>
+
+        {/* 金額輸入 */}
+<div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6">
+  <div className="flex items-center gap-2 mb-4">
+    <div className="p-2 bg-green-100 text-green-600 rounded-lg">
+      <span className="font-bold">$</span>
+    </div>
+    <h3 className="font-bold text-slate-800">收款金額 (線下收費)</h3>
+  </div>
+  <input 
+    type="number" 
+    value={manualAmount} 
+    onChange={(e) => setManualAmount(e.target.value)}
+    placeholder="請輸入此單總金額 (HKD)"
+    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-green-500 transition-all font-mono text-lg"
+  />
+  <p className="text-xs text-slate-400 mt-2">* 填寫金額後 Dashboard 才能統計收入</p>
+</div>
+
 
         {/* 提交按鈕 */}
         <button type="submit" disabled={uploading} className="w-full py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 transition-colors disabled:bg-slate-400 flex justify-center items-center gap-2 shadow-lg">
