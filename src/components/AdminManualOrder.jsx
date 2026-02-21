@@ -220,29 +220,26 @@ const AdminManualOrder = ({ screens }) => {
         </div>
 
         {/* 2. 選擇屏幕 & 檔案 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">選擇屏幕 (可多選)</label>
-              <div className="grid grid-cols-2 gap-2">
-                {screens?.map(screen => (
-                  <div key={screen.id} onClick={() => toggleScreen(String(screen.id))} className={`p-3 border rounded-xl cursor-pointer text-sm font-bold flex items-center justify-between ${selectedScreens.has(String(screen.id)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}>
-                    {screen.name}
-                    {selectedScreens.has(String(screen.id)) && <CheckCircle size={16} />}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">上載影片 / 圖片</label>
-              <div className="border-2 border-dashed border-slate-300 p-6 rounded-xl text-center hover:bg-slate-50 transition-colors h-[calc(100%-28px)] flex flex-col justify-center">
-                <input type="file" onChange={e => setFile(e.target.files[0])} className="hidden" id="admin-file" accept="image/*,video/*" />
-                <label htmlFor="admin-file" className="cursor-pointer flex flex-col items-center gap-2">
-                  <Upload className={`w-8 h-8 ${file ? 'text-blue-600' : 'text-slate-400'}`} />
-                  <span className={`font-bold text-sm ${file ? 'text-blue-600' : 'text-slate-500'}`}>{file ? file.name : '點擊選擇檔案'}</span>
-                </label>
-              </div>
-            </div>
-        </div>
+        <div>
+  <label className="block text-sm font-bold text-slate-700 mb-2">上載影片 / 圖片</label>
+  {/* 將成個虛線框變做 label，加入 cursor-pointer，點邊度都得！ */}
+  <label 
+    htmlFor="admin-file" 
+    className="cursor-pointer border-2 border-dashed border-slate-300 p-6 rounded-xl hover:bg-slate-50 transition-colors flex flex-col items-center justify-center gap-2 min-h-[120px] h-[calc(100%-28px)]"
+  >
+    <input 
+      type="file" 
+      onChange={e => setFile(e.target.files[0])} 
+      className="hidden" 
+      id="admin-file" 
+      accept="image/*,video/*" 
+    />
+    <Upload className={`w-8 h-8 ${file ? 'text-blue-600' : 'text-slate-400'}`} />
+    <span className={`font-bold text-sm ${file ? 'text-blue-600' : 'text-slate-500'}`}>
+      {file ? file.name : '點擊此處任何位置選擇檔案'}
+    </span>
+  </label>
+</div>
 
         {/* 3. 🚀 前台同款雙模式排期系統 */}
         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-6">
