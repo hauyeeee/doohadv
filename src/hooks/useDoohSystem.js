@@ -379,7 +379,7 @@ trackEvent("User", "Login", "Google_Login");
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
-            setCreativeStatus(orderData.hasVideo ? 'approved' : 'empty');
+            setCreativeStatus(orderData.creativeStatus || 'empty');
             setCreativeName(orderData.videoName || ''); 
             const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid'].includes(orderData.status);
             if (isPaid) { setModalPaymentStatus('paid'); localStorage.removeItem('temp_txn_time'); } 
@@ -418,7 +418,11 @@ trackEvent("User", "Login", "Google_Login");
           async () => { 
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
               await updateDoc(doc(db, "orders", targetId), { hasVideo: true, videoUrl: downloadURL, videoName: file.name, uploadedAt: serverTimestamp(), creativeStatus: 'pending_review' }); 
-              setCreativeName(file.name); setCreativeStatus('approved'); setIsUploadingReal(false); showToast("✅ 上傳成功！等待審核"); localStorage.removeItem('temp_order_id'); 
+             setCreativeName(file.name); 
+setCreativeStatus('pending_review'); // 畫面變成「審批中」
+setIsUploadingReal(false); 
+showToast("⏳ 上傳成功！正在審核您的圖片...");
+              localStorage.removeItem('temp_order_id'); 
           });
       } catch (error) { console.error(error); showToast("上傳錯誤"); setIsUploadingReal(false); }
   };
