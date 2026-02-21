@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase'; 
-import { Upload, Calendar, Clock, MonitorPlay, CheckCircle, Plus } from 'lucide-react';
+// 🔥 確保引入咗 X icon
+import { Upload, Calendar, Clock, CheckCircle, Plus, X } from 'lucide-react';
 
 const WEEKDAYS = [
   { val: 1, label: '一' }, { val: 2, label: '二' }, { val: 3, label: '三' },
@@ -11,50 +12,48 @@ const WEEKDAYS = [
 
 const AdminManualOrder = ({ screens }) => {
   const [memo, setMemo] = useState('');
-  const [manualAmount, setManualAmount] = useState(0); // <-- 新增這一行
   const [orderCategory, setOrderCategory] = useState('offline_paid'); 
+  const [manualAmount, setManualAmount] = useState(''); // 收錢金額
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   
   const [selectedScreens, setSelectedScreens] = useState([]);
   
-  // --- 時間排期狀態 ---
+  // --- 🚀 全新雙模式排期狀態 ---
+  const [mode, setMode] = useState('specific'); // 'specific' = 指定日子, 'recurring' = 包週
+  const [selectedSpecificDates, setSelectedSpecificDates] = useState([]); // 裝指定日子嘅 Array
+  
   const [startDate, setStartDate] = useState('');
   const [weekCount, setWeekCount] = useState(1);
-  const [selectedWeekdays, setSelectedWeekdays] = useState([1, 2, 3, 4, 5, 6, 0]); // 預設全選
-  const [selectedHours, setSelectedHours] = useState(Array.from({length: 24}, (_, i) => i)); // 預設 24 小時全選
-
-  // 產生符合條件嘅日期 Array ('YYYY-MM-DD')
- const generateDates = () => {
-  if (!startDate) return [];
-  const slots = [];
-  const start = new Date(startDate);
+  const [selectedWeekdays, setSelectedWeekdays] = useState([1, 2, 3, 4, 5, 6, 0]); 
   
-  // 修正：weekCount 如果是 1，就跑 7 天；如果是 0，我們當作「只排當天」
-  const totalDays = weekCount * 7 || 1; 
+  const [selectedHours, setSelectedHours] = useState(Array.from({length: 24}, (_, i) => i));
 
-  for (let i = 0; i < totalDays; i++) {
-    const current = new Date(start);
-    current.setDate(start.getDate() + i);
-    
-    // 檢查這一天是否在勾選的「星期」內
-    if (selectedWeekdays.includes(current.getDay())) {
-      const dateStr = current.toISOString().split('T')[0];
+  // 🚀 全新 Dates 產生邏輯 (完美複製前台)
+  const generateDates = () => {
+    if (mode === 'specific') {
+      return [...selectedSpecificDates].sort(); // 模式一：直接回傳你揀咗嘅散日
+    } else {
+      // 模式二：包週邏輯
+      if (!startDate) return [];
+      const dates = [];
+      const [year, month, day] = startDate.split('-').map(Number);
+      const start = new Date(year, month - 1, day);
+      const totalDaysToScan = weekCount * 7;
       
-      selectedScreens.forEach(screenId => {
-        selectedHours.forEach(hour => {
-          slots.push({
-            date: dateStr,
-            hour: hour,
-            screenId: screenId,
-            isBuyout: true
-          });
-        });
-      });
+      for (let i = 0; i < totalDaysToScan; i++) {
+        const current = new Date(start);
+        current.setDate(start.getDate() + i);
+        if (selectedWeekdays.includes(current.getDay())) {
+          const y = current.getFullYear();
+          const m = String(current.getMonth() + 1).padStart(2, '0');
+          const d = String(current.getDate()).padStart(2, '0');
+          dates.push(`${y}-${m}-${d}`);
+        }
+      }
+      return dates;
     }
-  }
-  return slots;
-};
+  };
 
   const handleToggleScreen = (id) => setSelectedScreens(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   const handleToggleWeekday = (day) => setSelectedWeekdays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
@@ -62,25 +61,33 @@ const AdminManualOrder = ({ screens }) => {
   const handleSelectAllHours = () => setSelectedHours(Array.from({length: 24}, (_, i) => i));
   const handleClearHours = () => setSelectedHours([]);
 
+  // 加入/移除指定日子
+  const handleAddSpecificDate = (e) => {
+      const dateStr = e.target.value;
+      if (dateStr && !selectedSpecificDates.includes(dateStr)) {
+          setSelectedSpecificDates(prev => [...prev, dateStr].sort());
+      }
+  };
+  const handleRemoveSpecificDate = (dateStr) => setSelectedSpecificDates(prev => prev.filter(d => d !== dateStr));
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) return alert("請先上載宣傳片或圖片！");
     if (selectedScreens.length === 0) return alert("請至少選擇一部機！");
-    if (!startDate) return alert("請選擇開始日期！");
-    if (selectedWeekdays.length === 0) return alert("請至少選擇一日 (星期幾)！");
     if (selectedHours.length === 0) return alert("請至少選擇一個播放時段！");
+    if (mode === 'specific' && selectedSpecificDates.length === 0) return alert("請至少選擇一日！");
+    if (mode === 'recurring' && !startDate) return alert("請選擇開始日期！");
+    if (mode === 'recurring' && selectedWeekdays.length === 0) return alert("請至少選擇一日 (星期幾)！");
 
     setUploading(true);
     try {
-      // 1. 上載檔案
       const storageRef = ref(storage, `manual_ads/${Date.now()}_${file.name}`);
       const uploadTask = await uploadBytesResumable(storageRef, file);
       const downloadURL = await getDownloadURL(uploadTask.ref);
 
-      // 2. 準備排期數據
       const dates = generateDates();
+      const finalAmount = Number(manualAmount) || 0;
       
-      // 3. 模擬 detailedSlots
       const generatedSlots = [];
       dates.forEach(d => {
           selectedHours.forEach(h => {
@@ -91,7 +98,7 @@ const AdminManualOrder = ({ screens }) => {
                       hour: h,
                       screenId: String(sId),
                       screenName: screen ? screen.name : `Screen ${sId}`,
-                      bidPrice: 'Buyout', 
+                      bidPrice: dates.length > 0 ? (finalAmount / (dates.length * selectedHours.length * selectedScreens.length)).toFixed(2) : 0, 
                       isBuyout: true,
                       slotStatus: 'winning'
                   });
@@ -99,34 +106,32 @@ const AdminManualOrder = ({ screens }) => {
           });
       });
 
-      // 4. 寫入 Firestore
-     await addDoc(collection(db, 'orders'), {
-  userId: 'ADMIN_MANUAL',
-  userName: 'Admin 手動排單',
-  userEmail: 'admin@system.com',
-  memo: memo || 'Admin 手動排期',
-  type: 'buyout',
-  amount: Number(manualAmount), // <-- 這裡改為讀取你輸入的金額
-  status: 'approved', 
-  paymentStatus: 'paid_offline', 
-  creativeStatus: file ? 'pending_review' : 'empty',
-  videoUrl: downloadURL,
-  hasVideo: !!downloadURL,
-  createdAt: serverTimestamp(),
-  
-  // 為了讓 Dashboard 正確計算利潤，我們平攤每個 Slot 的價格
-  detailedSlots: generatedSlots.map(slot => ({
-    ...slot,
-    bidPrice: manualAmount > 0 ? (Number(manualAmount) / generatedSlots.length).toFixed(2) : 0
-  })),
-  timeSlotSummary: `Admin 手動排期: ${generatedSlots.length} 個時段`
-});
+      await addDoc(collection(db, 'orders'), {
+        memo: memo || 'Admin 手動排期',
+        type: 'buyout',
+        orderType: 'manual',
+        paymentStatus: orderCategory,
+        status: 'paid', 
+        creativeStatus: 'approved', 
+        isApproved: true,
+        hasVideo: true,
+        videoUrl: downloadURL,
+        videoName: file.name,
+        screenIds: selectedScreens,
+        detailedSlots: generatedSlots,
+        userEmail: orderCategory === 'internal_promo' ? 'admin@doohadv.com' : 'offline_client@doohadv.com',
+        userName: orderCategory === 'internal_promo' ? '系統內部宣傳' : '線下客戶',
+        amount: finalAmount,
+        createdAt: serverTimestamp(),
+        adminId: 'admin_dashboard',
+        timeSlotSummary: `Admin排期: ${generatedSlots.length} 個時段`
+      });
 
       alert(`✅ 排期成功！共排入 ${generatedSlots.length} 個時段。`);
       
-      // 清空表單
-      setMemo(''); setFile(null); setSelectedScreens([]); setStartDate(''); 
+      setMemo(''); setManualAmount(''); setFile(null); setSelectedScreens([]); setStartDate(''); 
       setWeekCount(1); setSelectedWeekdays([1, 2, 3, 4, 5, 6, 0]); setSelectedHours(Array.from({length: 24}, (_, i) => i));
+      setSelectedSpecificDates([]);
     } catch (error) {
       console.error("Error:", error);
       alert("❌ 發生錯誤：" + error.message);
@@ -161,6 +166,22 @@ const AdminManualOrder = ({ screens }) => {
                 <label className="block text-sm font-bold text-slate-700">廣告名稱 / 備註</label>
                 <input type="text" value={memo} onChange={e => setMemo(e.target.value)} placeholder="例如：十二味 3月包月廣告" className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500" required />
             </div>
+
+            {/* 收款金額欄位 */}
+            <div className="space-y-4 col-span-1 md:col-span-2">
+                <label className="block text-sm font-bold text-slate-700">收款總金額 (HKD)</label>
+                <div className="relative w-full md:w-1/2">
+                    <span className="absolute left-3 top-3 text-slate-400 font-bold">$</span>
+                    <input 
+                        type="number" 
+                        value={manualAmount} 
+                        onChange={e => setManualAmount(e.target.value)} 
+                        placeholder="輸入實收金額" 
+                        className="w-full p-3 pl-8 border border-slate-300 rounded-xl outline-none focus:border-blue-500 font-mono font-bold text-blue-600 bg-slate-50"
+                    />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">* 必須輸入金額，Dashboard 收益表先會識加數</p>
+            </div>
         </div>
 
         {/* 2. 選擇屏幕 & 檔案 */}
@@ -188,34 +209,64 @@ const AdminManualOrder = ({ screens }) => {
             </div>
         </div>
 
-        {/* 3. 超強排期系統 */}
+        {/* 3. 雙模式排期系統 */}
         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-6">
-            <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Calendar className="text-blue-600"/> 詳細排期設定</h3>
+            <div className="flex justify-between items-center mb-4">
+               <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Calendar className="text-blue-600"/> 詳細排期設定</h3>
+               
+               {/* 🚀 模式切換 Tabs */}
+               <div className="flex bg-slate-200 rounded-lg p-1">
+                  <button type="button" onClick={() => setMode('specific')} className={`px-4 py-2 text-xs font-bold rounded-md transition-all ${mode === 'specific' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>指定日子</button>
+                  <button type="button" onClick={() => setMode('recurring')} className={`px-4 py-2 text-xs font-bold rounded-md transition-all ${mode === 'recurring' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>包週排期</button>
+               </div>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* 左邊：日期與星期 */}
+                {/* 左邊：日期選擇區域 (根據 Mode 切換) */}
                 <div className="space-y-6">
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">開始日期</label>
-                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl" required />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">連續播放 (星期數)</label>
-                        <div className="flex items-center gap-2">
-                            <input type="range" min="1" max="52" value={weekCount} onChange={(e) => setWeekCount(Number(e.target.value))} className="flex-1 accent-blue-600" />
-                            <span className="font-bold text-lg w-16 text-right text-blue-600">{weekCount} 星期</span>
+                    {mode === 'specific' ? (
+                        <div className="space-y-4 animate-in fade-in">
+                            <label className="block text-sm font-bold text-slate-700">加入指定日子 (可選多日)</label>
+                            <input type="date" onChange={handleAddSpecificDate} className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-blue-500" />
+                            
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 min-h-[100px]">
+                                <p className="text-xs text-slate-400 mb-2">已選日子 ({selectedSpecificDates.length}日)：</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {selectedSpecificDates.map(d => (
+                                        <span key={d} className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 border border-blue-200">
+                                            {d} 
+                                            <button type="button" onClick={() => handleRemoveSpecificDate(d)} className="text-blue-400 hover:text-blue-800 bg-white rounded-full p-0.5"><X size={12}/></button>
+                                        </span>
+                                    ))}
+                                    {selectedSpecificDates.length === 0 && <span className="text-slate-400 text-sm">請從上方選擇日期...</span>}
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">指定星期幾</label>
-                        <div className="flex gap-1 justify-between">
-                            {WEEKDAYS.map(day => (
-                                <button key={day.val} type="button" onClick={() => handleToggleWeekday(day.val)} className={`w-10 h-10 rounded-full font-bold text-sm transition-all ${selectedWeekdays.includes(day.val) ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>
-                                    {day.label}
-                                </button>
-                            ))}
+                    ) : (
+                        <div className="space-y-6 animate-in fade-in">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">開始日期</label>
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">連續播放 (星期數)</label>
+                                <div className="flex items-center gap-2">
+                                    <input type="range" min="1" max="52" value={weekCount} onChange={(e) => setWeekCount(Number(e.target.value))} className="flex-1 accent-blue-600" />
+                                    <span className="font-bold text-lg w-16 text-right text-blue-600">{weekCount} 星期</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">指定星期幾</label>
+                                <div className="flex gap-1 justify-between">
+                                    {WEEKDAYS.map(day => (
+                                        <button key={day.val} type="button" onClick={() => handleToggleWeekday(day.val)} className={`w-10 h-10 rounded-full font-bold text-sm transition-all ${selectedWeekdays.includes(day.val) ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>
+                                            {day.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* 右邊：鐘數 */}
@@ -238,25 +289,6 @@ const AdminManualOrder = ({ screens }) => {
                 </div>
             </div>
         </div>
-
-        {/* 金額輸入 */}
-<div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6">
-  <div className="flex items-center gap-2 mb-4">
-    <div className="p-2 bg-green-100 text-green-600 rounded-lg">
-      <span className="font-bold">$</span>
-    </div>
-    <h3 className="font-bold text-slate-800">收款金額 (線下收費)</h3>
-  </div>
-  <input 
-    type="number" 
-    value={manualAmount} 
-    onChange={(e) => setManualAmount(e.target.value)}
-    placeholder="請輸入此單總金額 (HKD)"
-    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-green-500 transition-all font-mono text-lg"
-  />
-  <p className="text-xs text-slate-400 mt-2">* 填寫金額後 Dashboard 才能統計收入</p>
-</div>
-
 
         {/* 提交按鈕 */}
         <button type="submit" disabled={uploading} className="w-full py-4 bg-slate-900 text-white font-bold text-lg rounded-xl hover:bg-slate-800 transition-colors disabled:bg-slate-400 flex justify-center items-center gap-2 shadow-lg">
