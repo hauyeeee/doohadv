@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase'; 
-import { Upload, Calendar, Clock, Plus, ChevronLeft, ChevronRight, CheckCircle } from 'lucide-react';
+import { Upload, Calendar, Clock, Plus, ChevronLeft, ChevronRight, CheckCircle, X } from 'lucide-react';
 
 const WEEKDAYS_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 const HOURS = Array.from({ length: 24 }, (_, i) => ({ val: i, label: `${String(i).padStart(2, '0')}:00` }));
 
-// --- 日期 Helper Functions (完美移植自 useDoohSystem) ---
+// --- 日期 Helper Functions ---
 const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
 const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); 
 const formatDateKey = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -19,44 +19,43 @@ const AdminManualOrder = ({ screens }) => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   
-  const [selectedScreens, setSelectedScreens] = useState(new Set());
+  // 改用 Array 確保 React 穩定渲染
+  const [selectedScreens, setSelectedScreens] = useState([]);
   
-  // --- 🚀 前台日曆狀態 ---
+  // --- 前台日曆狀態 ---
   const [mode, setMode] = useState('specific'); 
-  const [currentDate, setCurrentDate] = useState(new Date()); // 控制日曆顯示邊個月
-  const [previewDate, setPreviewDate] = useState(new Date()); // 控制 24 小時 Highlight 邊日
-  const [selectedSpecificDates, setSelectedSpecificDates] = useState(new Set()); 
+  const [currentDate, setCurrentDate] = useState(new Date()); 
+  const [previewDate, setPreviewDate] = useState(new Date()); 
+  const [selectedSpecificDates, setSelectedSpecificDates] = useState([]); 
   
-  // --- 🚀 包週狀態 ---
+  // --- 包週狀態 ---
   const [startDate, setStartDate] = useState('');
   const [weekCount, setWeekCount] = useState(1);
-  const [selectedWeekdays, setSelectedWeekdays] = useState(new Set([1, 2, 3, 4, 5, 6, 0])); 
+  const [selectedWeekdays, setSelectedWeekdays] = useState([1, 2, 3, 4, 5, 6, 0]); 
   
-  // --- 🚀 時段狀態 ---
-  const [selectedHours, setSelectedHours] = useState(new Set());
+  // --- 時段狀態 ---
+  const [selectedHours, setSelectedHours] = useState([]);
 
-  // --- 核心邏輯 (完全對接前台寫法) ---
-  const toggleScreen = (id) => { const newSet = new Set(selectedScreens); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedScreens(newSet); };
-  const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
-  const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); };
+  // --- 核心邏輯 ---
+  const toggleScreen = (id) => setSelectedScreens(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleHour = (val) => setSelectedHours(prev => prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val]);
+  const toggleWeekday = (dayIdx) => setSelectedWeekdays(prev => prev.includes(dayIdx) ? prev.filter(x => x !== dayIdx) : [...prev, dayIdx]);
   
   const toggleDate = (year, month, day) => { 
       const key = formatDateKey(year, month, day); 
       setPreviewDate(new Date(year, month, day)); 
-      const newSet = new Set(selectedSpecificDates); 
-      if (newSet.has(key)) newSet.delete(key); else newSet.add(key); 
-      setSelectedSpecificDates(newSet); 
+      setSelectedSpecificDates(prev => prev.includes(key) ? prev.filter(d => d !== key) : [...prev, key].sort());
   };
 
-  const handleSelectAllHours = () => setSelectedHours(new Set(HOURS.map(h => h.val)));
-  const handleClearHours = () => setSelectedHours(new Set());
+  const handleSelectAllHours = () => setSelectedHours(HOURS.map(h => h.val));
+  const handleClearHours = () => setSelectedHours([]);
   
   const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
 
   const generateDates = () => {
     if (mode === 'specific') {
-      return Array.from(selectedSpecificDates).sort(); 
+      return [...selectedSpecificDates]; 
     } else {
       if (!startDate) return [];
       const dates = [];
@@ -65,7 +64,7 @@ const AdminManualOrder = ({ screens }) => {
       for (let i = 0; i < weekCount * 7; i++) {
         const current = new Date(start);
         current.setDate(start.getDate() + i);
-        if (selectedWeekdays.has(current.getDay())) {
+        if (selectedWeekdays.includes(current.getDay())) {
           dates.push(formatDateKey(current.getFullYear(), current.getMonth(), current.getDate()));
         }
       }
@@ -76,11 +75,11 @@ const AdminManualOrder = ({ screens }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) return alert("請先上載宣傳片或圖片！");
-    if (selectedScreens.size === 0) return alert("請至少選擇一部機！");
-    if (selectedHours.size === 0) return alert("請至少選擇一個播放時段！");
-    if (mode === 'specific' && selectedSpecificDates.size === 0) return alert("請至少選擇一日！");
+    if (selectedScreens.length === 0) return alert("請至少選擇一部機！");
+    if (selectedHours.length === 0) return alert("請至少選擇一個播放時段！");
+    if (mode === 'specific' && selectedSpecificDates.length === 0) return alert("請至少選擇一日！");
     if (mode === 'recurring' && !startDate) return alert("請選擇開始日期！");
-    if (mode === 'recurring' && selectedWeekdays.size === 0) return alert("請至少選擇一日 (星期幾)！");
+    if (mode === 'recurring' && selectedWeekdays.length === 0) return alert("請至少選擇一日 (星期幾)！");
 
     setUploading(true);
     try {
@@ -93,15 +92,15 @@ const AdminManualOrder = ({ screens }) => {
       
       const generatedSlots = [];
       dates.forEach(d => {
-          Array.from(selectedHours).forEach(h => {
-              Array.from(selectedScreens).forEach(sId => {
+          selectedHours.forEach(h => {
+              selectedScreens.forEach(sId => {
                   const screen = screens.find(s => String(s.id) === String(sId));
                   generatedSlots.push({
                       date: d,
                       hour: h,
                       screenId: String(sId),
                       screenName: screen ? screen.name : `Screen ${sId}`,
-                      bidPrice: dates.length > 0 ? (finalAmount / (dates.length * selectedHours.size * selectedScreens.size)).toFixed(2) : 0, 
+                      bidPrice: dates.length > 0 ? (finalAmount / (dates.length * selectedHours.length * selectedScreens.length)).toFixed(2) : 0, 
                       isBuyout: true,
                       slotStatus: 'winning'
                   });
@@ -120,7 +119,7 @@ const AdminManualOrder = ({ screens }) => {
         hasVideo: true,
         videoUrl: downloadURL,
         videoName: file.name,
-        screenIds: Array.from(selectedScreens),
+        screenIds: selectedScreens,
         detailedSlots: generatedSlots,
         userEmail: orderCategory === 'internal_promo' ? 'admin@doohadv.com' : 'offline_client@doohadv.com',
         userName: orderCategory === 'internal_promo' ? '系統內部宣傳' : '線下客戶',
@@ -132,10 +131,10 @@ const AdminManualOrder = ({ screens }) => {
 
       alert(`✅ 排期成功！共排入 ${generatedSlots.length} 個時段。`);
       
-      // Reset
-      setMemo(''); setManualAmount(''); setFile(null); setSelectedScreens(new Set()); setStartDate(''); 
-      setWeekCount(1); setSelectedWeekdays(new Set([1, 2, 3, 4, 5, 6, 0])); setSelectedHours(new Set());
-      setSelectedSpecificDates(new Set());
+      // 成功後清空表單
+      setMemo(''); setManualAmount(''); setFile(null); setSelectedScreens([]); setStartDate(''); 
+      setWeekCount(1); setSelectedWeekdays([1, 2, 3, 4, 5, 6, 0]); setSelectedHours([]);
+      setSelectedSpecificDates([]);
     } catch (error) {
       console.error("Error:", error);
       alert("❌ 發生錯誤：" + error.message);
@@ -165,7 +164,7 @@ const AdminManualOrder = ({ screens }) => {
           {Array.from({ length: daysInMonth }, (_, i) => {
             const day = i + 1;
             const key = formatDateKey(year, month, day);
-            const isSelected = selectedSpecificDates.has(key);
+            const isSelected = selectedSpecificDates.includes(key);
             const isPreview = previewDate && formatDateKey(previewDate.getFullYear(), previewDate.getMonth(), previewDate.getDate()) === key;
             return (
               <button 
@@ -184,7 +183,7 @@ const AdminManualOrder = ({ screens }) => {
           })}
         </div>
         <div className="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 font-bold">
-            已選 {selectedSpecificDates.size} 日
+            已選 {selectedSpecificDates.length} 日
         </div>
       </div>
     );
@@ -219,29 +218,34 @@ const AdminManualOrder = ({ screens }) => {
             </div>
         </div>
 
-        {/* 2. 選擇屏幕 & 檔案 */}
-        <div>
-  <label className="block text-sm font-bold text-slate-700 mb-2">上載影片 / 圖片</label>
-  {/* 將成個虛線框變做 label，加入 cursor-pointer，點邊度都得！ */}
-  <label 
-    htmlFor="admin-file" 
-    className="cursor-pointer border-2 border-dashed border-slate-300 p-6 rounded-xl hover:bg-slate-50 transition-colors flex flex-col items-center justify-center gap-2 min-h-[120px] h-[calc(100%-28px)]"
-  >
-    <input 
-      type="file" 
-      onChange={e => setFile(e.target.files[0])} 
-      className="hidden" 
-      id="admin-file" 
-      accept="image/*,video/*" 
-    />
-    <Upload className={`w-8 h-8 ${file ? 'text-blue-600' : 'text-slate-400'}`} />
-    <span className={`font-bold text-sm ${file ? 'text-blue-600' : 'text-slate-500'}`}>
-      {file ? file.name : '點擊此處任何位置選擇檔案'}
-    </span>
-  </label>
-</div>
+        {/* 2. 選擇屏幕 & 檔案 (屏幕已經回歸！) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">選擇屏幕 (可多選)</label>
+              <div className="grid grid-cols-2 gap-2">
+                {screens?.map(screen => (
+                  <div key={screen.id} onClick={() => toggleScreen(String(screen.id))} className={`p-3 border rounded-xl cursor-pointer text-sm font-bold flex items-center justify-between ${selectedScreens.includes(String(screen.id)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}>
+                    {screen.name}
+                    {selectedScreens.includes(String(screen.id)) && <CheckCircle size={16} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {/* 修正後嘅巨型上載掣，撳邊度都得！ */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">上載影片 / 圖片</label>
+              <label htmlFor="admin-file" className="cursor-pointer border-2 border-dashed border-slate-300 p-6 rounded-xl hover:bg-slate-50 transition-colors flex flex-col items-center justify-center gap-2 min-h-[120px] h-[calc(100%-28px)]">
+                <input type="file" onChange={e => setFile(e.target.files[0])} className="hidden" id="admin-file" accept="image/*,video/*" />
+                <Upload className={`w-8 h-8 ${file ? 'text-blue-600' : 'text-slate-400'}`} />
+                <span className={`font-bold text-sm text-center ${file ? 'text-blue-600' : 'text-slate-500'}`}>
+                  {file ? file.name : '點擊此處任何位置選擇檔案'}
+                </span>
+              </label>
+            </div>
+        </div>
 
-        {/* 3. 🚀 前台同款雙模式排期系統 */}
+        {/* 3. 前台同款雙模式排期系統 */}
         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-6">
             <div className="flex justify-between items-center mb-4">
                <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Calendar className="text-blue-600"/> 詳細排期設定</h3>
@@ -278,7 +282,7 @@ const AdminManualOrder = ({ screens }) => {
                                     {WEEKDAYS_LABEL.map((label, idx) => {
                                         const dayVal = idx === 0 ? 0 : idx; 
                                         return (
-                                        <button key={dayVal} type="button" onClick={() => toggleWeekday(dayVal)} className={`w-10 h-10 rounded-full font-bold text-sm transition-all ${selectedWeekdays.has(dayVal) ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>
+                                        <button key={dayVal} type="button" onClick={() => toggleWeekday(dayVal)} className={`w-10 h-10 rounded-full font-bold text-sm transition-all ${selectedWeekdays.includes(dayVal) ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>
                                             {label}
                                         </button>
                                     )})}
@@ -288,7 +292,7 @@ const AdminManualOrder = ({ screens }) => {
                     )}
                 </div>
 
-                {/* 右邊：🚀 前台同款 TimeSlotSelector 介面 */}
+                {/* 右邊：前台同款 TimeSlotSelector 介面 */}
                 <div>
                     <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col h-full">
                         <div className="flex justify-between items-center mb-4">
@@ -306,7 +310,7 @@ const AdminManualOrder = ({ screens }) => {
                                     type="button"
                                     onClick={() => toggleHour(h.val)} 
                                     className={`py-3 text-xs rounded border transition-all font-bold 
-                                        ${selectedHours.has(h.val) ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-blue-300'}`
+                                        ${selectedHours.includes(h.val) ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-blue-300'}`
                                     }
                                 >
                                     {h.label}
