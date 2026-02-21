@@ -121,7 +121,7 @@ const AdminManualOrder = ({ screens }) => {
         videoName: file.name,
         screenIds: selectedScreens,
         detailedSlots: generatedSlots,
-        userEmail: orderCategory === 'internal_promo' ? 'admin@doohadv.com' : 'offline_client@doohadv.com',
+        userEmail: orderCategory === 'internal_promo' ? 'info@doohadv.com' : 'info@doohadv.com',
         userName: orderCategory === 'internal_promo' ? '系統內部宣傳' : '線下客戶',
         amount: finalAmount,
         createdAt: serverTimestamp(),
