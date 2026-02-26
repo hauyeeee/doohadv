@@ -470,10 +470,11 @@ const AdminPanel = () => {
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
         
         {/* 🔥 新增財務相關 Views */}
-        {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} />}
-        {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} />}
-        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} />}
-        
+        {/* 🔥 新增財務相關 Views (記得傳入 screens 同 orders) */}
+        {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} screens={screens} />}
+        {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} />}
+        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} />}
+
         {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
