@@ -7,7 +7,7 @@ import {
   ref, uploadBytes, getDownloadURL 
 } from "firebase/storage"; 
 import { 
-  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe 
+  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe, Plus, DollarSign, Briefcase 
 } from 'lucide-react';
 // 🔥 2. 引入 storage
 import { db, auth, storage } from '../firebase'; 
@@ -16,13 +16,12 @@ import { useNavigate } from 'react-router-dom';
 import { sendBidConfirmation, sendBidLostEmail } from '../utils/emailService';
 import { useLanguage } from '../context/LanguageContext';
 
-
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
-  DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView 
+  DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView,
+  FinancialConfigView, PlatformOwnerSettlementView, MerchantSettlementView // 🔥 確保 import 咗新組件 (已修復逗號)
 } from '../components/AdminTabs';
-import AdminManualOrder from '../components/AdminManualOrder'; // 路徑按你實際擺位調整
-import { Plus } from 'lucide-react'; // 確保有 Plus Icon
+import AdminManualOrder from '../components/AdminManualOrder';
 
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
@@ -63,6 +62,13 @@ const AdminPanel = () => {
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
   const [isUploadingImage, setIsUploadingImage] = useState(false); // 🔥 上傳狀態
   
+  // 🔥 新增：財務配置 State
+  const [financialConfig, setFinancialConfig] = useState({
+    costFactor: 0.5,        // 預設 50% 成本
+    partnerPoolRatio: 0.3,  // 預設 30% 分成池
+    merchantRatioOfPool: 0.5 // 商家佔池中一半
+  });
+  
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
     footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', // 🔥 加咗呢度
@@ -90,6 +96,14 @@ const AdminPanel = () => {
         setOrders(snap.docs.map(d => ({ id: d.id, ...d.data(), createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() })));
         setLoading(false);
       });
+
+      // 🔥 讀取財務配置
+      getDoc(doc(db, "system_config", "financials")).then(docSnap => {
+          if (docSnap.exists()) {
+              setFinancialConfig(docSnap.data());
+          }
+      });
+
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
           setScreens(sorted);
@@ -104,6 +118,17 @@ const AdminPanel = () => {
           }
       });
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
+  };
+
+  // 🔥 儲存財務配置邏輯 (已修復：移出 fetchAllData 確保 Scope 正確)
+  const saveFinancialConfig = async () => {
+      try {
+          await setDoc(doc(db, "system_config", "financials"), financialConfig);
+          alert("✅ 財務分成比例已更新！");
+      } catch (e) {
+          console.error(e);
+          alert("❌ 儲存失敗");
+      }
   };
 
   // --- Logic Helpers ---
@@ -195,12 +220,10 @@ const AdminPanel = () => {
       if (!file) return;
       setIsUploadingImage(true);
       try {
-          // 上傳到 Firebase Storage (路徑: screen_images/timestamp_filename)
           const storageRef = ref(storage, `screen_images/${Date.now()}_${file.name}`);
           await uploadBytes(storageRef, file);
           const downloadURL = await getDownloadURL(storageRef);
           
-          // 更新狀態
           const newImages = [...newScreenData.images];
           newImages[index] = downloadURL;
           setNewScreenData({ ...newScreenData, images: newImages });
@@ -213,8 +236,6 @@ const AdminPanel = () => {
           setIsUploadingImage(false);
       }
   };
-
-  // --- Full Functions (No Code Cut) ---
 
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
@@ -407,6 +428,22 @@ const AdminPanel = () => {
 
   if (loading) return <LoadingScreen />;
 
+  // 🔥 定義所有的 Tabs (加入財務視圖)
+  const ADMIN_TABS = [
+      { id: 'dashboard', icon: <LayoutDashboard size={16}/>, label: t('tab_dashboard') },
+      { id: 'financial_config', icon: <Settings size={16}/>, label: '財務分成配置' }, 
+      { id: 'platform_settle', icon: <DollarSign size={16}/>, label: '平台分成(老闆)' }, 
+      { id: 'merchant_settle', icon: <Briefcase size={16}/>, label: '商家分成' }, 
+      { id: 'calendar', icon: <Calendar size={16}/>, label: t('tab_calendar') },
+      { id: 'orders', icon: <List size={16}/>, label: t('tab_orders') },
+      { id: 'manualOrder', icon: <Plus size={16}/>, label: '手動加單/排期' },
+      { id: 'review', icon: <Video size={16}/>, label: `${t('tab_review')} (${stats.pendingReview})`, alert: stats.pendingReview > 0 },
+      { id: 'rules', icon: <Settings size={16}/>, label: t('tab_rules') },
+      { id: 'screens', icon: <Monitor size={16}/>, label: t('tab_screens') },
+      { id: 'analytics', icon: <TrendingUp size={16}/>, label: t('tab_analytics') },
+      { id: 'config', icon: <Settings size={16}/>, label: t('tab_config') }
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto space-y-6">
@@ -422,33 +459,33 @@ const AdminPanel = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
-            {[ {id:'dashboard',icon:<LayoutDashboard size={16}/>,label:t('tab_dashboard')}, {id:'calendar',icon:<Calendar size={16}/>,label:t('tab_calendar')}, {id:'orders',icon:<List size={16}/>,label:t('tab_orders')}, {id:'manualOrder', icon:<Plus size={16}/>, label:'手動加單/排期'}, {id:'review',icon:<Video size={16}/>,label:`${t('tab_review')} (${stats.pendingReview})`, alert:stats.pendingReview>0}, {id:'rules',icon:<Settings size={16}/>,label:t('tab_rules')}, {id:'screens',icon:<Monitor size={16}/>,label:t('tab_screens')}, {id:'analytics',icon:<TrendingUp size={16}/>,label:t('tab_analytics')}, {id:'config',icon:<Settings size={16}/>,label:t('tab_config')} ].map(t => (
+            {ADMIN_TABS.map(t => (
                 <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
                     {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                 </button>
             ))}
         </div>
 
+        {/* 渲染各個 Views */}
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
+        
+        {/* 🔥 新增財務相關 Views */}
+        {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} />}
+        {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} />}
+        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} />}
+        
+        {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
         {activeTab === 'analytics' && <AnalyticsView stats={realMarketStats} screens={screens} selectedScreens={selectedStatScreens} setSelectedScreens={setSelectedStatScreens} selectedHours={selectedAnalyticsHours} setSelectedHours={setSelectedAnalyticsHours} />}
         {activeTab === 'config' && <ConfigView config={activeConfig} setConfig={setActiveConfig} globalConfig={globalPricingConfig} setGlobal={setGlobalPricingConfig} target={selectedConfigTarget} setTarget={setSelectedConfigTarget} screens={screens} localRules={localBundleRules} setLocalRules={setLocalBundleRules} onSave={savePricingConfig} onAddRule={handleAddBundleRule} onRuleChange={handleBundleRuleChange} onRemoveRule={handleRemoveBundleRule} />}
         {activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} />}
-        
-        {/* 🔥🔥🔥 這裡傳入 onCopy */}
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
-        
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
-{activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
-
+        {activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
 
         {/* Modals */}
-        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} 
-            // 🔥 新增 props
-            onImageUpload={handleScreenImageUpload}
-            isUploading={isUploadingImage}
-        />
+        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} onImageUpload={handleScreenImageUpload} isUploading={isUploadingImage} />
         <SlotGroupModal group={selectedSlotGroup} onClose={()=>setSelectedSlotGroup(null)} onReview={handleReview} onMarkScheduled={handleMarkAsScheduled} />
       
       </div>
