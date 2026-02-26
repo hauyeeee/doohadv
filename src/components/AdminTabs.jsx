@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   BarChart3, TrendingUp, Users, DollarSign, Search, Video, Monitor, Save, Trash2, 
   List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff
+  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff, PieChart as PieIcon, Briefcase
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
@@ -13,7 +13,7 @@ import { useLanguage } from '../context/LanguageContext';
 const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-// --- 1. Dashboard View ---
+// --- 1. Dashboard View (保持原樣) ---
 export const DashboardView = ({ stats, COLORS }) => {
     const { t } = useLanguage();
     return (
@@ -32,7 +32,67 @@ export const DashboardView = ({ stats, COLORS }) => {
     );
 };
 
-// --- 2. Orders View (詳細版) ---
+// --- NEW 1.1 Financial Config View (老闆專用：設定 Percentage) ---
+export const FinancialConfigView = ({ config, setConfig, onSave }) => {
+    return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl mx-auto animate-in fade-in">
+            <h3 className="font-bold text-lg mb-6 flex items-center gap-2 border-b pb-4"><Briefcase className="text-blue-600"/> 財務分成與成本配置</h3>
+            <div className="space-y-6">
+                <ConfigSection title="全域成本設定">
+                    <ConfigInput label="預估營運成本 (Buffer)" val={config.costFactor || 0.5} onChange={v => setConfig({...config, costFactor: parseFloat(v)})} desc="目前 50%，剩餘為可分配利潤" />
+                </ConfigSection>
+                <ConfigSection title="合作伙伴資金池 (利潤中之百分比)">
+                    <ConfigInput label="合作伙伴總比例" val={config.partnerPoolRatio || 0.3} onChange={v => setConfig({...config, partnerPoolRatio: parseFloat(v)})} desc="商家與老闆夾埋佔利潤的 30%" />
+                    <ConfigInput label="商家佔資金池比例" val={config.merchantRatioOfPool || 0.5} onChange={v => setConfig({...config, merchantRatioOfPool: parseFloat(v)})} desc="若商家要分錢，佔 30% 池中的比例 (如 0.5 = 15%)" />
+                </ConfigSection>
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 italic text-xs text-blue-700">提示：系統會先減去成本比例，再按七三拆分。</div>
+            </div>
+            <button onClick={onSave} className="mt-8 w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2"><Save size={18}/> 儲存配置</button>
+        </div>
+    );
+};
+
+// --- NEW 1.2 Platform Owner Settlement (充電寶老闆專用：隱藏總營收) ---
+export const PlatformOwnerSettlementView = ({ stats, config }) => {
+    const netProfit = stats.totalRevenue * (1 - (config.costFactor || 0.5));
+    const partnerPool = netProfit * (config.partnerPoolRatio || 0.3);
+    const ownerShare = partnerPool * (1 - (config.merchantRatioOfPool || 0.5));
+    return (
+        <div className="space-y-6 animate-in slide-in-from-bottom-4">
+            <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl">
+                <p className="text-xs opacity-60 uppercase font-bold mb-1">本月累計分成 (已扣除營運成本)</p>
+                <h2 className="text-4xl font-extrabold">HK$ {ownerShare.toLocaleString()}</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+                <StatCard title="合作設備數" value={stats.totalScreens} icon={<Monitor/>} bg="bg-white" />
+                <StatCard title="有效訂單數" value={stats.validOrders} icon={<CheckCircle/>} bg="bg-white" />
+            </div>
+        </div>
+    );
+};
+
+// --- NEW 1.3 Merchant Settlement (商家專用：只見自己份額) ---
+export const MerchantSettlementView = ({ stats, config }) => {
+    const netProfit = stats.totalRevenue * (1 - (config.costFactor || 0.5));
+    const merchantShare = netProfit * (config.partnerPoolRatio || 0.3) * (config.merchantRatioOfPool || 0.5);
+    return (
+        <div className="space-y-6 animate-in fade-in">
+            <div className="bg-emerald-600 text-white p-8 rounded-3xl shadow-lg">
+                <p className="text-xs opacity-80 uppercase font-bold mb-1">媒體管理津貼 (本月)</p>
+                <h2 className="text-4xl font-extrabold">HK$ {merchantShare.toLocaleString()}</h2>
+            </div>
+            <div className="bg-white border rounded-xl p-5 text-sm text-slate-500">
+                <p className="font-bold text-slate-800 mb-2">💡 商家權益說明</p>
+                <ul className="list-disc pl-4 space-y-1">
+                    <li>享有一小時內 10 分鐘的免費店內宣傳時段。</li>
+                    <li>系統已自動過濾同類競爭對手廣告。</li>
+                </ul>
+            </div>
+        </div>
+    );
+};
+
+// --- 2. Orders View (保持原樣) ---
 export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAction, customerHistory = {}, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => {
     const { t, lang } = useLanguage();
     return (
@@ -92,7 +152,7 @@ export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAc
     );
 };
 
-// --- 3. Review View ---
+// --- 3. Review View (保持原樣) ---
 export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => {
     const { t } = useLanguage();
     return (
@@ -115,11 +175,10 @@ export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => {
     );
 };
 
-// --- 4. Analytics View ---
+// --- 4. Analytics View (保持原樣) ---
 export const AnalyticsView = ({ stats, screens, selectedScreens, setSelectedScreens, selectedHours, setSelectedHours }) => {
     const { t, lang } = useLanguage();
     const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_ZH;
-    
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
             <div className="flex flex-col md:flex-row justify-between mb-4 gap-4">
@@ -136,7 +195,7 @@ export const AnalyticsView = ({ stats, screens, selectedScreens, setSelectedScre
     );
 };
 
-// --- 5. Config View ---
+// --- 5. Config View (保持原樣) ---
 export const ConfigView = ({ config, setConfig, globalConfig, setGlobal, target, setTarget, screens, localRules, setLocalRules, onSave, onAddRule, onRuleChange, onRemoveRule }) => {
     const { t } = useLanguage();
     return (
@@ -155,7 +214,7 @@ export const ConfigView = ({ config, setConfig, globalConfig, setGlobal, target,
     );
 };
 
-// --- 6. Calendar View ---
+// --- 6. Calendar View (保持原樣) ---
 export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid, screens, onSelectSlot, onPrev, onNext }) => {
     const { t } = useLanguage();
     return (
@@ -167,7 +226,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                     <div className="flex items-center gap-1 bg-white border p-1 rounded-lg"><button onClick={onPrev} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft size={16}/></button><span className="px-3 font-mono font-bold text-sm min-w-[100px] text-center">{mode==='month'?date.toLocaleDateString():date.toLocaleDateString()}</span><button onClick={onNext} className="p-1 hover:bg-slate-100 rounded"><ChevronRight size={16}/></button></div>
                 </div>
             </div>
-            
             {mode === 'month' && (
                 <div className="flex-1 p-4 overflow-auto">
                     <div className="grid grid-cols-7 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden">
@@ -186,7 +244,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                     </div>
                 </div>
             )}
-
             {mode === 'day' && (
                 <div className="flex-1 overflow-auto flex flex-col min-h-0">
                     <div className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-10">
@@ -200,18 +257,13 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
                                 const k=`${h}-${s.id}`;
                                 const g=dayGrid[k];
                                 const top=g?g[0]:null;
-                                
-                                let cls='bg-white';
-                                let icon=null;
-                                let statusText = '';
-
+                                let cls='bg-white'; let icon=null; let statusText = '';
                                 if(top){
                                     if(top.displayStatus==='scheduled') { cls='bg-emerald-100 text-emerald-700 border-emerald-200'; icon=<CheckCircle size={10}/>; statusText='已排程'; }
                                     else if(top.displayStatus==='action_needed') { cls='bg-blue-100 text-blue-700 border-blue-200'; icon=<AlertCircle size={10}/>; statusText='待處理'; }
                                     else if(top.displayStatus==='review_needed') { cls='bg-red-100 text-red-700 border-red-200'; icon=<Video size={10}/>; statusText='待審核'; }
                                     else if(top.displayStatus==='bidding') { cls='bg-yellow-50 text-yellow-700 border-yellow-200'; icon=<Clock size={10}/>; statusText='競價中'; }
                                 }
-
                                 return(
                                     <div key={k} className={`flex-1 min-w-[120px] border-r border-slate-100 p-1 cursor-pointer transition-all ${top ? 'hover:shadow-md' : ''}`} onClick={()=>g&&onSelectSlot(g)}>
                                         {top && (
@@ -232,16 +284,14 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-// --- 7. Rules View ---
+// --- 7. Rules View (保持原樣) ---
 export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete }) => {
     const { t } = useLanguage();
-    
     const getScreenName = (id) => {
         if(id === 'all') return t('rule_global') || 'Global (全部)';
         const s = screens.find(x => String(x.id) === String(id));
         return s ? s.name : id;
     };
-
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
             <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
@@ -255,34 +305,18 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                     <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 shadow-md">{t('add')}</button>
                 </div>
             </div>
-            
             <div className="lg:col-span-2 space-y-4">
                 <h3 className="font-bold text-lg flex items-center gap-2"><Calendar size={20}/> {t('rule_existing')} ({rules.length})</h3>
-                {rules.length === 0 ? (
-                    <div className="text-slate-400 text-center py-10 bg-white rounded-xl border border-dashed text-sm">No rules set</div>
-                ) : (
+                {rules.length === 0 ? (<div className="text-slate-400 text-center py-10 bg-white rounded-xl border border-dashed text-sm">No rules set</div>) : (
                     rules.map(rule => (
                         <div key={rule.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center hover:shadow-md transition-shadow">
                             <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-bold text-slate-700 text-lg">{rule.date}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
-                                        {getScreenName(rule.screenId)}
-                                    </span>
-                                </div>
-                                <div className="text-sm text-slate-500 flex items-center gap-4">
-                                    <span className="flex items-center gap-1 font-mono bg-slate-100 px-2 py-0.5 rounded text-xs"><Clock size={12}/> {rule.hours && rule.hours.length === 24 ? 'All Day (全日)' : `Hours: ${rule.hours?.join(',')}`}</span>
-                                    
-                                    {rule.type === 'lock' ? (
-                                        <span className="text-red-600 font-bold flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded text-xs"><Lock size={12}/> Locked (鎖定)</span>
-                                    ) : (
-                                        <span className="text-green-600 font-bold flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded text-xs"><DollarSign size={12}/> ${rule.value}</span>
-                                    )}
+                                <div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-lg">{rule.date}</span><span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>{getScreenName(rule.screenId)}</span></div>
+                                <div className="text-sm text-slate-500 flex items-center gap-4"><span className="flex items-center gap-1 font-mono bg-slate-100 px-2 py-0.5 rounded text-xs"><Clock size={12}/> {rule.hours && rule.hours.length === 24 ? 'All Day (全日)' : `Hours: ${rule.hours?.join(',')}`}</span>
+                                    {rule.type === 'lock' ? (<span className="text-red-600 font-bold flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded text-xs"><Lock size={12}/> Locked (鎖定)</span>) : (<span className="text-green-600 font-bold flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded text-xs"><DollarSign size={12}/> ${rule.value}</span>)}
                                 </div>
                             </div>
-                            <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors">
-                                <Trash2 size={18}/>
-                            </button>
+                            <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={18}/></button>
                         </div>
                     ))
                 )}
@@ -291,7 +325,7 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
     );
 };
 
-// --- 8. Screens View (🔥 修正：加入 Copy 按鈕 & 接收 onCopy Prop) ---
+// --- 8. Screens View (保持原樣) ---
 export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy, onSaveSimple, onChange, onToggle }) => {
     const { t } = useLanguage();
     return (
@@ -315,21 +349,10 @@ export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy
                                     <td className="p-4 text-center"><button onClick={()=>onToggle(s)} className={`px-3 py-1.5 rounded-full text-xs font-bold w-full ${s.isActive!==false?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{s.isActive!==false?t('btn_toggle_on'):t('btn_toggle_off')}</button></td>
                                     <td className="p-4"><div className="flex items-center gap-1 bg-white border rounded px-2 py-1"><span className="text-slate-400">$</span><input type="number" value={currentPrice} onChange={(e)=>onChange(s.firestoreId, 'basePrice', e.target.value)} className="w-full font-bold outline-none"/></div></td>
                                     <td className="p-4 text-right flex items-center justify-end gap-2">
-                                        
-                                        {/* Simple Save */}
                                         {isEditingSimple && <button onClick={()=>onSaveSimple(s)} className="bg-green-600 text-white p-1.5 rounded hover:bg-green-700" title="儲存底價"><CheckCircle size={14}/></button>}
-                                        
-                                        {/* Edit Full */}
                                         <button onClick={()=>onEditFull(s)} className="bg-white border border-slate-200 text-blue-600 p-1.5 rounded hover:bg-blue-50" title="編輯詳情"><Edit size={14}/></button>
-                                        
-                                        {/* 🔥 Copy Button */}
                                         <button onClick={()=>onCopy(s)} className="bg-white border border-slate-200 text-emerald-600 p-1.5 rounded hover:bg-emerald-50" title="複製"><Copy size={14}/></button>
-
-                                        {/* Toggle Active */}
-                                        <button onClick={()=>onToggle(s)} className="bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded" title={s.isActive ? "下架" : "上架"}>
-                                            {s.isActive ? <Eye size={14}/> : <EyeOff size={14}/>}
-                                        </button>
-
+                                        <button onClick={()=>onToggle(s)} className="bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded" title={s.isActive ? "下架" : "上架"}>{s.isActive ? <Eye size={14}/> : <EyeOff size={14}/>}</button>
                                     </td>
                                 </tr>
                              )
@@ -339,5 +362,4 @@ export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy
             </div>
         </div>
     );
-};  
-
+};
