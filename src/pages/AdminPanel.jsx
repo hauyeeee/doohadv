@@ -21,8 +21,9 @@ import {
 } from '../components/AdminTabs';
 import AdminManualOrder from '../components/AdminManualOrder';
 
-// --- 常數設定 ---
+// --- 👑 權限及常數設定 ---
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
+const PLATFORM_BOSS_EMAILS = ["powerbankboss@gmail.com"]; // 充電寶老闆專用登入
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -31,6 +32,7 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState(null); // 'admin' | 'boss' | 'merchant'
   
   // --- Data States ---
   const [orders, setOrders] = useState([]);
@@ -61,7 +63,7 @@ const AdminPanel = () => {
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
-  // 🔥 新增：財務配置 State
+  // --- 財務配置 State ---
   const [financialConfig, setFinancialConfig] = useState({
     costFactor: 0.5,        
     partnerPoolRatio: 0.3,  
@@ -71,6 +73,7 @@ const AdminPanel = () => {
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
+    merchantEmail: '', // 綁定商家專用電郵
     footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
@@ -83,13 +86,22 @@ const AdminPanel = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) { navigate("/"); return; }
-      if (!ADMIN_EMAILS.includes(currentUser.email)) { 
-          alert("⛔ You don't have admin access."); 
-          signOut(auth); 
-          navigate("/"); 
-          return; 
+      
+      // 判斷身份
+      let role = 'merchant'; 
+      if (ADMIN_EMAILS.includes(currentUser.email)) {
+          role = 'admin';
+      } else if (PLATFORM_BOSS_EMAILS.includes(currentUser.email)) {
+          role = 'boss';
       }
+      
+      setUserRole(role);
       setUser(currentUser);
+      
+      // 根據身份跳轉去對應嘅 Tab
+      if (role === 'boss') setActiveTab('platform_settle');
+      if (role === 'merchant') setActiveTab('merchant_settle');
+      
       fetchAllData();
     });
     return () => unsubscribe();
@@ -108,7 +120,7 @@ const AdminPanel = () => {
         setLoading(false);
       });
 
-      // 🔥 讀取財務配置
+      // 讀取財務配置
       getDoc(doc(db, "system_config", "financials")).then(docSnap => {
           if (docSnap.exists()) {
               setFinancialConfig(docSnap.data());
@@ -141,7 +153,7 @@ const AdminPanel = () => {
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // --- 🔥 新增：財務相關 API Handlers ---
+  // --- API Handlers ---
   const saveFinancialConfig = async () => {
       try {
           await setDoc(doc(db, "system_config", "financials"), financialConfig);
@@ -167,7 +179,7 @@ const AdminPanel = () => {
       }
   };
 
-  // --- Logic Helpers (已還原為易讀格式) ---
+  // --- Logic Helpers (完全展開版) ---
   const customerHistory = useMemo(() => { 
       const h = {}; 
       if (orders) {
@@ -349,8 +361,7 @@ const AdminPanel = () => {
   }, [orders, activeTab, searchTerm, statusFilter]);
 
 
-  // --- Event Handlers (保持完整) ---
-  
+  // --- Event Handlers (完全展開版) ---
   const handleScreenImageUpload = async (file, index) => {
       if (!file) return;
       setIsUploadingImage(true);
@@ -620,7 +631,7 @@ const AdminPanel = () => {
       setIsAddScreenModalOpen(true); 
       setEditingScreenId(null); 
       setNewScreenData({
-          name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
+          name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', merchantEmail: '', footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
           tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
       }); 
   };
@@ -641,6 +652,7 @@ const AdminPanel = () => {
       try {
           const p = { 
               ...newScreenData, 
+              merchantEmail: (newScreenData.merchantEmail || '').toLowerCase().trim(),
               basePrice: parseFloat(newScreenData.basePrice), 
               lat: parseFloat(newScreenData.lat) || null, 
               lng: parseFloat(newScreenData.lng) || null, 
@@ -689,21 +701,29 @@ const AdminPanel = () => {
 
   if (loading) return <LoadingScreen />;
 
-  // 🔥 定義所有的 Tabs 導航 (加入財務視圖)
+  // 🔥 權限隔離：定義所有的 Tabs 導航
   const ADMIN_TABS = [
       { id: 'dashboard', icon: <LayoutDashboard size={16}/>, label: t('tab_dashboard') },
-      { id: 'financial_config', icon: <Settings size={16}/>, label: '財務分成配置' }, 
+      { id: 'financial_config', icon: <Briefcase size={16}/>, label: '財務分成配置' }, 
       { id: 'platform_settle', icon: <DollarSign size={16}/>, label: '平台分成結算' }, 
       { id: 'merchant_settle', icon: <Briefcase size={16}/>, label: '商家專屬結算' }, 
-      { id: 'calendar', icon: <Calendar size={16}/>, label: t('tab_calendar') },
       { id: 'orders', icon: <List size={16}/>, label: t('tab_orders') },
-      { id: 'manualOrder', icon: <Plus size={16}/>, label: '手動加單/排期' },
       { id: 'review', icon: <Video size={16}/>, label: `${t('tab_review')} (${stats.pendingReview})`, alert: stats.pendingReview > 0 },
-      { id: 'rules', icon: <Settings size={16}/>, label: t('tab_rules') },
       { id: 'screens', icon: <Monitor size={16}/>, label: t('tab_screens') },
+      { id: 'calendar', icon: <Calendar size={16}/>, label: t('tab_calendar') },
+      { id: 'manualOrder', icon: <Plus size={16}/>, label: '手動加單/排期' },
       { id: 'analytics', icon: <TrendingUp size={16}/>, label: t('tab_analytics') },
+      { id: 'rules', icon: <Settings size={16}/>, label: t('tab_rules') },
       { id: 'config', icon: <Settings size={16}/>, label: t('tab_config') }
   ];
+
+  // 🔥 權限隔離：過濾用戶可見的 Tabs
+  const VISIBLE_TABS = ADMIN_TABS.filter(tab => {
+      if (userRole === 'admin') return true; 
+      if (userRole === 'boss') return tab.id === 'platform_settle'; 
+      if (userRole === 'merchant') return tab.id === 'merchant_settle'; 
+      return false;
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
@@ -717,15 +737,15 @@ const AdminPanel = () => {
             <div className="flex gap-2">
                 <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"><Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}</button>
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">{t('back_home')}</button>
+                {userRole === 'admin' && <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> {t('btn_smart_resolve')}</button>}
+                {userRole === 'admin' && <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> {t('btn_finalize')}</button>}
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">{t('logout')}</button>
-                <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> {t('btn_smart_resolve')}</button>
-                <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> {t('btn_finalize')}</button>
             </div>
         </div>
 
         {/* Tab 導航按鈕 */}
         <div className="flex flex-wrap gap-2">
-            {ADMIN_TABS.map(tab => (
+            {VISIBLE_TABS.map(tab => (
                 <button 
                     key={tab.id} 
                     onClick={() => { setActiveTab(tab.id); setSelectedOrderIds(new Set()); }} 
@@ -740,10 +760,21 @@ const AdminPanel = () => {
         {/* 渲染各個 Views */}
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
         
-        {/* 🔥 新增財務相關 Views */}
+        {/* 新增財務相關 Views */}
         {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} screens={screens} />}
         {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
-        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
+        
+        {/* 商家專屬結算視圖：傳遞過濾後的 Screens */}
+        {activeTab === 'merchant_settle' && (
+            <MerchantSettlementView 
+                stats={stats} 
+                config={financialConfig} 
+                orders={orders} 
+                screens={userRole === 'admin' ? screens : screens.filter(s => s.merchantEmail === user.email)} 
+                userRole={userRole}
+                onWithdrawRequest={handleWithdrawRequest} 
+            />
+        )}
         
         {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
