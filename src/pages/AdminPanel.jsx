@@ -87,11 +87,13 @@ const AdminPanel = () => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) { navigate("/"); return; }
       
+      const userEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
+      
       // 判斷身份
       let role = 'merchant'; 
-      if (ADMIN_EMAILS.includes(currentUser.email)) {
+      if (ADMIN_EMAILS.includes(userEmail)) {
           role = 'admin';
-      } else if (PLATFORM_BOSS_EMAILS.includes(currentUser.email)) {
+      } else if (PLATFORM_BOSS_EMAILS.includes(userEmail)) {
           role = 'boss';
       }
       
@@ -110,45 +112,59 @@ const AdminPanel = () => {
   const fetchAllData = () => {
       setLoading(true);
 
-      // 讀取 Orders
-      const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
-        setOrders(snap.docs.map(d => ({ 
-            id: d.id, 
-            ...d.data(), 
-            createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() 
-        })));
-        setLoading(false);
+      // 🔥 讀取 Orders (加入 Error 攔截，防止 Firebase Block 導致卡死)
+      const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), 
+      (snap) => {
+          setOrders(snap.docs.map(d => ({ 
+              id: d.id, 
+              ...d.data(), 
+              createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() 
+          })));
+          setLoading(false);
+      }, 
+      (error) => {
+          console.error("Firebase Orders Error:", error);
+          alert("⚠️ 無法讀取訂單數據！如果持續發生，請檢查 Firebase Security Rules 權限設定。");
+          setLoading(false); // 發生錯誤都要解除 Loading！
       });
 
       // 讀取財務配置
-      getDoc(doc(db, "system_config", "financials")).then(docSnap => {
-          if (docSnap.exists()) {
-              setFinancialConfig(docSnap.data());
-          }
-      });
+      getDoc(doc(db, "system_config", "financials"))
+          .then(docSnap => {
+              if (docSnap.exists()) {
+                  setFinancialConfig(docSnap.data());
+              }
+          })
+          .catch(err => console.error("Financial Config Error:", err));
 
       // 讀取 Screens
-      const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
+      const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), 
+      (snap) => {
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
           setScreens(sorted);
-      });
+      }, 
+      (error) => console.error("Screens Error:", error));
 
       // 讀取特殊規則
-      const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => { 
+      const unsubRules = onSnapshot(collection(db, "special_rules"), 
+      (snap) => { 
           setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() }))); 
-      });
+      }, 
+      (error) => console.error("Rules Error:", error));
 
       // 讀取定價設定
-      getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              setGlobalPricingConfig(data);
-              setActiveConfig(data);
-              if (data.bundleRules) {
-                  setLocalBundleRules(data.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier })));
+      getDoc(doc(db, "system_config", "pricing_rules"))
+          .then(docSnap => {
+              if (docSnap.exists()) {
+                  const data = docSnap.data();
+                  setGlobalPricingConfig(data);
+                  setActiveConfig(data);
+                  if (data.bundleRules) {
+                      setLocalBundleRules(data.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier })));
+                  }
               }
-          }
-      });
+          })
+          .catch(err => console.error("Pricing Config Error:", err));
 
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
@@ -179,7 +195,7 @@ const AdminPanel = () => {
       }
   };
 
-  // --- Logic Helpers (完全展開版) ---
+  // --- Logic Helpers (已還原為易讀格式) ---
   const customerHistory = useMemo(() => { 
       const h = {}; 
       if (orders) {
@@ -362,6 +378,7 @@ const AdminPanel = () => {
 
 
   // --- Event Handlers (完全展開版) ---
+  
   const handleScreenImageUpload = async (file, index) => {
       if (!file) return;
       setIsUploadingImage(true);
@@ -393,9 +410,13 @@ const AdminPanel = () => {
           const allOrders = snapshot.docs.map(d => {
               const data = d.data();
               let timeVal;
-              if (data.createdAt && typeof data.createdAt.toMillis === 'function') timeVal = data.createdAt.toMillis();
-              else if (data.createdAt instanceof Date) timeVal = data.createdAt.getTime();
-              else timeVal = Date.now(); 
+              if (data.createdAt && typeof data.createdAt.toMillis === 'function') {
+                  timeVal = data.createdAt.toMillis();
+              } else if (data.createdAt instanceof Date) {
+                  timeVal = data.createdAt.getTime();
+              } else {
+                  timeVal = Date.now(); 
+              }
               return { id: d.id, ...data, timeVal };
           });
 
@@ -453,21 +474,26 @@ const AdminPanel = () => {
                       if (winner.winnerOrderId !== order.id) { 
                           loseCount++; 
                           newSlotStatus = 'outbid'; 
-                      } 
-                      else { 
+                      } else { 
                           winCount++; 
                           newSlotStatus = 'winning'; 
                       }
                   }
-                  if (slot.slotStatus !== newSlotStatus) { hasChange = true; }
+                  if (slot.slotStatus !== newSlotStatus) { 
+                      hasChange = true; 
+                  }
                   return { ...slot, slotStatus: newSlotStatus };
               });
 
               let newStatus = order.status;
-              if (loseCount > 0 && winCount === 0) newStatus = 'outbid_needs_action'; 
-              else if (loseCount > 0 && winCount > 0) newStatus = 'partially_outbid'; 
-              else if (loseCount === 0 && winCount > 0) {
-                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') newStatus = 'paid_pending_selection'; 
+              if (loseCount > 0 && winCount === 0) {
+                  newStatus = 'outbid_needs_action'; 
+              } else if (loseCount > 0 && winCount > 0) {
+                  newStatus = 'partially_outbid'; 
+              } else if (loseCount === 0 && winCount > 0) {
+                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
+                      newStatus = 'paid_pending_selection'; 
+                  }
               }
 
               if (hasChange || newStatus !== order.status) {
@@ -527,19 +553,19 @@ const AdminPanel = () => {
   };
 
   const handleReview = async (id, action) => { 
-      if(!confirm(action)) return; 
+      if(!confirm(`Confirm ${action}?`)) return; 
       try { 
           await updateDoc(doc(db,"orders",id), { 
-              creativeStatus: action==='approve'?'approved':'rejected', 
-              isApproved: action==='approve', 
-              isRejected: action!=='approve', 
-              reviewNote: action!=='approve'?reviewNote:'' 
+              creativeStatus: action === 'approve' ? 'approved' : 'rejected', 
+              isApproved: action === 'approve', 
+              isRejected: action !== 'approve', 
+              reviewNote: action !== 'approve' ? reviewNote : '' 
           }); 
           
           const o = orders.find(x=>x.id===id);
           const userInfo = {email: o.userEmail, displayName: o.userName};
 
-          if(action==='approve') { 
+          if(action === 'approve') { 
               await sendBidConfirmation(userInfo, o, 'video_approved'); 
           } else {
               await sendBidConfirmation(userInfo, o, 'video_rejected', reviewNote);
@@ -559,14 +585,15 @@ const AdminPanel = () => {
   };
 
   const handleBulkAction = async (act) => { 
-      if(!confirm('Confirm bulk action?')) return; 
-      const b = writeBatch(db); 
-      selectedOrderIds.forEach(id => {
-          if(act === 'cancel') b.update(doc(db,"orders",id),{status:'cancelled'});
-      }); 
-      await b.commit(); 
-      alert("Done"); 
-      setSelectedOrderIds(new Set()); 
+      if(confirm('Confirm bulk action?')) { 
+          const b = writeBatch(db); 
+          selectedOrderIds.forEach(id => {
+              if(act === 'cancel') b.update(doc(db,"orders",id),{status:'cancelled'});
+          }); 
+          await b.commit(); 
+          alert("Done"); 
+          setSelectedOrderIds(new Set()); 
+      }
   };
 
   const handleDeleteOrder = async (id) => { 
@@ -578,8 +605,11 @@ const AdminPanel = () => {
   const handleAddRule = async () => { 
       if(!newRule.date) return alert("Date is required"); 
       let hours = []; 
-      if(!newRule.hoursStr) hours = Array.from({length:24},(_,i)=>i); 
-      else hours = newRule.hoursStr.split(',').map(Number); 
+      if(!newRule.hoursStr) {
+          hours = Array.from({length:24},(_,i)=>i); 
+      } else {
+          hours = newRule.hoursStr.split(',').map(Number); 
+      }
       
       await addDoc(collection(db,"special_rules"),{
           ...newRule, 
@@ -612,9 +642,21 @@ const AdminPanel = () => {
       alert(t('alert_saved')); 
   };
 
-  const handleAddBundleRule = () => setLocalBundleRules([...localBundleRules, {screensStr:"", multiplier:1.2}]);
-  const handleBundleRuleChange = (i,f,v) => { const n=[...localBundleRules]; n[i][f]=v; setLocalBundleRules(n); };
-  const handleRemoveBundleRule = (i) => { const n=[...localBundleRules]; n.splice(i,1); setLocalBundleRules(n); };
+  const handleAddBundleRule = () => {
+      setLocalBundleRules([...localBundleRules, {screensStr:"", multiplier:1.2}]);
+  };
+  
+  const handleBundleRuleChange = (i,f,v) => { 
+      const n = [...localBundleRules]; 
+      n[i][f] = v; 
+      setLocalBundleRules(n); 
+  };
+  
+  const handleRemoveBundleRule = (i) => { 
+      const n = [...localBundleRules]; 
+      n.splice(i,1); 
+      setLocalBundleRules(n); 
+  };
   
   const handleCopyScreen = (screenToCopy) => { 
       const copiedData = JSON.parse(JSON.stringify(screenToCopy)); 
@@ -687,7 +729,9 @@ const AdminPanel = () => {
       }
   };
 
-  const handleScreenChange = (fid,f,v) => setEditingScreens(p=>({...p, [fid]:{...p[fid], [f]:v}}));
+  const handleScreenChange = (fid,f,v) => {
+      setEditingScreens(p=>({...p, [fid]:{...p[fid], [f]:v}}));
+  };
 
   const saveScreenSimple = async (s) => { 
       const d = editingScreens[s.firestoreId]; 
@@ -695,7 +739,11 @@ const AdminPanel = () => {
           if(d.basePrice) d.basePrice = parseFloat(d.basePrice); 
           await updateDoc(doc(db,"screens",s.firestoreId), d); 
           alert(t('alert_saved')); 
-          setEditingScreens(p => { const n={...p}; delete n[s.firestoreId]; return n; }); 
+          setEditingScreens(p => { 
+              const n={...p}; 
+              delete n[s.firestoreId]; 
+              return n; 
+          }); 
       }
   };
 
@@ -735,11 +783,22 @@ const AdminPanel = () => {
                 <span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH {t('admin_title')}
             </h1>
             <div className="flex gap-2">
-                <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"><Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}</button>
-                <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">{t('back_home')}</button>
-                {userRole === 'admin' && <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"><Gavel size={16}/> {t('btn_smart_resolve')}</button>}
-                {userRole === 'admin' && <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"><Flag size={16}/> {t('btn_finalize')}</button>}
-                <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded">{t('logout')}</button>
+                <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200">
+                    <Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}
+                </button>
+                {userRole === 'admin' && (
+                    <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg">
+                        <Gavel size={16}/> {t('btn_smart_resolve')}
+                    </button>
+                )}
+                {userRole === 'admin' && (
+                    <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg">
+                        <Flag size={16}/> {t('btn_finalize')}
+                    </button>
+                )}
+                <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100 transition-colors">
+                    {t('logout')}
+                </button>
             </div>
         </div>
 
@@ -762,6 +821,7 @@ const AdminPanel = () => {
         
         {/* 新增財務相關 Views */}
         {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} screens={screens} />}
+        
         {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
         
         {/* 商家專屬結算視圖：傳遞過濾後的 Screens */}
@@ -778,12 +838,19 @@ const AdminPanel = () => {
         
         {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
+        
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
+        
         {activeTab === 'analytics' && <AnalyticsView stats={realMarketStats} screens={screens} selectedScreens={selectedStatScreens} setSelectedScreens={setSelectedStatScreens} selectedHours={selectedAnalyticsHours} setSelectedHours={setSelectedAnalyticsHours} />}
+        
         {activeTab === 'config' && <ConfigView config={activeConfig} setConfig={setActiveConfig} globalConfig={globalPricingConfig} setGlobal={setGlobalPricingConfig} target={selectedConfigTarget} setTarget={setSelectedConfigTarget} screens={screens} localRules={localBundleRules} setLocalRules={setLocalBundleRules} onSave={savePricingConfig} onAddRule={handleAddBundleRule} onRuleChange={handleBundleRuleChange} onRemoveRule={handleRemoveBundleRule} />}
+        
         {activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} />}
+        
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
+        
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
+        
         {activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
 
         {/* Modals */}
@@ -801,8 +868,11 @@ const AdminPanel = () => {
             toggleTierHour={(t,h) => {
                 const r = {...newScreenData.tierRules}; 
                 const d = r[activeDayTab][t]; 
-                if(d.includes(h)) r[activeDayTab][t] = d.filter(x => x !== h); 
-                else r[activeDayTab][t] = [...d,h]; 
+                if(d.includes(h)) {
+                    r[activeDayTab][t] = d.filter(x => x !== h); 
+                } else {
+                    r[activeDayTab][t] = [...d,h]; 
+                }
                 setNewScreenData({...newScreenData, tierRules:r});
             }} 
             activeDayTab={activeDayTab} 
