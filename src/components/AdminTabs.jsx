@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   BarChart3, TrendingUp, Users, DollarSign, Search, Video, Monitor, Save, Trash2, 
   List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff, Briefcase
+  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff, Briefcase, Loader2
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
@@ -12,6 +12,61 @@ import { useLanguage } from '../context/LanguageContext';
 
 const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// --- 共用組件：提現申請 (Withdrawal Section) ---
+const WithdrawalSection = ({ currentBalance, onWithdrawRequest }) => {
+    const [amount, setAmount] = useState('');
+    const [method, setMethod] = useState('FPS');
+    const [accountInfo, setAccountInfo] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleRequest = async () => {
+        const reqAmount = parseFloat(amount);
+        if (isNaN(reqAmount) || reqAmount < 1000) return alert("❌ 提現金額最少為 HK$1,000");
+        if (reqAmount > currentBalance) return alert("❌ 餘額不足");
+        if (!accountInfo.trim()) return alert("❌ 請提供銀行帳戶或 FPS 號碼");
+
+        if (window.confirm(`確認申請提現 HK$${reqAmount}？\n預計處理時間：至少 3 個工作天。`)) {
+            setIsSubmitting(true);
+            await onWithdrawRequest({ amount: reqAmount, method, accountInfo });
+            setIsSubmitting(false);
+            setAmount('');
+            setAccountInfo('');
+        }
+    };
+
+    return (
+        <div className="mt-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in">
+            <h4 className="font-bold text-slate-800 flex items-center gap-2"><DollarSign size={18} className="text-blue-600"/> 申請提現 (Withdrawal)</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">提現金額 (最少 $1,000)</label>
+                    <input type="number" value={amount} onChange={e=>setAmount(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 ring-blue-100" placeholder="0.00"/>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">收款方式</label>
+                    <select value={method} onChange={e=>setMethod(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none">
+                        <option value="FPS">轉數快 (FPS)</option>
+                        <option value="Bank">銀行轉帳 (Bank Transfer)</option>
+                    </select>
+                </div>
+                <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">帳戶資料 (銀行名稱/分行代碼/帳號 或 FPS 手機號碼/名稱)</label>
+                    <textarea value={accountInfo} onChange={e=>setAccountInfo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none h-20 resize-none" placeholder="請輸入詳細轉帳資料..."/>
+                </div>
+            </div>
+            <button 
+                onClick={handleRequest}
+                disabled={isSubmitting || currentBalance < 1000}
+                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${currentBalance < 1000 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'}`}
+            >
+                {isSubmitting ? <Loader2 className="animate-spin"/> : <CheckCircle size={18}/>}
+                立即申請提現
+            </button>
+            <p className="text-[10px] text-slate-400 text-center italic">註：所有提現申請均需經人工核對，並於至少 3 個工作天內處理轉帳。</p>
+        </div>
+    );
+};
 
 // --- 1. Dashboard View ---
 export const DashboardView = ({ stats, COLORS }) => {
@@ -25,36 +80,14 @@ export const DashboardView = ({ stats, COLORS }) => {
                 <StatCard title={t('total_records')} value={stats.totalOrders} icon={<List className="text-slate-500"/>} bg="bg-slate-50" border="border-slate-100" />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full flex flex-col">
-                    <h3 className="font-bold mb-4">{t('daily_revenue')}</h3>
-                    <div className="flex-1 w-full min-h-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={stats.dailyChartData}>
-                                <CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/>
-                                <Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/>
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full flex flex-col">
-                    <h3 className="font-bold mb-4">{t('order_status_dist')}</h3>
-                    <div className="flex-1 w-full min-h-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                    {stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
-                                </Pie>
-                                <Tooltip/><Legend/>
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full flex flex-col"><h3 className="font-bold mb-4">{t('daily_revenue')}</h3><div className="flex-1 w-full min-h-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={stats.dailyChartData}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/><Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={3}/></LineChart></ResponsiveContainer></div></div>
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-[350px] w-full flex flex-col"><h3 className="font-bold mb-4">{t('order_status_dist')}</h3><div className="flex-1 w-full min-h-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={stats.statusChartData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{stats.statusChartData.map((e,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip/><Legend/></PieChart></ResponsiveContainer></div></div>
             </div>
         </div>
     );
 };
 
-// --- 1.1 Financial Config View (財務配置：支援全域及單機獨立設定) ---
+// --- 1.1 Financial Config View ---
 export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
     const handleOverrideChange = (screenId, field, value) => {
         const numVal = value === '' ? undefined : parseFloat(value);
@@ -109,17 +142,17 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
     );
 };
 
-// --- 1.2 Platform Owner Settlement (平台老闆視圖：精準計算) ---
-export const PlatformOwnerSettlementView = ({ config, orders }) => {
-    const ownerTotalShare = React.useMemo(() => {
+// --- 1.2 Platform Owner Settlement (平台老闆視圖 + 提現) ---
+export const PlatformOwnerSettlementView = ({ stats, config, orders, screens, onWithdrawRequest }) => {
+    const ownerTotalShare = useMemo(() => {
         let total = 0;
         if (!orders) return 0;
         orders.forEach(order => {
             if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) {
                 order.detailedSlots.forEach(slot => {
                     const ov = config.screenOverrides?.[slot.screenId] || {};
-                    const poolR = ov.partnerPoolRatio ?? (config.partnerPoolRatio || 0.3);
-                    const merchR = ov.merchantRatioOfPool ?? (config.merchantRatioOfPool || 0.5);
+                    const poolR = ov.partnerPoolRatio !== undefined ? ov.partnerPoolRatio : (config.partnerPoolRatio || 0.3);
+                    const merchR = ov.merchantRatioOfPool !== undefined ? ov.merchantRatioOfPool : (config.merchantRatioOfPool || 0.5);
                     const netProfit = (Number(slot.bidPrice) || 0) * (1 - (config.costFactor || 0.5));
                     total += (netProfit * poolR * (1 - merchR));
                 });
@@ -129,21 +162,28 @@ export const PlatformOwnerSettlementView = ({ config, orders }) => {
     }, [orders, config]);
 
     return (
-        <div className="space-y-6 animate-in slide-in-from-bottom-4">
+        <div className="space-y-6 animate-in slide-in-from-bottom-4 max-w-4xl mx-auto">
             <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl">
-                <p className="text-xs opacity-60 uppercase font-bold mb-1">本月累計分成 (已扣成本及商家份額)</p>
-                <h2 className="text-4xl font-extrabold">HK$ {ownerTotalShare.toLocaleString(undefined, {minimumFractionDigits: 1})}</h2>
+                <p className="text-xs opacity-60 uppercase font-bold mb-1">本月累計分成結算 (已扣營運成本及商家津貼)</p>
+                <h2 className="text-4xl md:text-5xl font-extrabold">HK$ {ownerTotalShare.toLocaleString(undefined, {minimumFractionDigits: 1})}</h2>
+                <p className="text-[10px] mt-2 opacity-50">* 系統已自動根據各屏幕專屬協議比例進行結算。</p>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+                <StatCard title="合作設備數" value={stats.totalScreens} icon={<Monitor/>} bg="bg-white" />
+                <StatCard title="有效訂單數" value={stats.validOrders} icon={<CheckCircle/>} bg="bg-white" />
+            </div>
+            
+            <WithdrawalSection currentBalance={ownerTotalShare} onWithdrawRequest={onWithdrawRequest} />
         </div>
     );
 };
 
-// --- 1.3 Merchant Settlement (商家視圖：具備展示鎖定功能) ---
-export const MerchantSettlementView = ({ config, orders, screens }) => {
-    const [selectedScreenId, setSelectedScreenId] = React.useState('all');
-    const [isLocked, setIsLocked] = React.useState(false);
+// --- 1.3 Merchant Settlement (商家視圖 + 提現 + 展示鎖定) ---
+export const MerchantSettlementView = ({ config, orders, screens, onWithdrawRequest }) => {
+    const [selectedScreenId, setSelectedScreenId] = useState('all');
+    const [isLocked, setIsLocked] = useState(false);
 
-    const merchantShare = React.useMemo(() => {
+    const merchantShare = useMemo(() => {
         let share = 0;
         if (!orders) return 0;
         orders.forEach(order => {
@@ -151,8 +191,8 @@ export const MerchantSettlementView = ({ config, orders, screens }) => {
                 order.detailedSlots.forEach(slot => {
                     if (selectedScreenId === 'all' || String(slot.screenId) === String(selectedScreenId)) {
                         const ov = config.screenOverrides?.[slot.screenId] || {};
-                        const poolR = ov.partnerPoolRatio ?? (config.partnerPoolRatio || 0.3);
-                        const merchR = ov.merchantRatioOfPool ?? (config.merchantRatioOfPool || 0.5);
+                        const poolR = ov.partnerPoolRatio !== undefined ? ov.partnerPoolRatio : (config.partnerPoolRatio || 0.3);
+                        const merchR = ov.merchantRatioOfPool !== undefined ? ov.merchantRatioOfPool : (config.merchantRatioOfPool || 0.5);
                         const netProfit = (Number(slot.bidPrice) || 0) * (1 - (config.costFactor || 0.5));
                         share += (netProfit * poolR * merchR);
                     }
@@ -165,27 +205,46 @@ export const MerchantSettlementView = ({ config, orders, screens }) => {
     const curName = selectedScreenId === 'all' ? '總預覽' : screens.find(s=>String(s.id)===selectedScreenId)?.name;
 
     return (
-        <div className="space-y-6 animate-in fade-in">
+        <div className="space-y-6 animate-in fade-in max-w-4xl mx-auto">
             {!isLocked && (
-                <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 flex gap-4">
-                    <select value={selectedScreenId} onChange={e=>setSelectedScreenId(e.target.value)} className="flex-1 border rounded px-3 py-2">
-                        <option value="all">總預覽 (請勿向商家展示)</option>
-                        {screens.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
-                    </select>
-                    <button onClick={()=>selectedScreenId!=='all'&&setIsLocked(true)} className="bg-slate-900 text-white px-4 py-2 rounded font-bold flex items-center gap-2"><Lock size={16}/> 鎖定展示</button>
+                <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1 w-full">
+                        <span className="font-bold text-orange-800 text-sm mb-1 block">👨‍💻 Admin 控制台 (選擇商家)：</span>
+                        <select value={selectedScreenId} onChange={e=>setSelectedScreenId(e.target.value)} className="w-full border rounded-lg px-3 py-2 outline-none font-bold text-slate-700">
+                            <option value="all">總預覽 (請勿向商家展示)</option>
+                            <option disabled>──────────</option>
+                            {screens.map(s => <option key={s.id} value={String(s.id)}>📍 {s.name} ({s.location})</option>)}
+                        </select>
+                    </div>
+                    <button onClick={()=>{ if(selectedScreenId === 'all') { alert("請先選擇單一商家！"); return; } setIsLocked(true); }} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-slate-800 mt-5 sm:mt-0">
+                        <Lock size={16}/> 鎖定展示模式
+                    </button>
                 </div>
             )}
-            <div className="bg-emerald-600 text-white p-8 rounded-3xl relative overflow-hidden">
-                {isLocked && <div onDoubleClick={()=>setIsLocked(false)} className="absolute top-4 right-4 text-[10px] opacity-20 cursor-pointer">Secure Mode</div>}
-                <p className="text-xs opacity-80 uppercase font-bold">媒體管理津貼結算單</p>
-                <h3 className="text-2xl font-bold mb-2">{curName}</h3>
-                <h2 className="text-5xl font-extrabold">HK$ {merchantShare.toLocaleString(undefined, {minimumFractionDigits: 1})}</h2>
+            
+            <div className="bg-emerald-600 text-white p-8 rounded-3xl relative overflow-hidden shadow-lg">
+                {isLocked && <div onDoubleClick={()=>setIsLocked(false)} className="absolute top-4 right-4 text-[10px] opacity-20 cursor-pointer hover:opacity-100 transition-all bg-black/20 px-2 py-1 rounded" title="雙擊解鎖">Secure Mode</div>}
+                <p className="text-xs opacity-80 uppercase font-bold mb-1">媒體管理津貼結算單</p>
+                <h3 className="text-2xl font-bold mb-4 opacity-90">{curName}</h3>
+                <h2 className="text-4xl md:text-5xl font-extrabold">HK$ {merchantShare.toLocaleString(undefined, {minimumFractionDigits: 1})}</h2>
+            </div>
+
+            <WithdrawalSection currentBalance={merchantShare} onWithdrawRequest={onWithdrawRequest} />
+
+            <div className="bg-white border rounded-xl p-5 text-sm text-slate-500 shadow-sm">
+                <p className="font-bold text-slate-800 mb-2 flex items-center gap-2"><Briefcase size={16} className="text-emerald-500"/> 商家專屬權益</p>
+                <ul className="list-disc pl-4 space-y-1">
+                    <li>屏幕運作正常，已為貴店保留每小時 <strong className="text-emerald-600">10 分鐘</strong> 之免費專屬宣傳。</li>
+                    <li>系統防護啟動：已成功過濾同區競爭對手廣告。</li>
+                    <li>津貼已按貴店的專屬協議比例結算。</li>
+                </ul>
             </div>
         </div>
     );
 };
 
-// --- 2. Orders View ---
+// --- 以下功能全部保持原樣 (Orders, Review, Analytics, Config, Calendar, Rules, Screens) ---
+
 export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAction, customerHistory = {}, statusFilter, setStatusFilter, searchTerm, setSearchTerm, onDeleteOrder }) => {
     const { t, lang } = useLanguage();
     return (
@@ -234,7 +293,6 @@ export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAc
     );
 };
 
-// --- 3. Review View ---
 export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => {
     const { t } = useLanguage();
     return (
@@ -253,7 +311,6 @@ export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => {
     );
 };
 
-// --- 4. Analytics View ---
 export const AnalyticsView = ({ stats, screens, selectedScreens, setSelectedScreens, selectedHours, setSelectedHours }) => {
     const { t, lang } = useLanguage();
     const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_ZH;
@@ -274,7 +331,6 @@ export const AnalyticsView = ({ stats, screens, selectedScreens, setSelectedScre
     );
 };
 
-// --- 5. Config View ---
 export const ConfigView = ({ config, setConfig, screens, target, setTarget, onSave, onAddRule, onRuleChange, onRemoveRule, localRules }) => {
     const { t } = useLanguage();
     return (
@@ -300,7 +356,6 @@ export const ConfigView = ({ config, setConfig, screens, target, setTarget, onSa
     );
 };
 
-// --- 6. Calendar View ---
 export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid, screens, onSelectSlot, onPrev, onNext }) => {
     const { t } = useLanguage();
     return (
@@ -352,7 +407,6 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-// --- 7. Rules View ---
 export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete }) => {
     const { t } = useLanguage();
     return (
@@ -383,7 +437,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
     );
 };
 
-// --- 8. Screens View ---
 export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy, onSaveSimple, onChange, onToggle }) => {
     const { t } = useLanguage();
     return (

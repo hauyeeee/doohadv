@@ -2,14 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
-// 🔥 1. 新增 Storage 相關函數
 import { 
   ref, uploadBytes, getDownloadURL 
 } from "firebase/storage"; 
 import { 
   LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe, Plus, DollarSign, Briefcase 
 } from 'lucide-react';
-// 🔥 2. 引入 storage
 import { db, auth, storage } from '../firebase'; 
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from 'react-router-dom';
@@ -19,10 +17,11 @@ import { useLanguage } from '../context/LanguageContext';
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
   DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView,
-  FinancialConfigView, PlatformOwnerSettlementView, MerchantSettlementView // 🔥 確保 import 咗新組件 (已修復逗號)
+  FinancialConfigView, PlatformOwnerSettlementView, MerchantSettlementView 
 } from '../components/AdminTabs';
 import AdminManualOrder from '../components/AdminManualOrder';
 
+// --- 常數設定 ---
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
@@ -33,18 +32,18 @@ const AdminPanel = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  // --- Data ---
+  // --- Data States ---
   const [orders, setOrders] = useState([]);
   const [screens, setScreens] = useState([]);
   const [specialRules, setSpecialRules] = useState([]);
   
-  // --- Config ---
+  // --- Config States ---
   const [globalPricingConfig, setGlobalPricingConfig] = useState({});
   const [activeConfig, setActiveConfig] = useState({}); 
   const [selectedConfigTarget, setSelectedConfigTarget] = useState('global'); 
   const [localBundleRules, setLocalBundleRules] = useState([]); 
 
-  // --- UI ---
+  // --- UI States ---
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -55,23 +54,24 @@ const AdminPanel = () => {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());        
   const [editingScreens, setEditingScreens] = useState({});
   
-  // --- Modals State ---
+  // --- Modals States ---
   const [isAddScreenModalOpen, setIsAddScreenModalOpen] = useState(false);
   const [editingScreenId, setEditingScreenId] = useState(null);
   const [activeDayTab, setActiveDayTab] = useState(1);
   const [selectedSlotGroup, setSelectedSlotGroup] = useState(null); 
-  const [isUploadingImage, setIsUploadingImage] = useState(false); // 🔥 上傳狀態
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   // 🔥 新增：財務配置 State
   const [financialConfig, setFinancialConfig] = useState({
-    costFactor: 0.5,        // 預設 50% 成本
-    partnerPoolRatio: 0.3,  // 預設 30% 分成池
-    merchantRatioOfPool: 0.5 // 商家佔池中一半
+    costFactor: 0.5,        
+    partnerPoolRatio: 0.3,  
+    merchantRatioOfPool: 0.5,
+    screenOverrides: {}
   });
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
-    footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', // 🔥 加咗呢度
+    footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
     tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
   });
 
@@ -79,11 +79,16 @@ const AdminPanel = () => {
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
-  // 1. Auth & Data Fetching
+  // --- 1. 權限認證與資料讀取 ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) { navigate("/"); return; }
-      if (!ADMIN_EMAILS.includes(currentUser.email)) { alert("⛔"); signOut(auth); navigate("/"); return; }
+      if (!ADMIN_EMAILS.includes(currentUser.email)) { 
+          alert("⛔ You don't have admin access."); 
+          signOut(auth); 
+          navigate("/"); 
+          return; 
+      }
       setUser(currentUser);
       fetchAllData();
     });
@@ -92,8 +97,14 @@ const AdminPanel = () => {
 
   const fetchAllData = () => {
       setLoading(true);
+
+      // 讀取 Orders
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), (snap) => {
-        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data(), createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() })));
+        setOrders(snap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(), 
+            createdAtDate: d.data().createdAt?.toDate ? d.data().createdAt.toDate() : new Date() 
+        })));
         setLoading(false);
       });
 
@@ -104,40 +115,65 @@ const AdminPanel = () => {
           }
       });
 
+      // 讀取 Screens
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), (snap) => {
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
           setScreens(sorted);
       });
-      const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => { setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() }))); });
+
+      // 讀取特殊規則
+      const unsubRules = onSnapshot(collection(db, "special_rules"), (snap) => { 
+          setSpecialRules(snap.docs.map(d => ({ id: d.id, ...d.data() }))); 
+      });
+
+      // 讀取定價設定
       getDoc(doc(db, "system_config", "pricing_rules")).then(docSnap => {
           if (docSnap.exists()) {
               const data = docSnap.data();
               setGlobalPricingConfig(data);
               setActiveConfig(data);
-              if (data.bundleRules) setLocalBundleRules(data.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier })));
+              if (data.bundleRules) {
+                  setLocalBundleRules(data.bundleRules.map(r => ({ screensStr: r.screens.join(','), multiplier: r.multiplier })));
+              }
           }
       });
+
       return () => { unsubOrders(); unsubScreens(); unsubRules(); };
   };
 
-  // 🔥 儲存財務配置邏輯 (已修復：移出 fetchAllData 確保 Scope 正確)
+  // --- 🔥 新增：財務相關 API Handlers ---
   const saveFinancialConfig = async () => {
       try {
           await setDoc(doc(db, "system_config", "financials"), financialConfig);
-          alert("✅ 財務分成比例已更新！");
+          alert("✅ 財務分成比例已成功更新並儲存！");
       } catch (e) {
           console.error(e);
-          alert("❌ 儲存失敗");
+          alert("❌ 儲存失敗：" + e.message);
       }
   };
 
-  // --- Logic Helpers ---
+  const handleWithdrawRequest = async (requestData) => {
+      try {
+          await addDoc(collection(db, "withdrawal_requests"), {
+              ...requestData,
+              userEmail: user.email,
+              status: 'pending',
+              createdAt: serverTimestamp()
+          });
+          alert("✅ 提現申請已提交，請耐心等候至少 3 個工作天處理轉帳。");
+      } catch (e) {
+          console.error(e);
+          alert("❌ 提交失敗，請檢查網絡連線");
+      }
+  };
+
+  // --- Logic Helpers (已還原為易讀格式) ---
   const customerHistory = useMemo(() => { 
       const h = {}; 
       if (orders) {
           orders.forEach(o => { 
-              if (o.userEmail) {
-                  if(!h[o.userEmail]) h[o.userEmail]=0; 
+              if (o.userEmail) { 
+                  if(!h[o.userEmail]) h[o.userEmail] = 0; 
                   h[o.userEmail]++; 
               }
           }); 
@@ -150,10 +186,15 @@ const AdminPanel = () => {
     if (orders) {
         orders.forEach(order => {
             statusCount[order.status || 'unknown'] = (statusCount[order.status || 'unknown'] || 0) + 1;
-            const needsReview = order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
+            
+            const needsReview = order.creativeStatus === 'pending_review' || 
+                (order.hasVideo && !order.creativeStatus && !order.isApproved && !order.isRejected && order.status !== 'cancelled');
+            
             if (needsReview) pendingReview++;
+            
             if (['paid', 'won', 'completed', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status)) {
-                totalRevenue += Number(order.amount) || 0; validOrders++;
+                totalRevenue += Number(order.amount) || 0; 
+                validOrders++;
                 if (order.createdAtDate) {
                     const dateKey = order.createdAtDate.toISOString().split('T')[0];
                     dailyRevenue[dateKey] = (dailyRevenue[dateKey] || 0) + Number(order.amount);
@@ -161,16 +202,65 @@ const AdminPanel = () => {
             }
         });
     }
-    return { totalRevenue, totalOrders: orders.length, validOrders, pendingReview, dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) };
+    return { 
+        totalRevenue, 
+        totalOrders: orders.length, 
+        validOrders, 
+        pendingReview, 
+        dailyChartData: Object.keys(dailyRevenue).sort().map(d => ({ date: d.substring(5), amount: dailyRevenue[d] })), 
+        statusChartData: Object.keys(statusCount).map(k => ({ name: k, value: statusCount[k] })) 
+    };
   }, [orders]);
 
   const realMarketStats = useMemo(() => {
-      const statsMap = {}; for(let d=0; d<7; d++) { for(let h=0; h<24; h++) { statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; } }
-      orders.forEach(order => { if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) { order.detailedSlots.forEach(slot => { const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId)); const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour); if (isScreenSelected && isHourSelected) { const dateObj = new Date(slot.date); const key = `${dateObj.getDay()}-${slot.hour}`; if (statsMap[key]) { statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); statsMap[key].totalBids += 1; } } }); } });
-      let selectionTotalAmount = 0; let selectionTotalBids = 0;
-      const rows = Object.values(statsMap).map(item => { if (item.totalBids > 0) { const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); if (isHourVisible) { selectionTotalAmount += item.totalAmount; selectionTotalBids += item.totalBids; } } return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; });
+      const statsMap = {}; 
+      for(let d=0; d<7; d++) { 
+          for(let h=0; h<24; h++) { 
+              statsMap[`${d}-${h}`] = { dayOfWeek: d, hour: h, totalAmount: 0, totalBids: 0 }; 
+          } 
+      }
+
+      orders.forEach(order => { 
+          if (['paid', 'won', 'completed'].includes(order.status) && order.detailedSlots) { 
+              order.detailedSlots.forEach(slot => { 
+                  const isScreenSelected = selectedStatScreens.size === 0 || selectedStatScreens.has(String(slot.screenId)); 
+                  const isHourSelected = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(slot.hour); 
+                  
+                  if (isScreenSelected && isHourSelected) { 
+                      const dateObj = new Date(slot.date); 
+                      const key = `${dateObj.getDay()}-${slot.hour}`; 
+                      if (statsMap[key]) { 
+                          statsMap[key].totalAmount += (Number(slot.bidPrice) || 0); 
+                          statsMap[key].totalBids += 1; 
+                      } 
+                  } 
+              }); 
+          } 
+      });
+
+      let selectionTotalAmount = 0; 
+      let selectionTotalBids = 0;
+      
+      const rows = Object.values(statsMap).map(item => { 
+          if (item.totalBids > 0) { 
+              const isHourVisible = selectedAnalyticsHours.size === 0 || selectedAnalyticsHours.has(item.hour); 
+              if (isHourVisible) { 
+                  selectionTotalAmount += item.totalAmount; 
+                  selectionTotalBids += item.totalBids; 
+              } 
+          } 
+          return { ...item, averagePrice: item.totalBids > 0 ? Math.round(item.totalAmount / item.totalBids) : 0 }; 
+      });
+
       const displayRows = selectedAnalyticsHours.size > 0 ? rows.filter(r => selectedAnalyticsHours.has(r.hour)) : rows;
-      return { rows: displayRows, summary: { avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, totalBids: selectionTotalBids } };
+      
+      return { 
+          rows: displayRows, 
+          summary: { 
+              avgPrice: selectionTotalBids > 0 ? Math.round(selectionTotalAmount / selectionTotalBids) : 0, 
+              totalBids: selectionTotalBids 
+          } 
+      };
   }, [orders, selectedStatScreens, selectedAnalyticsHours]);
 
   const monthViewData = useMemo(() => {
@@ -182,7 +272,7 @@ const AdminPanel = () => {
           const dateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; 
           days[dateStr] = { count: 0, pending: 0, scheduled: 0, bidding: 0, action: 0 }; 
       }
-      
+
       orders.forEach(order => { 
           if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
           
@@ -205,17 +295,62 @@ const AdminPanel = () => {
   }, [orders, calendarDate]);
 
   const dayViewGrid = useMemo(() => {
-    const grid = {}; const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
-    orders.forEach(order => { if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; order.detailedSlots.forEach(slot => { if (slot.date !== targetDateStr) return; const key = `${slot.hour}-${slot.screenId}`; let status = 'normal'; if (order.status === 'paid_pending_selection') status = 'bidding'; else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed'; else if (order.isScheduled) status = 'scheduled'; else if (order.status === 'won' || order.status === 'paid' || order.status === 'partially_won') status = 'action_needed'; const slotData = { ...slot, orderId: order.id, userEmail: order.userEmail, videoUrl: order.videoUrl, status: order.status, creativeStatus: order.creativeStatus, isScheduled: order.isScheduled, displayStatus: status, price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 }; if (!grid[key]) grid[key] = []; grid[key].push(slotData); }); });
-    Object.keys(grid).forEach(key => { grid[key].sort((a, b) => b.priceVal - a.priceVal); });
+    const grid = {}; 
+    const targetDateStr = `${calendarDate.getFullYear()}-${String(calendarDate.getMonth()+1).padStart(2,'0')}-${String(calendarDate.getDate()).padStart(2,'0')}`;
+    
+    orders.forEach(order => { 
+        if (!['paid', 'won', 'paid_pending_selection', 'partially_outbid', 'partially_won'].includes(order.status) || !order.detailedSlots) return; 
+        
+        order.detailedSlots.forEach(slot => { 
+            if (slot.date !== targetDateStr) return; 
+            
+            const key = `${slot.hour}-${slot.screenId}`; 
+            let status = 'normal'; 
+            
+            if (order.status === 'paid_pending_selection') status = 'bidding'; 
+            else if (order.creativeStatus === 'pending_review' || (order.hasVideo && !order.creativeStatus && !order.isApproved)) status = 'review_needed'; 
+            else if (order.isScheduled) status = 'scheduled'; 
+            else if (order.status === 'won' || order.status === 'paid' || order.status === 'partially_won') status = 'action_needed'; 
+            
+            const slotData = { 
+                ...slot, 
+                orderId: order.id, 
+                userEmail: order.userEmail, 
+                videoUrl: order.videoUrl, 
+                status: order.status, 
+                creativeStatus: order.creativeStatus, 
+                isScheduled: order.isScheduled, 
+                displayStatus: status, 
+                price: order.type === 'bid' ? (slot.bidPrice || 0) : 'Buyout', 
+                priceVal: order.type === 'bid' ? (parseInt(slot.bidPrice) || 0) : 999999 
+            }; 
+            
+            if (!grid[key]) grid[key] = []; 
+            grid[key].push(slotData); 
+        }); 
+    });
+
+    Object.keys(grid).forEach(key => { 
+        grid[key].sort((a, b) => b.priceVal - a.priceVal); 
+    });
+
     return grid;
   }, [orders, calendarDate]);
 
-  const filteredOrders = useMemo(() => { return orders.filter(o => { if (activeTab === 'review') { return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); } const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); const matchesStatus = statusFilter === 'all' || o.status === statusFilter; return matchesSearch && matchesStatus; }); }, [orders, activeTab, searchTerm, statusFilter]);
+  const filteredOrders = useMemo(() => { 
+      return orders.filter(o => { 
+          if (activeTab === 'review') { 
+              return o.creativeStatus === 'pending_review' || (o.hasVideo && !o.creativeStatus && !o.isApproved && !o.isRejected && o.status !== 'cancelled'); 
+          } 
+          const matchesSearch = (o.id||'').toLowerCase().includes(searchTerm.toLowerCase()) || (o.userEmail||'').toLowerCase().includes(searchTerm.toLowerCase()); 
+          const matchesStatus = statusFilter === 'all' || o.status === statusFilter; 
+          return matchesSearch && matchesStatus; 
+      }); 
+  }, [orders, activeTab, searchTerm, statusFilter]);
 
-  // --- Handlers ---
+
+  // --- Event Handlers (保持完整) ---
   
-  // 🔥 3. 新增：處理圖片上傳
   const handleScreenImageUpload = async (file, index) => {
       if (!file) return;
       setIsUploadingImage(true);
@@ -232,8 +367,8 @@ const AdminPanel = () => {
       } catch (error) {
           console.error("Upload Error:", error);
           alert("❌ 上傳失敗: " + error.message);
-      } finally {
-          setIsUploadingImage(false);
+      } finally { 
+          setIsUploadingImage(false); 
       }
   };
 
@@ -304,8 +439,14 @@ const AdminPanel = () => {
                   let newSlotStatus = 'normal';
 
                   if (winner) {
-                      if (winner.winnerOrderId !== order.id) { loseCount++; newSlotStatus = 'outbid'; } 
-                      else { winCount++; newSlotStatus = 'winning'; }
+                      if (winner.winnerOrderId !== order.id) { 
+                          loseCount++; 
+                          newSlotStatus = 'outbid'; 
+                      } 
+                      else { 
+                          winCount++; 
+                          newSlotStatus = 'winning'; 
+                      }
                   }
                   if (slot.slotStatus !== newSlotStatus) { hasChange = true; }
                   return { ...slot, slotStatus: newSlotStatus };
@@ -328,7 +469,12 @@ const AdminPanel = () => {
           await batch.commit();
           alert(t('alert_resolve_success'));
 
-      } catch (error) { console.error("Auto Resolve Error:", error); alert(`Error: ${error.message}`); } finally { setLoading(false); }
+      } catch (error) { 
+          console.error("Auto Resolve Error:", error); 
+          alert(`Error: ${error.message}`); 
+      } finally { 
+          setLoading(false); 
+      }
   };
 
   const handleFinalizeAuction = async () => {
@@ -338,12 +484,16 @@ const AdminPanel = () => {
           const q = query(collection(db, "orders"), where("status", "==", "outbid_needs_action"));
           const snapshot = await getDocs(q); 
           const batch = writeBatch(db); 
-          let count=0; 
-          const now=new Date();
+          let count = 0; 
+          const now = new Date();
+          
           for(const d of snapshot.docs) {
               const o = d.data();
               if(o.detailedSlots && o.detailedSlots.length > 0) {
-                  const allSlotsExpired = o.detailedSlots.every(s => { const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`); return now > slotTime; });
+                  const allSlotsExpired = o.detailedSlots.every(s => { 
+                      const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`); 
+                      return now > slotTime; 
+                  });
                   if (allSlotsExpired) {
                       batch.update(doc(db,"orders",d.id), {status:'lost', finalizedAt: serverTimestamp()});
                       await sendBidLostEmail({email:o.userEmail, displayName:o.userName}, {id:d.id});
@@ -351,9 +501,18 @@ const AdminPanel = () => {
                   }
               }
           }
-          if(count>0) { await batch.commit(); alert(t('alert_finalize_success')); } 
-          else alert(t('alert_no_expired'));
-      } catch(e) { console.error(e); alert("Failed"); } finally { setLoading(false); }
+          if(count > 0) { 
+              await batch.commit(); 
+              alert(t('alert_finalize_success')); 
+          } else {
+              alert(t('alert_no_expired'));
+          }
+      } catch(e) { 
+          console.error(e); 
+          alert("Failed"); 
+      } finally { 
+          setLoading(false); 
+      }
   };
 
   const handleReview = async (id, action) => { 
@@ -374,7 +533,6 @@ const AdminPanel = () => {
           } else {
               await sendBidConfirmation(userInfo, o, 'video_rejected', reviewNote);
           }
-
           alert("Processed successfully"); 
       } catch(e){ 
           console.error(e);
@@ -382,58 +540,161 @@ const AdminPanel = () => {
       } 
   };
 
-  const handleMarkAsScheduled = async (id) => { if(!confirm("OK?"))return; await updateDoc(doc(db,"orders",id), {isScheduled:true, scheduledAt: new Date()}); alert("Scheduled"); };
-  const handleBulkAction = async (act) => { if(!confirm('Confirm?'))return; const b=writeBatch(db); selectedOrderIds.forEach(id=>{if(act==='cancel') b.update(doc(db,"orders",id),{status:'cancelled'})}); await b.commit(); alert("Done"); setSelectedOrderIds(new Set()); };
-  const handleDeleteOrder = async (id) => { if(confirm("Cancel?")) await updateDoc(doc(db,"orders",id),{status:'cancelled'}); };
-  
-  const handleAddRule = async () => { if(!newRule.date) return alert("Date?"); let hours=[]; if(!newRule.hoursStr) hours=Array.from({length:24},(_,i)=>i); else hours=newRule.hoursStr.split(',').map(Number); await addDoc(collection(db,"special_rules"),{...newRule, hours, type:newRule.action, value: parseFloat(newRule.overridePrice)}); alert("Done"); };
-  const handleDeleteRule = async (id) => { if(confirm("Del?")) await deleteDoc(doc(db,"special_rules",id)); };
+  const handleMarkAsScheduled = async (id) => { 
+      if(confirm("Mark as scheduled?")) {
+          await updateDoc(doc(db,"orders",id), {isScheduled:true, scheduledAt: new Date()}); 
+          alert("Scheduled");
+      }
+  };
 
-  const savePricingConfig = async () => { const rules=localBundleRules.map(r=>({screens:r.screensStr.split(','), multiplier:parseFloat(r.multiplier)})); if(selectedConfigTarget==='global'){await setDoc(doc(db,"system_config","pricing_rules"),{...activeConfig, bundleRules:rules}); setGlobalPricingConfig(activeConfig);} else {const s=screens.find(x=>String(x.id)===selectedConfigTarget); await updateDoc(doc(db,"screens",s.firestoreId),{customPricing:activeConfig});} alert(t('alert_saved')); };
+  const handleBulkAction = async (act) => { 
+      if(!confirm('Confirm bulk action?')) return; 
+      const b = writeBatch(db); 
+      selectedOrderIds.forEach(id => {
+          if(act === 'cancel') b.update(doc(db,"orders",id),{status:'cancelled'});
+      }); 
+      await b.commit(); 
+      alert("Done"); 
+      setSelectedOrderIds(new Set()); 
+  };
+
+  const handleDeleteOrder = async (id) => { 
+      if(confirm("Cancel order?")) {
+          await updateDoc(doc(db,"orders",id),{status:'cancelled'}); 
+      }
+  };
+  
+  const handleAddRule = async () => { 
+      if(!newRule.date) return alert("Date is required"); 
+      let hours = []; 
+      if(!newRule.hoursStr) hours = Array.from({length:24},(_,i)=>i); 
+      else hours = newRule.hoursStr.split(',').map(Number); 
+      
+      await addDoc(collection(db,"special_rules"),{
+          ...newRule, 
+          hours, 
+          type: newRule.action, 
+          value: parseFloat(newRule.overridePrice)
+      }); 
+      alert("Done"); 
+  };
+
+  const handleDeleteRule = async (id) => { 
+      if(confirm("Delete rule?")) {
+          await deleteDoc(doc(db,"special_rules",id)); 
+      }
+  };
+
+  const savePricingConfig = async () => { 
+      const rules = localBundleRules.map(r => ({
+          screens: r.screensStr.split(','), 
+          multiplier: parseFloat(r.multiplier)
+      })); 
+      
+      if (selectedConfigTarget === 'global') {
+          await setDoc(doc(db,"system_config","pricing_rules"), {...activeConfig, bundleRules:rules}); 
+          setGlobalPricingConfig(activeConfig);
+      } else {
+          const s = screens.find(x => String(x.id) === selectedConfigTarget); 
+          await updateDoc(doc(db,"screens",s.firestoreId), {customPricing:activeConfig});
+      } 
+      alert(t('alert_saved')); 
+  };
+
   const handleAddBundleRule = () => setLocalBundleRules([...localBundleRules, {screensStr:"", multiplier:1.2}]);
   const handleBundleRuleChange = (i,f,v) => { const n=[...localBundleRules]; n[i][f]=v; setLocalBundleRules(n); };
   const handleRemoveBundleRule = (i) => { const n=[...localBundleRules]; n.splice(i,1); setLocalBundleRules(n); };
   
-  // 複製功能
-  const handleCopyScreen = (screenToCopy) => { const copiedData = JSON.parse(JSON.stringify(screenToCopy)); delete copiedData.firestoreId; delete copiedData.id; copiedData.name = `${copiedData.name} (Copy)`; copiedData.isActive = true; setNewScreenData(copiedData); setEditingScreenId(null); setIsAddScreenModalOpen(true); };
-  const handleAddScreen = () => { setIsAddScreenModalOpen(true); setEditingScreenId(null); setNewScreenData({name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }}); };
-  const handleEditScreenFull = (s) => { let rules = s.tierRules || {}; if(rules.default && !rules[0]) { let r=rules.default; rules={}; for(let i=0;i<7;i++) rules[i]=r; } setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); setEditingScreenId(s.firestoreId); setIsAddScreenModalOpen(true); };
+  const handleCopyScreen = (screenToCopy) => { 
+      const copiedData = JSON.parse(JSON.stringify(screenToCopy)); 
+      delete copiedData.firestoreId; 
+      delete copiedData.id; 
+      copiedData.name = `${copiedData.name} (Copy)`; 
+      copiedData.isActive = true; 
+      setNewScreenData(copiedData); 
+      setEditingScreenId(null); 
+      setIsAddScreenModalOpen(true); 
+  };
 
-  // 🔥 4. 修正儲存邏輯 (解決 No Document Error)
+  const handleAddScreen = () => { 
+      setIsAddScreenModalOpen(true); 
+      setEditingScreenId(null); 
+      setNewScreenData({
+          name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '', footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
+          tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
+      }); 
+  };
+
+  const handleEditScreenFull = (s) => { 
+      let rules = s.tierRules || {}; 
+      if (rules.default && !rules[0]) { 
+          let r = rules.default; 
+          rules = {}; 
+          for(let i=0; i<7; i++) rules[i] = r; 
+      } 
+      setNewScreenData({ ...s, tierRules: rules, images: s.images||['','',''] }); 
+      setEditingScreenId(s.firestoreId); 
+      setIsAddScreenModalOpen(true); 
+  };
+
   const saveScreenFull = async () => { 
       try {
-          const p = { ...newScreenData, basePrice: parseFloat(newScreenData.basePrice), 
-        lat: parseFloat(newScreenData.lat) || null, // 🔥 加咗呢行 (轉做數字，如果無就入 null)
-        lng: parseFloat(newScreenData.lng) || null, // 🔥 加咗呢行
-        images: newScreenData.images.filter(x=>x), lastUpdated: serverTimestamp() };
+          const p = { 
+              ...newScreenData, 
+              basePrice: parseFloat(newScreenData.basePrice), 
+              lat: parseFloat(newScreenData.lat) || null, 
+              lng: parseFloat(newScreenData.lng) || null, 
+              images: newScreenData.images.filter(x=>x), 
+              lastUpdated: serverTimestamp() 
+          };
           delete p.firestoreId; 
           
           if(editingScreenId) { 
-              // 使用 setDoc merge 來確保即使文件是 "虛擬" 的也能寫入
               await setDoc(doc(db,"screens",editingScreenId), p, { merge: true }); 
-          } 
-          else {
-              const existingIds = screens.map(s => { const internalId = parseInt(s.id); const docId = s.firestoreId && s.firestoreId.startsWith('screen_') ? parseInt(s.firestoreId.replace('screen_', '')) : 0; return Math.max(isNaN(internalId)?0:internalId, isNaN(docId)?0:docId); });
+          } else {
+              const existingIds = screens.map(s => { 
+                  const internalId = parseInt(s.id); 
+                  const docId = s.firestoreId && s.firestoreId.startsWith('screen_') ? parseInt(s.firestoreId.replace('screen_', '')) : 0; 
+                  return Math.max(isNaN(internalId)?0:internalId, isNaN(docId)?0:docId); 
+              });
               const nextId = (existingIds.length > 0 ? Math.max(...existingIds) : 0) + 1;
               const newDocId = `screen_${String(nextId).padStart(3, '0')}`;
               await setDoc(doc(db, "screens", newDocId), { ...p, id: String(nextId), createdAt: serverTimestamp(), isActive: true });
           }
-          alert(t('alert_saved')); setIsAddScreenModalOpen(false); 
-      } catch (e) { console.error("Save Error", e); alert("Save Failed: " + e.message); }
+          alert(t('alert_saved')); 
+          setIsAddScreenModalOpen(false); 
+      } catch (e) { 
+          console.error("Save Error", e); 
+          alert("Save Failed: " + e.message); 
+      }
   };
 
-  const toggleScreenActive = async (s) => { if(confirm("Toggle?")) await updateDoc(doc(db,"screens",s.firestoreId),{isActive:!s.isActive}); };
+  const toggleScreenActive = async (s) => { 
+      if(confirm("Toggle Active Status?")) {
+          await updateDoc(doc(db,"screens",s.firestoreId),{isActive:!s.isActive}); 
+      }
+  };
+
   const handleScreenChange = (fid,f,v) => setEditingScreens(p=>({...p, [fid]:{...p[fid], [f]:v}}));
-  const saveScreenSimple = async (s) => { const d=editingScreens[s.firestoreId]; if(d){ if(d.basePrice) d.basePrice=parseFloat(d.basePrice); await updateDoc(doc(db,"screens",s.firestoreId), d); alert(t('alert_saved')); setEditingScreens(p=>{const n={...p}; delete n[s.firestoreId]; return n;}); }};
+
+  const saveScreenSimple = async (s) => { 
+      const d = editingScreens[s.firestoreId]; 
+      if(d){ 
+          if(d.basePrice) d.basePrice = parseFloat(d.basePrice); 
+          await updateDoc(doc(db,"screens",s.firestoreId), d); 
+          alert(t('alert_saved')); 
+          setEditingScreens(p => { const n={...p}; delete n[s.firestoreId]; return n; }); 
+      }
+  };
 
   if (loading) return <LoadingScreen />;
 
-  // 🔥 定義所有的 Tabs (加入財務視圖)
+  // 🔥 定義所有的 Tabs 導航 (加入財務視圖)
   const ADMIN_TABS = [
       { id: 'dashboard', icon: <LayoutDashboard size={16}/>, label: t('tab_dashboard') },
       { id: 'financial_config', icon: <Settings size={16}/>, label: '財務分成配置' }, 
-      { id: 'platform_settle', icon: <DollarSign size={16}/>, label: '平台分成(老闆)' }, 
-      { id: 'merchant_settle', icon: <Briefcase size={16}/>, label: '商家分成' }, 
+      { id: 'platform_settle', icon: <DollarSign size={16}/>, label: '平台分成結算' }, 
+      { id: 'merchant_settle', icon: <Briefcase size={16}/>, label: '商家專屬結算' }, 
       { id: 'calendar', icon: <Calendar size={16}/>, label: t('tab_calendar') },
       { id: 'orders', icon: <List size={16}/>, label: t('tab_orders') },
       { id: 'manualOrder', icon: <Plus size={16}/>, label: '手動加單/排期' },
@@ -447,8 +708,12 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto space-y-6">
+        
+        {/* Header */}
         <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h1 className="text-xl font-bold flex items-center gap-2"><span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> {t('admin_title')}</h1>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+                <span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH {t('admin_title')}
+            </h1>
             <div className="flex gap-2">
                 <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"><Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}</button>
                 <button onClick={() => navigate('/')} className="text-sm font-bold text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded">{t('back_home')}</button>
@@ -458,10 +723,16 @@ const AdminPanel = () => {
             </div>
         </div>
 
+        {/* Tab 導航按鈕 */}
         <div className="flex flex-wrap gap-2">
-            {ADMIN_TABS.map(t => (
-                <button key={t.id} onClick={()=>{setActiveTab(t.id); setSelectedOrderIds(new Set())}} className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab===t.id?'bg-blue-600 text-white shadow-md':'bg-white text-slate-500 hover:bg-slate-100 border'}`}>
-                    {t.icon} {t.label} {t.alert&&<span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
+            {ADMIN_TABS.map(tab => (
+                <button 
+                    key={tab.id} 
+                    onClick={() => { setActiveTab(tab.id); setSelectedOrderIds(new Set()); }} 
+                    className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border'}`}
+                >
+                    {tab.icon} {tab.label} 
+                    {tab.alert && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
                 </button>
             ))}
         </div>
@@ -470,11 +741,10 @@ const AdminPanel = () => {
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
         
         {/* 🔥 新增財務相關 Views */}
-        {/* 🔥 新增財務相關 Views (記得傳入 screens 同 orders) */}
         {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} screens={screens} />}
-        {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} />}
-        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} />}
-
+        {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
+        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
+        
         {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
@@ -486,8 +756,37 @@ const AdminPanel = () => {
         {activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
 
         {/* Modals */}
-        <ScreenModal isOpen={isAddScreenModalOpen} onClose={()=>setIsAddScreenModalOpen(false)} isEdit={!!editingScreenId} data={newScreenData} setData={setNewScreenData} handleImageChange={(i,v)=>{const n=[...newScreenData.images];n[i]=v;setNewScreenData({...newScreenData,images:n})}} handleApplyToAllDays={()=>{const r=newScreenData.tierRules; for(let i=0;i<7;i++) r[i]=JSON.parse(JSON.stringify(r[activeDayTab])); setNewScreenData({...newScreenData, tierRules:r})}} toggleTierHour={(t,h)=>{const r={...newScreenData.tierRules}; const d=r[activeDayTab][t]; if(d.includes(h)) r[activeDayTab][t]=d.filter(x=>x!==h); else r[activeDayTab][t]=[...d,h]; setNewScreenData({...newScreenData, tierRules:r})}} activeDayTab={activeDayTab} setActiveDayTab={setActiveDayTab} onSave={saveScreenFull} onImageUpload={handleScreenImageUpload} isUploading={isUploadingImage} />
-        <SlotGroupModal group={selectedSlotGroup} onClose={()=>setSelectedSlotGroup(null)} onReview={handleReview} onMarkScheduled={handleMarkAsScheduled} />
+        <ScreenModal 
+            isOpen={isAddScreenModalOpen} 
+            onClose={() => setIsAddScreenModalOpen(false)} 
+            isEdit={!!editingScreenId} 
+            data={newScreenData} 
+            setData={setNewScreenData} 
+            handleApplyToAllDays={() => {
+                const r = newScreenData.tierRules; 
+                for(let i=0; i<7; i++) r[i] = JSON.parse(JSON.stringify(r[activeDayTab])); 
+                setNewScreenData({...newScreenData, tierRules:r});
+            }} 
+            toggleTierHour={(t,h) => {
+                const r = {...newScreenData.tierRules}; 
+                const d = r[activeDayTab][t]; 
+                if(d.includes(h)) r[activeDayTab][t] = d.filter(x => x !== h); 
+                else r[activeDayTab][t] = [...d,h]; 
+                setNewScreenData({...newScreenData, tierRules:r});
+            }} 
+            activeDayTab={activeDayTab} 
+            setActiveDayTab={setActiveDayTab} 
+            onSave={saveScreenFull} 
+            onImageUpload={handleScreenImageUpload} 
+            isUploading={isUploadingImage} 
+        />
+        
+        <SlotGroupModal 
+            group={selectedSlotGroup} 
+            onClose={() => setSelectedSlotGroup(null)} 
+            onReview={handleReview} 
+            onMarkScheduled={handleMarkAsScheduled} 
+        />
       
       </div>
     </div>
