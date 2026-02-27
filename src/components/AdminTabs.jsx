@@ -143,6 +143,9 @@ export const DashboardView = ({ stats, COLORS }) => {
     );
 };
 
+// ==========================================
+// 1.1 財務配置視圖 (Financial Config)
+// ==========================================
 export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
     const handleOverrideChange = (screenId, field, value) => {
         const numVal = value === '' ? undefined : parseFloat(value);
@@ -177,22 +180,22 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
                 <ConfigSection title="全域成本設定">
                     <ConfigInput 
                         label="預估營運成本" 
-                        val={config.costFactor || 0.5} 
-                        onChange={v => setConfig({...config, costFactor: parseFloat(v)})} 
+                        val={config.costFactor ?? 0.5} // 🔥 改用 ??
+                        onChange={v => setConfig({...config, costFactor: v === '' ? 0 : parseFloat(v)})} 
                         desc="扣除此比例後計算利潤" 
                     />
                 </ConfigSection>
                 <ConfigSection title="全域分紅比例">
                     <ConfigInput 
                         label="合作伙伴總池 %" 
-                        val={config.partnerPoolRatio || 0.3} 
-                        onChange={v => setConfig({...config, partnerPoolRatio: parseFloat(v)})} 
+                        val={config.partnerPoolRatio ?? 0.3} // 🔥 改用 ??
+                        onChange={v => setConfig({...config, partnerPoolRatio: v === '' ? 0 : parseFloat(v)})} 
                         desc="佔利潤比例" 
                     />
                     <ConfigInput 
                         label="商家佔池比例" 
-                        val={config.merchantRatioOfPool || 0.5} 
-                        onChange={v => setConfig({...config, merchantRatioOfPool: parseFloat(v)})} 
+                        val={config.merchantRatioOfPool ?? 0.5} // 🔥 改用 ??
+                        onChange={v => setConfig({...config, merchantRatioOfPool: v === '' ? 0 : parseFloat(v)})} 
                         desc="0 = 充電寶全取" 
                     />
                 </ConfigSection>
@@ -220,7 +223,8 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
                                         </td>
                                         <td className="p-3">
                                             <input 
-                                                type="number" step="0.05" placeholder={config.partnerPoolRatio || 0.3} 
+                                                type="number" step="0.05" 
+                                                placeholder={config.partnerPoolRatio ?? 0.3} 
                                                 value={ov.partnerPoolRatio ?? ''} 
                                                 onChange={e => handleOverrideChange(s.id, 'partnerPoolRatio', e.target.value)} 
                                                 className="w-24 border rounded px-2 py-1 outline-none"
@@ -228,7 +232,8 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
                                         </td>
                                         <td className="p-3">
                                             <input 
-                                                type="number" step="0.05" placeholder={config.merchantRatioOfPool || 0.5} 
+                                                type="number" step="0.05" 
+                                                placeholder={config.merchantRatioOfPool ?? 0.5} 
                                                 value={ov.merchantRatioOfPool ?? ''} 
                                                 onChange={e => handleOverrideChange(s.id, 'merchantRatioOfPool', e.target.value)} 
                                                 className="w-24 border rounded px-2 py-1 outline-none"

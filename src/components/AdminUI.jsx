@@ -34,7 +34,7 @@ export const ConfigInput = ({ label, val, onChange, desc }) => {
       </div>
       <input 
           type="number" step="0.05" 
-          value={val || 0} 
+          value={val ?? 0} // 🔥 已經將 || 改為 ??，容許輸入 0
           onChange={e => onChange(e.target.value)} 
           className="w-20 border rounded px-2 py-1 text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500" 
       />
