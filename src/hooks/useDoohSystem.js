@@ -18,8 +18,7 @@ import {
     sendPartialOutbidEmail
 } from '../utils/emailService';
 import { calculateDynamicPrice } from '../utils/pricingEngine';
-// 在最上方的 import 區域加入這行：
-import { trackEvent } from '../utils/analytics'; // 或者 '../analytics'
+import { trackEvent } from '../utils/analytics';
 
 export const useDoohSystem = () => {
   // --- States ---
@@ -39,7 +38,7 @@ export const useDoohSystem = () => {
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [previewDate, setPreviewDate] = useState(new Date()); 
 
-  // 🔥 修正 1: 初始狀態強制使用 String "1"，避免與 Number 1 混淆
+  // 🔥 保證初始值為 String
   const [selectedScreens, setSelectedScreens] = useState(new Set(['1'])); 
   const [selectedHours, setSelectedHours] = useState(new Set());
   
@@ -99,7 +98,8 @@ export const useDoohSystem = () => {
       if (selectedScreens.size === 0) return 'normal';
       const currentDayKey = String(previewDate.getDay());
       selectedScreens.forEach(id => {
-          const s = screens.find(sc => String(sc.id) === String(id)); // Force string compare
+          const stringId = String(id);
+          const s = screens.find(sc => String(sc.id) === stringId);
           if (s && s.tierRules) {
               let rules = s.tierRules[currentDayKey];
               if (!rules) rules = s.tierRules["default"];
@@ -117,7 +117,7 @@ export const useDoohSystem = () => {
     const fetchScreens = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "screens"));
-        const screensData = querySnapshot.docs.map(doc => ({ id: String(doc.data().id), ...doc.data() })); // Ensure ID is string
+        const screensData = querySnapshot.docs.map(doc => ({ id: String(doc.data().id), ...doc.data() })); 
         screensData.sort((a, b) => Number(a.id) - Number(b.id));
         setScreens(screensData.filter(s => s.isActive !== false));
       } catch (error) { console.error("Error fetching screens:", error); showToast("❌ 無法載入屏幕資料"); } finally { setIsScreensLoading(false); }
@@ -172,7 +172,7 @@ export const useDoohSystem = () => {
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
-          snapshot.docs.forEach(doc => { if (doc.data().detailedSlots) doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${s.screenId}`)); });
+          snapshot.docs.forEach(doc => { if (doc.data().detailedSlots) doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${String(s.screenId)}`)); });
           setOccupiedSlots(sold);
       });
 
@@ -197,12 +197,17 @@ export const useDoohSystem = () => {
   
   const handleGoogleLogin = async () => { 
     setIsLoginLoading(true); 
-    try { await signInWithPopup(auth, googleProvider); setIsLoginModalOpen(false); showToast(`👋 歡迎回來`);
-trackEvent("User", "Login", "Google_Login");
+    try { 
+        await signInWithPopup(auth, googleProvider); 
+        setIsLoginModalOpen(false); 
+        showToast(`👋 歡迎回來`);
+        trackEvent("User", "Login", "Google_Login");
+    } catch (error) { 
+        console.error("Login Error", error); 
+        showToast(`❌ 登入失敗: ${error.message}`); 
+    } finally { 
+        setIsLoginLoading(false); 
     } 
-    
-    catch (error) { console.error("Login Error", error); showToast(`❌ 登入失敗: ${error.message}`); } 
-    finally { setIsLoginLoading(false); } 
   };
   
   const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
@@ -211,7 +216,7 @@ trackEvent("User", "Login", "Google_Login");
       if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
       const slots = buyoutOrder.detailedSlots;
       if (!slots || slots.length === 0) return;
-      const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${s.screenId}`);
+      const affectedKeys = slots.map(s => `${s.date}-${s.hour}-${String(s.screenId)}`);
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid"]));
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
@@ -219,20 +224,20 @@ trackEvent("User", "Login", "Google_Login");
       snapshot.forEach(docSnap => {
           const loserOrder = docSnap.data();
           const loserId = docSnap.id;
-          const hasConflict = loserOrder.detailedSlots.some(s => s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${s.screenId}`));
+          const hasConflict = loserOrder.detailedSlots.some(s => s.slotStatus !== 'outbid' && affectedKeys.includes(`${s.date}-${s.hour}-${String(s.screenId)}`));
           if (hasConflict) {
               losersFound = true;
               let lostSlotsInfo = [];
               const updatedDetailedSlots = loserOrder.detailedSlots.map(slot => {
-                  const key = `${slot.date}-${slot.hour}-${slot.screenId}`;
+                  const key = `${slot.date}-${slot.hour}-${String(slot.screenId)}`;
                   if (affectedKeys.includes(key) && slot.slotStatus !== 'outbid') {
                       lostSlotsInfo.push(`${slot.date} ${String(slot.hour).padStart(2,'0')}:00 @ ${slot.screenName || 'Unknown Screen'}`);
-                      return { ...slot, slotStatus: 'outbid' }; 
+                      return { ...slot, slotStatus: 'outbid_by_buyout' }; 
                   }
                   return slot; 
               });
               const totalSlots = updatedDetailedSlots.length;
-              const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid').length;
+              const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid' || s.slotStatus === 'outbid_by_buyout').length;
               let newStatus = 'paid_pending_selection'; 
               if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; else if (outbidCount > 0) newStatus = 'partially_outbid';
               
@@ -256,17 +261,10 @@ trackEvent("User", "Login", "Google_Login");
       const newSlots = newOrder.detailedSlots;
       if (!newSlots || newSlots.length === 0) return;
 
-      console.log("🔍 [Outbid Check] Started for Order:", newOrder.id);
-
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
       
       let snapshot;
-      try {
-          snapshot = await getDocs(q);
-      } catch (error) {
-          console.error("❌ [Outbid Check] Query Error:", error);
-          return;
-      }
+      try { snapshot = await getDocs(q); } catch (error) { console.error("❌ [Outbid Check] Query Error:", error); return; }
 
       const batch = writeBatch(db);
       let isBatchUsed = false;
@@ -293,14 +291,12 @@ trackEvent("User", "Login", "Google_Login");
                   const newPrice = parseInt(matchNewSlot.bidPrice, 10) || 0;
                   
                   if (newPrice > oldPrice && oldSlot.slotStatus !== 'outbid') {
-                      console.log(`⚡ Outbid Other! Old(${oldOrder.userEmail}) $${oldPrice} < New $${newPrice}`);
                       outbidInfo.push(`${oldSlot.date} ${String(oldSlot.hour).padStart(2,'0')}:00 @ ${oldSlot.screenName || oldSlot.screenId}`);
                       if(newPrice > maxNewPrice) maxNewPrice = newPrice;
                       hasOldOrderChanged = true;
                       return { ...oldSlot, slotStatus: 'outbid' }; 
                   }
                   else if (oldPrice >= newPrice) {
-                      console.log(`⚡ Self Outbid! Old $${oldPrice} >= New(${newOrder.userName}) $${newPrice}`);
                       isSelfOutbid = true;
                       const mySlotIndex = newOrderUpdatedSlots.findIndex(s => 
                           s.date === oldSlot.date && 
@@ -321,12 +317,8 @@ trackEvent("User", "Login", "Google_Login");
               const outbidCount = updatedOldSlots.filter(s => s.slotStatus === 'outbid').length;
               let newStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
 
-              if (outbidInfo.length > 0) {
-                  const infoStr = outbidInfo.join('<br/>');
-                  const targetEmail = oldOrder.userEmail;
-                  if (targetEmail) {
-                      sendStandardOutbidEmail(targetEmail, oldOrder.userName || 'Customer', infoStr, maxNewPrice);
-                  }
+              if (outbidInfo.length > 0 && oldOrder.userEmail) {
+                  sendStandardOutbidEmail(oldOrder.userEmail, oldOrder.userName || 'Customer', outbidInfo.join('<br/>'), maxNewPrice);
               }
               const oldOrderRef = doc(db, "orders", docSnap.id);
               batch.update(oldOrderRef, { detailedSlots: updatedOldSlots, status: newStatus, lastUpdated: serverTimestamp() });
@@ -334,7 +326,6 @@ trackEvent("User", "Login", "Google_Login");
       });
 
       if (isSelfOutbid) {
-          console.log("⚠️ New order has lost some slots immediately.");
           const totalSlots = newOrderUpdatedSlots.length;
           const outbidCount = newOrderUpdatedSlots.filter(s => s.slotStatus === 'outbid').length;
           let selfStatus = (outbidCount === totalSlots) ? 'outbid_needs_action' : 'partially_outbid';
@@ -345,10 +336,7 @@ trackEvent("User", "Login", "Google_Login");
           isBatchUsed = true;
       }
 
-      if (isBatchUsed) {
-          await batch.commit();
-          console.log("✅ All Outbid updates committed (Both ways).");
-      }
+      if (isBatchUsed) { await batch.commit(); }
   };
 
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
@@ -393,7 +381,6 @@ trackEvent("User", "Login", "Google_Login");
     const queryParams = new URLSearchParams(window.location.search);
     const qrScreenId = queryParams.get('screen_id');
     if (qrScreenId) {
-        // 🔥 修正 2: 來自 URL 的 ID 也強制轉 String
         setSelectedScreens(new Set([String(qrScreenId)]));
         showToast(`📍 歡迎！已自動定位到屏幕 #${qrScreenId}`);
     }
@@ -418,10 +405,10 @@ trackEvent("User", "Login", "Google_Login");
           async () => { 
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
               await updateDoc(doc(db, "orders", targetId), { hasVideo: true, videoUrl: downloadURL, videoName: file.name, uploadedAt: serverTimestamp(), creativeStatus: 'pending_review' }); 
-             setCreativeName(file.name); 
-setCreativeStatus('pending_review'); // 畫面變成「審批中」
-setIsUploadingReal(false); 
-showToast("⏳ 上傳成功！正在審核您的圖片...");
+              setCreativeName(file.name); 
+              setCreativeStatus('pending_review'); 
+              setIsUploadingReal(false); 
+              showToast("⏳ 上傳成功！正在審核您的圖片...");
               localStorage.removeItem('temp_order_id'); 
           });
       } catch (error) { console.error(error); showToast("上傳錯誤"); setIsUploadingReal(false); }
@@ -439,27 +426,27 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
   const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
   const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
   
-  // 🔥 修正 3: toggleScreen 強制確保 ID 為 String
-  const toggleScreen = (id) => { 
-      const strId = String(id);
-      const newSet = new Set(selectedScreens); 
-      if (newSet.has(strId)) newSet.delete(strId); 
-      else newSet.add(strId); 
-      setSelectedScreens(newSet); 
+  // 🔥 強制 String ID
+  const toggleScreen = (id) => {
+    const stringId = String(id);
+    const newSelected = new Set(selectedScreens);
+    if (newSelected.has(stringId)) {
+      newSelected.delete(stringId);
+    } else {
+      newSelected.add(stringId);
+    }
+    setSelectedScreens(newSelected);
   };
   
   const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
-  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); trackEvent("Interaction", "Select_Date", key);
-    setSelectedSpecificDates(newSet); };
+  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); trackEvent("Interaction", "Select_Date", key); setSelectedSpecificDates(newSet); };
   
-  // --- 關鍵計算 Multiplier (遵守 String 規則) ---
+  // --- Bundle Multiplier 判斷 ---
   const getMultiplierForScreen = (screenId) => {
-      // 現在 selectedScreens 肯定都是 String，這裡直接 map 只是保險
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
       
-      // 只有當選了 > 1 個屏幕時，才檢查 bundleRules
       if (selectedIds.length > 1) {
           bundleRules.forEach(rule => {
               const ruleIds = rule.screens.map(String);
@@ -480,7 +467,6 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
                       const g = s?.bundleGroup || s?.bundlegroup;
                       return g === myGroup;
                   }).length;
-                  // 再次確認必須 > 1 才算 bundle
                   if (countInGroup > 1) { return pricingConfig?.defaultBundleMultiplier || 1.25; }
               }
           }
@@ -488,9 +474,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
       return 1.0;
   };
 
-  // --- Bundle Mode 判定 ---
   const isBundleMode = useMemo(() => { 
-      // 🛑 如果少於 2 個屏幕，直接 false
       if (selectedScreens.size < 2) return false; 
       for (const id of selectedScreens) { 
           if (getMultiplierForScreen(id) > 1.0) return true; 
@@ -515,7 +499,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
             selectedScreens.forEach(screenId => {
                 const screen = screens.find(s => String(s.id) === String(screenId));
                 if (!screen) return;
-                const key = `${dateStr}-${h}-${screenId}`; 
+                const key = `${dateStr}-${h}-${String(screenId)}`; 
                 const isSoldOut = occupiedSlots.has(key);
                 const screenMultiplier = getMultiplierForScreen(screenId);
                 const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
@@ -527,7 +511,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
                 let warning = basePricing.warning;
                 const isLocked = basePricing.isLocked || isSoldOut;
                 slots.push({ 
-                    key, dateStr, hour: h, screenId, screenName: screen.name, location: screen.location, 
+                    key, dateStr, hour: h, screenId: String(screenId), screenName: screen.name, location: screen.location, 
                     minBid: basePricing.minBid, buyoutPrice: finalBuyout, marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
                     isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled, canBid, hoursUntil: basePricing.hoursUntil, 
                     isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, competitorBid: currentHighestBid, 
@@ -536,7 +520,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
             });
         });
     });
-    return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId - b.screenId);
+    return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId.localeCompare(b.screenId));
   }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
 
   const pricing = useMemo(() => {
@@ -549,7 +533,6 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
     let maxAppliedMultiplier = 1.0; let futureDateText = null; 
     
     availableSlots.forEach(slot => {
-        // 🔥 確保這裡也只在多屏幕時計算 Max Multiplier
         if (selectedScreens.size > 1 && slot.activeMultiplier > maxAppliedMultiplier) {
             maxAppliedMultiplier = slot.activeMultiplier;
         }
@@ -607,7 +590,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: String(slot.screenId), screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout' }));
+    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: String(slot.screenId), screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout', slotStatus: 'normal' }));
     const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
     const screenNamesStr = Array.from(selectedScreens).map(id => { const s = screens.find(sc => String(sc.id) === String(id)); return s ? s.name : `Screen ${id}`; }).join(', ');
     let slotSummary = "";
@@ -649,7 +632,17 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
     if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
     const currentUrl = window.location.origin + window.location.pathname;
     const captureMethod = pendingTransaction && pendingTransaction.type === 'buyout' ? 'automatic' : 'manual';
-    try { const response = await fetch('/.netlify/functions/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), }); const data = await response.json(); if (response.ok && data.url) { window.location.href = data.url; } else { throw new Error(data.error); } } catch (error) { console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); }
+    try { 
+        const response = await fetch('/.netlify/functions/create-checkout-session', { 
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), 
+        }); 
+        const data = await response.json(); 
+        if (response.ok && data.url) { window.location.href = data.url; } 
+        else { throw new Error(data.error); } 
+    } catch (error) { 
+        console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); 
+    }
   };
 
   const handleUpdateBid = async (orderId, slotIndex, newPrice, newTotalAmount) => {
@@ -668,10 +661,8 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
       
       try {
           await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
-          
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
-
       } catch (e) { console.error("Update DB Error", e); return alert("更新失敗"); }
       
       setCurrentOrderId(orderId);
@@ -683,13 +674,10 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
 
   const recalculateAllBids = async () => { console.log("Recalc"); };
 
- const handleBidClick = () => { 
+  const handleBidClick = () => { 
     if (!user) { setIsLoginModalOpen(true); return; } 
     if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
-    
-    // 👉 正確：放喺個掣入面，客真係撳先射上 GA
     trackEvent("E-commerce", "Initiate_Checkout", "Bidding", pricing.currentBidTotal);
-    
     setTermsAccepted(false); 
     setIsBidModalOpen(true); 
   };
@@ -698,10 +686,7 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
     if (!user) { setIsLoginModalOpen(true); return; } 
     if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
     if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
-    
-    // 👉 這個本來就正確
     trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
-
     setTermsAccepted(false); 
     setIsBuyoutModalOpen(true); 
   };
@@ -720,21 +705,13 @@ showToast("⏳ 上傳成功！正在審核您的圖片...");
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
     occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    
-    restrictionModalData, 
-    setRestrictionModalData,
-    handleProceedAfterRestriction,
-    
-    resumePayment,
-    isTimeMismatchModalOpen,
-    setIsTimeMismatchModalOpen,
-
+    restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction, resumePayment,
+    isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
     setCurrentDate, setMode, setSelectedSpecificDates, setSelectedWeekdays, setWeekCount, setScreenSearchTerm, setViewingScreen,
     setBatchBidInput, setTermsAccepted, setCurrentOrderId, 
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
-    handleUpdateBid, 
-    recalculateAllBids,
+    handleUpdateBid, recalculateAllBids,
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
     existingBids
   };

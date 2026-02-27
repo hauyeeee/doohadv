@@ -690,6 +690,7 @@ const AdminPanel = () => {
       setIsAddScreenModalOpen(true); 
   };
 
+  // 🔥 已修正的 saveScreenFull (強制轉 String ID)
   const saveScreenFull = async () => { 
       try {
           const p = { 
@@ -704,6 +705,8 @@ const AdminPanel = () => {
           delete p.firestoreId; 
           
           if(editingScreenId) { 
+              // 確保編輯時更新的 ID 也是 String
+              p.id = String(p.id || editingScreenId.replace('screen_', ''));
               await setDoc(doc(db,"screens",editingScreenId), p, { merge: true }); 
           } else {
               const existingIds = screens.map(s => { 
@@ -713,7 +716,13 @@ const AdminPanel = () => {
               });
               const nextId = (existingIds.length > 0 ? Math.max(...existingIds) : 0) + 1;
               const newDocId = `screen_${String(nextId).padStart(3, '0')}`;
-              await setDoc(doc(db, "screens", newDocId), { ...p, id: String(nextId), createdAt: serverTimestamp(), isActive: true });
+              
+              await setDoc(doc(db, "screens", newDocId), { 
+                  ...p, 
+                  id: String(nextId), // 強制 String
+                  createdAt: serverTimestamp(), 
+                  isActive: true 
+              });
           }
           alert(t('alert_saved')); 
           setIsAddScreenModalOpen(false); 

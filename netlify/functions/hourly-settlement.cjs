@@ -46,17 +46,14 @@ const sendEmail = (templateId, params) => {
 };
 
 const settlementHandler = async (event, context) => {
-    console.log("⏰ Settlement Run (Time-Aware V4)...");
+    console.log("⏰ Settlement Run (Transaction Safe V5)...");
     try {
-        // 1. 抓取所有潛在需要結算的訂單 (狀態還未完全定案的)
-        // 注意：這裡還是抓所有，因為我們需要在內存中過濾時間
         const snapshot = await db.collection('orders').where('status', 'in', ['paid_pending_selection', 'partially_outbid', 'partially_won']).get();
-        
         if (snapshot.empty) return { statusCode: 200, body: "No pending orders" };
 
         const slotsMap = {};      
         const orderResults = {};
-        const now = new Date(); // 當前伺服器時間 (UTC)
+        const now = new Date(); 
         
         // B. 準備數據 & 檢查時間
         snapshot.forEach(doc => {
@@ -80,44 +77,29 @@ const settlementHandler = async (event, context) => {
                     slotStatuses: {}, 
                     status: data.status,
                     screenNames: new Set(),
-                    shouldSettleAny: false // 標記：這張單是否有任何部分到期了
+                    shouldSettleAny: false 
                 };
             }
 
             if (data.detailedSlots) {
                 data.detailedSlots.forEach((slot, index) => {
-                    orderResults[orderId].totalSlots++; 
+                    orderResults[orderId].totalSlots++;
                     const slotDateTimeStr = `${slot.date} ${String(slot.hour).padStart(2,'0')}:00`;
                     const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                     
-                    // 🔥 核心時間檢查 🔥
-                    // 計算截標時間：播放時間 - 24小時
-                    // 這裡假設 slot.date 是 YYYY-MM-DD 格式
-                    // 注意：簡單起見，我們將 slot 時間轉為時間戳比較
-                    // 如果 slotDateStr 是 "2026-02-12 02:00:00"
                     const slotPlayTime = new Date(slotDateTimeStr);
-                    // 減去 24 小時
                     const revealTime = new Date(slotPlayTime.getTime() - 24 * 60 * 60 * 1000);
-                    
-                    // 判斷是否已到截標時間
                     const isRevealed = now >= revealTime;
 
                     if (isRevealed) {
-                        // 只有到了時間的 slot 才加入競爭隊列
                         if (!slotsMap[key]) slotsMap[key] = [];
-                        
                         slotsMap[key].push({
                             orderId: orderId,
                             slotIndex: index,
                             bidPrice: parseInt(slot.bidPrice) || 0,
                             slotInfo: `${slotDateTimeStr} @ ${slot.screenName || slot.screenId}`
                         });
-                        
-                        // 標記這張單至少有一個 slot 要被處理
                         orderResults[orderId].shouldSettleAny = true;
-                    } else {
-                        // 未到時間，跳過處理
-                        // console.log(`⏳ Slot not yet revealed: ${key}`);
                     }
                     
                     orderResults[orderId].screenNames.add(slot.screenName || slot.screenId);
@@ -125,14 +107,12 @@ const settlementHandler = async (event, context) => {
             }
         });
 
-        // C. 比武大會 (只處理 slotsMap 裡有的，也就是時間已到的)
+        // C. 比武大會 
         for (const [key, bids] of Object.entries(slotsMap)) {
-            // 價格高者得
             bids.sort((a, b) => b.bidPrice - a.bidPrice);
             const winner = bids[0]; 
             const losers = bids.slice(1); 
 
-            // 1. 贏家
             if (orderResults[winner.orderId]) {
                 orderResults[winner.orderId].wonAmount += winner.bidPrice;
                 orderResults[winner.orderId].winCount++;
@@ -140,7 +120,6 @@ const settlementHandler = async (event, context) => {
                 orderResults[winner.orderId].slotStatuses[winner.slotIndex] = 'won';
             }
 
-            // 2. 輸家
             losers.forEach(loser => {
                 if (orderResults[loser.orderId]) {
                     orderResults[loser.orderId].loseCount++;
@@ -150,109 +129,124 @@ const settlementHandler = async (event, context) => {
             });
         }
 
-        // D. 執行 Capture & Update DB (只處理有變動的訂單)
+        // D. 執行 Capture & Update DB (🔥 加入 Transaction 防衝突機制 🔥)
         for (const [orderId, res] of Object.entries(orderResults)) {
-            // 🔥 如果這張單沒有任何 slot 到期，直接跳過，不要動它
             if (!res.shouldSettleAny) continue;
-
             const orderRef = db.collection('orders').doc(orderId);
-            
-            // 構建更新後的 slots array
-            // 注意：我們只更新那些狀態有變 (won/lost) 的 slot，其他的保持原樣
-            const updatedDetailedSlots = res.originalSlots.map((slot, idx) => {
-                if (res.slotStatuses[idx]) {
-                    return { ...slot, slotStatus: res.slotStatuses[idx] };
-                }
-                return slot; // 保持原狀 (例如還沒到期的 slot)
-            });
 
-            // 情況 1: 處理完之後發現全部都輸了 (或者是輸光了所有已到期的 slot)
-            // 這裡邏輯比較複雜：因為可能有部分 slot 還沒到期。
-            // 簡單起見，我們先只處理 "確定輸贏" 的金額。
-            
-            // 如果這張單的所有 slot 都已經處理完了 (totalSlots === win + lose + 其他已處理狀態)
-            // 為了安全起見，我們主要依賴 winCount > 0 來決定是否收錢
-            
-            if (res.winCount === 0 && res.loseCount > 0) {
-                // 如果這次結算只有輸，沒有贏 (且沒有其他未結算的 slot ? 這裡簡化處理)
-                // 如果這張單之前的狀態是 pending，現在變成 lost，我們可以更新
-                // 但因為可能有未到期的 slot，我們暫時只更新 detailedSlots，不改主狀態為 lost，除非所有 slot 都處理完了
-                
-                // 檢查是否還有未處理的 slot
-                const pendingSlots = updatedDetailedSlots.filter(s => !['won', 'lost', 'outbid'].includes(s.slotStatus));
-                const isFullySettled = pendingSlots.length === 0;
-
-                if (isFullySettled) {
-                    if (res.paymentIntentId) { 
-                        try { await stripe.paymentIntents.cancel(res.paymentIntentId); } catch(e) {} 
+            try {
+                await db.runTransaction(async (transaction) => {
+                    // 1. 每次 Transaction 重新讀取最新狀態
+                    const orderDoc = await transaction.get(orderRef);
+                    if (!orderDoc.exists) return;
+                    
+                    const currentData = orderDoc.data();
+                    
+                    // 🚨 防撞機制：如果喺清算前一秒，剛好被 Buyout 踢走或者取消咗，直接放棄結算
+                    if (['lost', 'cancelled', 'outbid_needs_action'].includes(currentData.status)) {
+                        console.log(`⚠️ 訂單 ${orderId} 狀態已變更為 ${currentData.status} (可能剛被買斷)，跳過結算。`);
+                        return; 
                     }
-                    await orderRef.update({ 
-                        status: 'lost', 
-                        detailedSlots: updatedDetailedSlots,
-                        lostAt: admin.firestore.FieldValue.serverTimestamp() 
+
+                    // 合併 Slots (保留未結算或已被買斷標記的 Slot)
+                    const updatedDetailedSlots = currentData.detailedSlots.map((slot, idx) => {
+                        // 如果在 transaction 期間 slot 已經被改成 outbid_by_buyout，就保留它！
+                        if (slot.slotStatus === 'outbid_by_buyout') return slot;
+                        if (res.slotStatuses[idx]) {
+                            return { ...slot, slotStatus: res.slotStatuses[idx] };
+                        }
+                        return slot; 
                     });
-                    await sendEmail(EMAIL_CFG.templates.LOST_BID, { to_email: res.userEmail, to_name: res.userName, order_id: orderId });
-                } else {
-                    // 還有 slot 未揭曉，只更新 slot 狀態，主狀態變成 partially_outbid (暫時)
-                    await orderRef.update({ 
-                        status: 'partially_outbid',
-                        detailedSlots: updatedDetailedSlots 
-                    });
-                }
-            }
-            
-            // 情況 2: 有贏 (Capture 贏的部分)
-            else if (res.winCount > 0) {
-                if (res.paymentIntentId) {
-                    try {
+
+                    // --- 情況 1: 全部輸 (釋放授權) ---
+                    if (res.winCount === 0 && res.loseCount > 0) {
+                        const pendingSlots = updatedDetailedSlots.filter(s => !['won', 'lost', 'outbid', 'outbid_by_buyout'].includes(s.slotStatus));
+                        const isFullySettled = pendingSlots.length === 0;
+
+                        if (isFullySettled) {
+                            if (res.paymentIntentId) { 
+                                try { 
+                                    // 🔥 使用 Idempotency Key 確保即使 Transaction 重試都不會重複 Cancel
+                                    await stripe.paymentIntents.cancel(res.paymentIntentId, {
+                                        idempotencyKey: `cancel_${orderId}`
+                                    });
+                                } catch(e) {} 
+                            }
+                            transaction.update(orderRef, { 
+                                status: 'lost', 
+                                detailedSlots: updatedDetailedSlots,
+                                lostAt: admin.firestore.FieldValue.serverTimestamp() 
+                            });
+                            // 發 Email 可以放喺 transaction 出面，但為簡化放這裡也無妨，如果重試有機會發兩次，但機率極低
+                            sendEmail(EMAIL_CFG.templates.LOST_BID, { to_email: res.userEmail, to_name: res.userName, order_id: orderId }).catch(()=>{});
+                        } else {
+                            transaction.update(orderRef, { 
+                                status: 'partially_outbid',
+                                detailedSlots: updatedDetailedSlots 
+                            });
+                        }
+                    }
+                    
+                    // --- 情況 2: 有贏 (Capture 贏的部分) ---
+                    else if (res.winCount > 0) {
                         const amountToCaptureCents = Math.round(res.wonAmount * 100);
-                        // 注意：Stripe Capture 只能做一次。如果這是 partial capture，後續再 capture 會失敗。
-                        // 這裡是一個潛在限制。如果一張單分開兩天結算，第一次 capture 後，第二次就無法再 capture 了。
-                        // 解決方案：通常建議 bid 單同一天結算，或者這裡假設只在最後一次全部 capture。
-                        // **但在這個 V4 版本，為了防止提前結算，我們假設到了時間才 capture。**
-                        // 如果你允許一張單跨越多天，這裡可能會出錯 (因為多次 capture)。
-                        // 暫時假設：一張單的所有 slot 都是同一天，所以會一起到期，一起 capture。
-                        
-                        await stripe.paymentIntents.capture(res.paymentIntentId, {
-                            amount_to_capture: amountToCaptureCents
-                        });
-                        console.log(`💰 Captured ${res.wonAmount} for ${orderId}`);
-                    } catch (e) { 
-                        if (!e.message.includes("already been captured")) console.error(`Capture Error: ${e.message}`);
+                        let captureSuccess = false;
+
+                        if (res.paymentIntentId) {
+                            try {
+                                // 🔥 使用 Idempotency Key 確保 Stripe 扣款只會執行一次！
+                                await stripe.paymentIntents.capture(res.paymentIntentId, {
+                                    amount_to_capture: amountToCaptureCents
+                                }, {
+                                    idempotencyKey: `capture_${orderId}_${amountToCaptureCents}` 
+                                });
+                                captureSuccess = true;
+                                console.log(`💰 Captured ${res.wonAmount} for ${orderId}`);
+                            } catch (e) { 
+                                // 如果已經扣過錢，Stripe 會報錯，但我們視為成功
+                                if (e.message.includes("already been captured")) {
+                                    captureSuccess = true;
+                                } else {
+                                    console.error(`Capture Error: ${e.message}`);
+                                }
+                            }
+                        }
+
+                        // 如果扣錢成功才 Update DB
+                        if (captureSuccess || !res.paymentIntentId) {
+                            const finalStatus = (res.winCount === res.totalSlots) ? 'won' : 'partially_won';
+                            transaction.update(orderRef, { 
+                                status: finalStatus, 
+                                amount: res.wonAmount, 
+                                detailedSlots: updatedDetailedSlots, 
+                                wonAt: admin.firestore.FieldValue.serverTimestamp(),
+                                finalWinCount: res.winCount,
+                                finalLostCount: res.loseCount
+                            });
+
+                            if (currentData.status !== 'won' && currentData.status !== 'partially_won') {
+                                let slotSummaryHtml = `
+                                    <b>✅ 成功競投 (Won):</b><br>${res.wonSlotsList.join('<br>')}<br><br>
+                                    ${res.loseCount > 0 ? `<b>❌ 未能中標 (Lost):</b><br>${res.lostSlotsList.join('<br>')}` : ''}
+                                `;
+                                let screenNamesStr = Array.from(res.screenNames).join(', ');
+                                const emailTemplate = finalStatus === 'partially_won' ? EMAIL_CFG.templates.PARTIAL_WIN : EMAIL_CFG.templates.WON_BID;
+                                
+                                sendEmail(emailTemplate, {
+                                    to_email: res.userEmail, to_name: res.userName, amount: res.wonAmount,
+                                    order_id: orderId, screen_names: screenNamesStr, slot_summary: slotSummaryHtml,
+                                    order_link: "https://dooh-adv-pro.netlify.app" 
+                                }).catch(()=>{});
+                            }
+                        }
                     }
-                }
-
-                const isFullySettled = updatedDetailedSlots.every(s => ['won', 'lost', 'outbid'].includes(s.slotStatus));
-                const finalStatus = (res.winCount === res.totalSlots) ? 'won' : 'partially_won';
-
-                // 只有當全部 slot 都結算完，或者我們決定現在就結算，才更新狀態
-                // 這裡我們直接更新，因為 capture 已經發生了
-                await orderRef.update({ 
-                    status: finalStatus, 
-                    amount: res.wonAmount, 
-                    detailedSlots: updatedDetailedSlots, 
-                    wonAt: admin.firestore.FieldValue.serverTimestamp(),
-                    finalWinCount: res.winCount,
-                    finalLostCount: res.loseCount
                 });
-
-                if (res.status !== 'won' && res.status !== 'partially_won') {
-                    let slotSummaryHtml = `
-                        <b>✅ 成功競投 (Won):</b><br>${res.wonSlotsList.join('<br>')}<br><br>
-                        ${res.loseCount > 0 ? `<b>❌ 未能中標 (Lost):</b><br>${res.lostSlotsList.join('<br>')}` : ''}
-                    `;
-                    let screenNamesStr = Array.from(res.screenNames).join(', ');
-                    const emailTemplate = finalStatus === 'partially_won' ? EMAIL_CFG.templates.PARTIAL_WIN : EMAIL_CFG.templates.WON_BID;
-                    await sendEmail(emailTemplate, {
-                        to_email: res.userEmail, to_name: res.userName, amount: res.wonAmount,
-                        order_id: orderId, screen_names: screenNamesStr, slot_summary: slotSummaryHtml,
-                        order_link: "https://dooh-adv-pro.netlify.app" 
-                    });
-                }
+            } catch (txError) {
+                console.error(`Transaction failed for order ${orderId}:`, txError);
             }
         }
 
-        return { statusCode: 200, body: "Settlement V4 Done" };
+        return { statusCode: 200, body: "Settlement Transaction V5 Done" };
     } catch (e) {
         console.error(e);
         return { statusCode: 500, body: e.message };
