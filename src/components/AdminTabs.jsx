@@ -673,21 +673,33 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                         </select>
                     </div>
                     
-                    <div>
-                        <label className="text-xs font-bold text-slate-500 mb-1 block">指定日期</label>
-                        <input 
-                            type="date" 
-                            value={newRule.date} 
-                            onChange={e => setNewRule({...newRule, date: e.target.value})} 
-                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
-                        />
+                    {/* 🔥 升級：開始日期與結束日期 */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 mb-1 block">開始日期</label>
+                            <input 
+                                type="date" 
+                                value={newRule.startDate || ''} 
+                                onChange={e => setNewRule({...newRule, startDate: e.target.value})} 
+                                className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 mb-1 block">結束日期 (單日可留空)</label>
+                            <input 
+                                type="date" 
+                                value={newRule.endDate || ''} 
+                                onChange={e => setNewRule({...newRule, endDate: e.target.value})} 
+                                className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                            />
+                        </div>
                     </div>
 
                     <div>
                         <label className="text-xs font-bold text-slate-500 mb-1 block">指定時段 (留空代表全日)</label>
                         <input 
                             type="text" 
-                            placeholder="例如: 18,19,20 (用逗號分隔)" 
+                            placeholder="例如: 18,19,20" 
                             value={newRule.hoursStr || ''} 
                             onChange={e => setNewRule({...newRule, hoursStr: e.target.value})} 
                             className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
@@ -728,7 +740,7 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                         <label className="text-xs font-bold text-slate-500 mb-1 block">備註 (只限內部看)</label>
                         <input 
                             type="text" 
-                            placeholder="例如: 聖誕節平安夜加價" 
+                            placeholder="例如: 聖誕節平安夜" 
                             value={newRule.note || ''} 
                             onChange={e => setNewRule({...newRule, note: e.target.value})} 
                             className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"

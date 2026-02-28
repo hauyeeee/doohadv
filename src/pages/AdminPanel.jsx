@@ -80,7 +80,11 @@ const AdminPanel = () => {
 
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
-  const [newRule, setNewRule] = useState({ screenId: 'all', date: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+  const [newRule, setNewRule] = useState({ 
+    screenId: 'all', 
+    startDate: '', // 🔥 改咗呢度
+    endDate: '',   // 🔥 加咗呢度
+    hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
   // --- 1. 權限認證與資料讀取 ---
   useEffect(() => {
@@ -602,8 +606,9 @@ const AdminPanel = () => {
       }
   };
   
-  const handleAddRule = async () => { 
-      if(!newRule.date) return alert("Date is required"); 
+const handleAddRule = async () => { 
+      if(!newRule.startDate) return alert("請選擇開始日期！"); 
+      
       let hours = []; 
       if(!newRule.hoursStr) {
           hours = Array.from({length:24},(_,i)=>i); 
@@ -611,13 +616,53 @@ const AdminPanel = () => {
           hours = newRule.hoursStr.split(',').map(Number); 
       }
       
-      await addDoc(collection(db,"special_rules"),{
-          ...newRule, 
-          hours, 
-          type: newRule.action, 
-          value: parseFloat(newRule.overridePrice)
-      }); 
-      alert("Done"); 
+      try {
+          // 🔥 自動計算日期範圍的函數
+          const getDatesInRange = (startStr, endStr) => {
+              if (!endStr) return [startStr];
+              const dateArray = [];
+              let currentDate = new Date(startStr);
+              const stopDate = new Date(endStr);
+              
+              // 防止用家入錯倒轉日期
+              if (currentDate > stopDate) return [startStr]; 
+              
+              while (currentDate <= stopDate) {
+                  const y = currentDate.getFullYear();
+                  const m = String(currentDate.getMonth() + 1).padStart(2, '0');
+                  const d = String(currentDate.getDate()).padStart(2, '0');
+                  dateArray.push(`${y}-${m}-${d}`);
+                  currentDate.setDate(currentDate.getDate() + 1);
+              }
+              return dateArray;
+          };
+
+          const datesToProcess = getDatesInRange(newRule.startDate, newRule.endDate);
+          const batch = writeBatch(db);
+
+          // 🔥 逐日產生一條 Rule
+          datesToProcess.forEach(dateStr => {
+              const ruleRef = doc(collection(db, "special_rules"));
+              batch.set(ruleRef, {
+                  screenId: newRule.screenId,
+                  date: dateStr, // 單獨的日子
+                  hours: hours, 
+                  type: newRule.action, 
+                  value: parseFloat(newRule.overridePrice) || 0,
+                  note: newRule.note || ''
+              });
+          });
+
+          await batch.commit(); 
+          alert(`✅ 成功新增 ${datesToProcess.length} 日的特別規則！`); 
+          
+          // 成功後清空表單
+          setNewRule({ screenId: 'all', startDate: '', endDate: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+
+      } catch (error) {
+          console.error("Add Rule Error:", error);
+          alert("❌ 儲存失敗: " + error.message);
+      }
   };
 
   const handleDeleteRule = async (id) => { 
