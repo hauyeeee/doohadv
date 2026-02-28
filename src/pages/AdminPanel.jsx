@@ -917,8 +917,6 @@ const handleClearAllRules = async () => {
         
         {activeTab === 'config' && <ConfigView config={activeConfig} setConfig={setActiveConfig} globalConfig={globalPricingConfig} setGlobal={setGlobalPricingConfig} target={selectedConfigTarget} setTarget={setSelectedConfigTarget} screens={screens} localRules={localBundleRules} setLocalRules={setLocalBundleRules} onSave={savePricingConfig} onAddRule={handleAddBundleRule} onRuleChange={handleBundleRuleChange} onRemoveRule={handleRemoveBundleRule} />}
         
-        {activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} />}
-        
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
         
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
