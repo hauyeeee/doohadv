@@ -654,7 +654,7 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete }) => {
+export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete, onClearAll }) => { // 🔥 就係呢行加多咗 onClearAll
     const { t } = useLanguage();
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
@@ -673,7 +673,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                         </select>
                     </div>
                     
-                    {/* 🔥 升級：開始日期與結束日期 */}
                     <div className="grid grid-cols-2 gap-2">
                         <div>
                             <label className="text-xs font-bold text-slate-500 mb-1 block">開始日期</label>
