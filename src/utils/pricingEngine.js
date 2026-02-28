@@ -72,9 +72,15 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
     } 
 
     const fSync = activeBundleMultiplier; 
+    
+    // 🔥 新增：特別規則倍數 (Multiplier)
+    let specialMultiplier = 1.0;
+    if (activeRule && activeRule.type === 'multiplier' && activeRule.value) {
+        specialMultiplier = parseFloat(activeRule.value);
+    }
 
-    // --- 4. Calculate Base Dynamic Price ---
-    let dynamicBase = Math.ceil(basePrice * mDay * mTime * fSync);
+    // --- 4. Calculate Base Dynamic Price (加入 specialMultiplier) ---
+    let dynamicBase = Math.ceil(basePrice * mDay * mTime * fSync * specialMultiplier);
     
     // --- 5. Time Constraints & Fees ---
     const slotTime = new Date(dateObj);
@@ -100,7 +106,6 @@ export const calculateDynamicPrice = (dateObj, hour, activeBundleMultiplier = 1.
         expeditedLabel = `🚀 Urgent (+${Math.round(expeditedFeeRate*100)}%)`;
         canBid = false; 
     } else if (daysUntil > 7) {
-        // 🔥🔥🔥 這裡計算日期 🔥🔥🔥
         canBid = false; 
         const openDate = new Date(slotTime);
         openDate.setDate(openDate.getDate() - 7); 
