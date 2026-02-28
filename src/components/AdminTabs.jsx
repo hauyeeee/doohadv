@@ -755,7 +755,18 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
 
             {/* 右邊：已設定規則列表 */}
             <div className="lg:col-span-2 space-y-3">
-                <h4 className="font-bold text-slate-700 mb-2">已生效的特別規則</h4>
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="font-bold text-slate-700">已生效的特別規則</h4>
+                    {rules.length > 0 && (
+                        <button 
+                            onClick={onClearAll} 
+                            className="text-xs bg-red-50 text-red-600 font-bold px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-600 hover:text-white transition-colors shadow-sm"
+                        >
+                            🗑️ 一鍵清空全部
+                        </button>
+                    )}
+                </div>
+                
                 {rules.length === 0 ? (
                     <div className="text-center p-10 bg-slate-50 rounded-xl border border-slate-200 text-slate-400">
                         暫時未有任何特別規則

@@ -671,6 +671,24 @@ const handleAddRule = async () => {
       }
   };
 
+
+const handleClearAllRules = async () => { 
+      if(confirm("⚠️ 警告：確定要刪除【所有】特別規則嗎？此操作無法復原！")) {
+          try {
+              const snapshot = await getDocs(collection(db, "special_rules"));
+              const batch = writeBatch(db);
+              snapshot.docs.forEach(d => {
+                  batch.delete(doc(db, "special_rules", d.id));
+              });
+              await batch.commit();
+              alert("✅ 已成功清空所有特別規則！");
+          } catch(e) {
+              console.error(e);
+              alert("❌ 清空失敗");
+          }
+      }
+  };
+
   const savePricingConfig = async () => { 
       const rules = localBundleRules.map(r => ({
           screens: r.screensStr.split(','), 
@@ -906,6 +924,8 @@ const handleAddRule = async () => {
         {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
         
         {activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
+
+{activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} onClearAll={handleClearAllRules} />}
 
         {/* Modals */}
         <ScreenModal 
