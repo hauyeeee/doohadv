@@ -97,18 +97,29 @@ export const useDoohSystem = () => {
       let hasPrime = false; let hasGold = false;
       if (selectedScreens.size === 0) return 'normal';
       const currentDayKey = String(previewDate.getDay());
+      
       selectedScreens.forEach(id => {
           const stringId = String(id);
           const s = screens.find(sc => String(sc.id) === stringId);
-          if (s && s.tierRules) {
-              let rules = s.tierRules[currentDayKey];
-              if (!rules) rules = s.tierRules["default"];
-              if (rules) { if (rules.prime?.includes(h)) hasPrime = true; if (rules.gold?.includes(h)) hasGold = true; }
-          } else {
-              if (h >= 22 || h < 2) hasPrime = true; else if (h >= 18 && h < 22) hasGold = true;
+          
+          // 🔥 修正：嚴格跟隨 Admin Panel 設定，刪除舊版硬編碼的 fallback
+          const rules = s?.tierRules || {};
+          const todayRules = rules[currentDayKey] || rules["default"] || { prime: [], gold: [] };
+          
+          // 防彈機制：強制將所有時間轉為 Number 對比，防止 "18" 同 18 配對唔到
+          const primeHours = (todayRules.prime || []).map(Number);
+          const goldHours = (todayRules.gold || []).map(Number);
+          
+          if (primeHours.includes(Number(h))) {
+              hasPrime = true;
+          } else if (goldHours.includes(Number(h))) {
+              hasGold = true;
           }
       });
-      if (hasPrime) return 'prime'; if (hasGold) return 'gold'; return 'normal';
+      
+      if (hasPrime) return 'prime'; 
+      if (hasGold) return 'gold'; 
+      return 'normal';
   };
 
   // --- Effects ---
