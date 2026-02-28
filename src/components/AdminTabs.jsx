@@ -658,39 +658,123 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
     const { t } = useLanguage();
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
-            <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Plus size={20}/> {t('rule_add_title')}</h3>
+            <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit shadow-sm">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><Plus size={20} className="text-blue-600"/> 新增特別規則</h3>
                 <div className="space-y-4">
-                    <select 
-                        value={newRule.screenId} 
-                        onChange={e => setNewRule({...newRule, screenId: e.target.value})} 
-                        className="w-full border rounded p-2 text-sm"
-                    >
-                        <option value="all">{t('rule_global')}</option>
-                        {screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <input 
-                        type="date" 
-                        value={newRule.date} 
-                        onChange={e => setNewRule({...newRule, date: e.target.value})} 
-                        className="w-full border rounded p-2 text-sm"
-                    />
-                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800">{t('add')}</button>
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">目標屏幕</label>
+                        <select 
+                            value={newRule.screenId} 
+                            onChange={e => setNewRule({...newRule, screenId: e.target.value})} 
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                        >
+                            <option value="all">🌍 全部屏幕 (Global)</option>
+                            {screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">指定日期</label>
+                        <input 
+                            type="date" 
+                            value={newRule.date} 
+                            onChange={e => setNewRule({...newRule, date: e.target.value})} 
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">指定時段 (留空代表全日)</label>
+                        <input 
+                            type="text" 
+                            placeholder="例如: 18,19,20 (用逗號分隔)" 
+                            value={newRule.hoursStr || ''} 
+                            onChange={e => setNewRule({...newRule, hoursStr: e.target.value})} 
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">規則類型</label>
+                        <select 
+                            value={newRule.action} 
+                            onChange={e => setNewRule({...newRule, action: e.target.value, overridePrice: ''})} 
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100 font-bold text-blue-700 bg-blue-50"
+                        >
+                            <option value="price_override">💰 強制更改底價</option>
+                            <option value="multiplier">📈 價格加乘倍數</option>
+                            <option value="lock">🔒 鎖定時段 (不開放)</option>
+                            <option value="disable_buyout">🚫 禁止買斷 (只限競價)</option>
+                        </select>
+                    </div>
+
+                    {newRule.action !== 'lock' && newRule.action !== 'disable_buyout' && (
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 mb-1 block">
+                                {newRule.action === 'multiplier' ? '輸入倍數 (例如 1.5, 2.0)' : '輸入新底價 (HK$)'}
+                            </label>
+                            <input 
+                                type="number" 
+                                step="any"
+                                placeholder={newRule.action === 'multiplier' ? "e.g. 1.5" : "e.g. 150"} 
+                                value={newRule.overridePrice || ''} 
+                                onChange={e => setNewRule({...newRule, overridePrice: e.target.value})} 
+                                className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100 font-bold"
+                            />
+                        </div>
+                    )}
+
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">備註 (只限內部看)</label>
+                        <input 
+                            type="text" 
+                            placeholder="例如: 聖誕節平安夜加價" 
+                            value={newRule.note || ''} 
+                            onChange={e => setNewRule({...newRule, note: e.target.value})} 
+                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
+                        />
+                    </div>
+
+                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-md">
+                        {t('add')}
+                    </button>
                 </div>
             </div>
-            <div className="lg:col-span-2 space-y-4">
-                {rules.map(rule => (
-                    <div key={rule.id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center">
-                        <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                                <span className="font-bold">{rule.date}</span>
-                                <span className="text-[10px] bg-blue-100 px-2 rounded">{rule.screenId}</span>
-                            </div>
-                            <div className="text-xs text-slate-500">{rule.type === 'lock' ? 'Locked (鎖定)' : `$${rule.value}`}</div>
-                        </div>
-                        <button onClick={() => onDelete(rule.id)} className="text-red-400 hover:text-red-600"><Trash2 size={18}/></button>
+
+            {/* 右邊：已設定規則列表 */}
+            <div className="lg:col-span-2 space-y-3">
+                <h4 className="font-bold text-slate-700 mb-2">已生效的特別規則</h4>
+                {rules.length === 0 ? (
+                    <div className="text-center p-10 bg-slate-50 rounded-xl border border-slate-200 text-slate-400">
+                        暫時未有任何特別規則
                     </div>
-                ))}
+                ) : (
+                    rules.map(rule => (
+                        <div key={rule.id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm hover:shadow transition-shadow">
+                            <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-sm">{rule.date}</span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                        {rule.screenId === 'all' ? '🌍 全部屏幕' : `Screen ID: ${rule.screenId}`}
+                                    </span>
+                                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                                        🕒 {rule.hours && rule.hours.length === 24 ? '全日' : (rule.hours ? rule.hours.join(',') + ':00' : '全日')}
+                                    </span>
+                                </div>
+                                <div className="text-sm font-medium">
+                                    {rule.type === 'lock' && <span className="text-red-600 flex items-center gap-1"><span className="text-lg">🔒</span> 時段已鎖定 (不對外開放)</span>}
+                                    {rule.type === 'disable_buyout' && <span className="text-orange-600 flex items-center gap-1"><span className="text-lg">🚫</span> 禁止買斷 (只允許競價)</span>}
+                                    {rule.type === 'price_override' && <span className="text-blue-600 flex items-center gap-1"><span className="text-lg">💰</span> 強制底價: HK$ {rule.value}</span>}
+                                    {rule.type === 'multiplier' && <span className="text-emerald-600 flex items-center gap-1"><span className="text-lg">📈</span> 價格倍數: {rule.value} 倍</span>}
+                                </div>
+                                {rule.note && <div className="text-[11px] text-slate-400">📝 備註: {rule.note}</div>}
+                            </div>
+                            <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all">
+                                <Trash2 size={20}/>
+                            </button>
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     );
