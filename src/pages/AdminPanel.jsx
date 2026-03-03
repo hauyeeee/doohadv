@@ -81,7 +81,7 @@ const AdminPanel = () => {
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [newRule, setNewRule] = useState({ 
-    screenId: 'all', 
+    screenIds: ['all'],
     startDate: '', // 🔥 改咗呢度
     endDate: '',   // 🔥 加咗呢度
     hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
@@ -608,7 +608,8 @@ const AdminPanel = () => {
   
 const handleAddRule = async () => { 
       if(!newRule.startDate) return alert("請選擇開始日期！"); 
-      
+      if(!newRule.screenIds || newRule.screenIds.length === 0) return alert("請至少選擇一部屏幕！");
+
       let hours = []; 
       if(!newRule.hoursStr) {
           hours = Array.from({length:24},(_,i)=>i); 
@@ -617,16 +618,12 @@ const handleAddRule = async () => {
       }
       
       try {
-          // 🔥 自動計算日期範圍的函數
           const getDatesInRange = (startStr, endStr) => {
               if (!endStr) return [startStr];
               const dateArray = [];
               let currentDate = new Date(startStr);
               const stopDate = new Date(endStr);
-              
-              // 防止用家入錯倒轉日期
               if (currentDate > stopDate) return [startStr]; 
-              
               while (currentDate <= stopDate) {
                   const y = currentDate.getFullYear();
                   const m = String(currentDate.getMonth() + 1).padStart(2, '0');
@@ -640,24 +637,32 @@ const handleAddRule = async () => {
           const datesToProcess = getDatesInRange(newRule.startDate, newRule.endDate);
           const batch = writeBatch(db);
 
-          // 🔥 逐日產生一條 Rule
+          // 🔥 決定要處理嘅屏幕
+          let targetScreens = newRule.screenIds;
+          if (targetScreens.includes('all')) {
+              targetScreens = ['all']; // 如果有剔 'all'，就只寫一條 global rule
+          }
+
+          // 🔥 雙重 Loop：每日 + 每一部機
           datesToProcess.forEach(dateStr => {
-              const ruleRef = doc(collection(db, "special_rules"));
-              batch.set(ruleRef, {
-                  screenId: newRule.screenId,
-                  date: dateStr, // 單獨的日子
-                  hours: hours, 
-                  type: newRule.action, 
-                  value: parseFloat(newRule.overridePrice) || 0,
-                  note: newRule.note || ''
+              targetScreens.forEach(sId => {
+                  const ruleRef = doc(collection(db, "special_rules"));
+                  batch.set(ruleRef, {
+                      screenId: sId, // 寫入獨立嘅屏幕 ID 或 'all'
+                      date: dateStr,
+                      hours: hours, 
+                      type: newRule.action, 
+                      value: parseFloat(newRule.overridePrice) || 0,
+                      note: newRule.note || ''
+                  });
               });
           });
 
           await batch.commit(); 
-          alert(`✅ 成功新增 ${datesToProcess.length} 日的特別規則！`); 
+          alert(`✅ 成功新增 ${datesToProcess.length * targetScreens.length} 條特別規則！`); 
           
           // 成功後清空表單
-          setNewRule({ screenId: 'all', startDate: '', endDate: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+          setNewRule({ screenIds: ['all'], startDate: '', endDate: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
 
       } catch (error) {
           console.error("Add Rule Error:", error);

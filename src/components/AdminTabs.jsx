@@ -654,23 +654,66 @@ export const CalendarView = ({ date, setDate, mode, setMode, monthData, dayGrid,
     );
 };
 
-export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete, onClearAll }) => { // 🔥 就係呢行加多咗 onClearAll
+export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete, onClearAll }) => {
     const { t } = useLanguage();
+    
+    // 處理多選 Checkbox 邏輯
+    const toggleScreenSelection = (id) => {
+        let currentIds = [...(newRule.screenIds || [])];
+        
+        if (id === 'all') {
+            setNewRule({...newRule, screenIds: ['all']});
+            return;
+        }
+
+        // 移除 'all' 如果有
+        currentIds = currentIds.filter(x => x !== 'all');
+
+        if (currentIds.includes(String(id))) {
+            currentIds = currentIds.filter(x => x !== String(id));
+        } else {
+            currentIds.push(String(id));
+        }
+        setNewRule({...newRule, screenIds: currentIds});
+    };
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
             <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit shadow-sm">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><Plus size={20} className="text-blue-600"/> 新增特別規則</h3>
                 <div className="space-y-4">
+                    
+                    {/* 🔥 全新多選屏幕 UI */}
                     <div>
-                        <label className="text-xs font-bold text-slate-500 mb-1 block">目標屏幕</label>
-                        <select 
-                            value={newRule.screenId} 
-                            onChange={e => setNewRule({...newRule, screenId: e.target.value})} 
-                            className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 ring-blue-100"
-                        >
-                            <option value="all">🌍 全部屏幕 (Global)</option>
-                            {screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                        <label className="text-xs font-bold text-slate-500 mb-1 block">目標屏幕 (可多選)</label>
+                        <div className="border border-slate-300 rounded-lg p-2 max-h-48 overflow-y-auto space-y-1 bg-slate-50 focus-within:ring-2 ring-blue-100 custom-scrollbar">
+                            <label className="flex items-center gap-2 p-1.5 hover:bg-slate-200 rounded cursor-pointer transition-colors">
+                                <input 
+                                    type="checkbox" 
+                                    checked={newRule.screenIds?.includes('all')} 
+                                    onChange={() => toggleScreenSelection('all')} 
+                                    className="w-4 h-4 text-blue-600 rounded border-slate-300"
+                                />
+                                <span className="text-sm font-bold text-slate-800">🌍 全部屏幕 (Global)</span>
+                            </label>
+                            
+                            <div className="border-t border-slate-200 my-1"></div>
+
+                            {screens.map(s => (
+                                <label key={s.id} className="flex items-center gap-2 p-1.5 hover:bg-slate-200 rounded cursor-pointer transition-colors ml-1">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={!newRule.screenIds?.includes('all') && newRule.screenIds?.includes(String(s.id))} 
+                                        onChange={() => toggleScreenSelection(s.id)} 
+                                        className="w-4 h-4 text-blue-600 rounded border-slate-300"
+                                    />
+                                    <span className="text-sm text-slate-700">{s.name}</span>
+                                </label>
+                            ))}
+                        </div>
+                        {newRule.screenIds && !newRule.screenIds.includes('all') && newRule.screenIds.length > 0 && (
+                            <p className="text-[10px] text-blue-600 mt-1 font-bold">已選擇 {newRule.screenIds.length} 部屏幕</p>
+                        )}
                     </div>
                     
                     <div className="grid grid-cols-2 gap-2">
@@ -746,7 +789,7 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                         />
                     </div>
 
-                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-md">
+                    <button onClick={onAdd} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-md transition-transform active:scale-95">
                         {t('add')}
                     </button>
                 </div>
@@ -771,31 +814,37 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                         暫時未有任何特別規則
                     </div>
                 ) : (
-                    rules.map(rule => (
-                        <div key={rule.id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm hover:shadow transition-shadow">
-                            <div className="space-y-1.5">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-sm">{rule.date}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                        {rule.screenId === 'all' ? '🌍 全部屏幕' : `Screen ID: ${rule.screenId}`}
-                                    </span>
-                                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                                        🕒 {rule.hours && rule.hours.length === 24 ? '全日' : (rule.hours ? rule.hours.join(',') + ':00' : '全日')}
-                                    </span>
+                    rules.map(rule => {
+                        const screenName = rule.screenId === 'all' 
+                            ? '🌍 全部屏幕' 
+                            : (screens.find(s => String(s.id) === String(rule.screenId))?.name || `Screen ID: ${rule.screenId}`);
+                            
+                        return (
+                            <div key={rule.id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm hover:shadow transition-shadow">
+                                <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-sm">{rule.date}</span>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold truncate max-w-[200px] ${rule.screenId === 'all' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                            {screenName}
+                                        </span>
+                                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                                            🕒 {rule.hours && rule.hours.length === 24 ? '全日' : (rule.hours ? rule.hours.join(',') + ':00' : '全日')}
+                                        </span>
+                                    </div>
+                                    <div className="text-sm font-medium">
+                                        {rule.type === 'lock' && <span className="text-red-600 flex items-center gap-1"><span className="text-lg">🔒</span> 時段已鎖定 (不對外開放)</span>}
+                                        {rule.type === 'disable_buyout' && <span className="text-orange-600 flex items-center gap-1"><span className="text-lg">🚫</span> 禁止買斷 (只允許競價)</span>}
+                                        {rule.type === 'price_override' && <span className="text-blue-600 flex items-center gap-1"><span className="text-lg">💰</span> 強制底價: HK$ {rule.value}</span>}
+                                        {rule.type === 'multiplier' && <span className="text-emerald-600 flex items-center gap-1"><span className="text-lg">📈</span> 價格倍數: {rule.value} 倍</span>}
+                                    </div>
+                                    {rule.note && <div className="text-[11px] text-slate-400">📝 備註: {rule.note}</div>}
                                 </div>
-                                <div className="text-sm font-medium">
-                                    {rule.type === 'lock' && <span className="text-red-600 flex items-center gap-1"><span className="text-lg">🔒</span> 時段已鎖定 (不對外開放)</span>}
-                                    {rule.type === 'disable_buyout' && <span className="text-orange-600 flex items-center gap-1"><span className="text-lg">🚫</span> 禁止買斷 (只允許競價)</span>}
-                                    {rule.type === 'price_override' && <span className="text-blue-600 flex items-center gap-1"><span className="text-lg">💰</span> 強制底價: HK$ {rule.value}</span>}
-                                    {rule.type === 'multiplier' && <span className="text-emerald-600 flex items-center gap-1"><span className="text-lg">📈</span> 價格倍數: {rule.value} 倍</span>}
-                                </div>
-                                {rule.note && <div className="text-[11px] text-slate-400">📝 備註: {rule.note}</div>}
+                                <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all">
+                                    <Trash2 size={20}/>
+                                </button>
                             </div>
-                            <button onClick={() => onDelete(rule.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all">
-                                <Trash2 size={20}/>
-                            </button>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
         </div>
