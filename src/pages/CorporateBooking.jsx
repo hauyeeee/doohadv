@@ -1,6 +1,18 @@
 import React, { useState, useMemo, useEffect } from 'react';
-// 🔥 已經幫你補返漏咗嘅 Monitor！
-import { Map, MapPin, Building2, Train, Target, FileText, CheckCircle, ChevronRight, ChevronLeft, AlertTriangle, Users, CalendarRange, Clock, Download, BarChart3, UploadCloud, Info, X, Monitor } from 'lucide-react';
+import { MapPin, Building2, Train, Target, FileText, CheckCircle, ChevronRight, ChevronLeft, AlertTriangle, Users, CalendarRange, Clock, Download, BarChart3, UploadCloud, Info, X, Monitor } from 'lucide-react';
+
+// 🔥 1. 引入 react-leaflet 同 leaflet 嘅 CSS
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// 🔥 2. Tech Lead 魔法：修正 React 中 Leaflet 預設 Icon 唔見咗嘅 Bug
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const CATEGORIES = [
   { id: 'fnb', name: '餐飲美食 (F&B)' },
@@ -29,12 +41,13 @@ const CorporateBooking = ({ screens = [] }) => {
   const [selectedScreens, setSelectedScreens] = useState(new Set()); 
   const [previewScreen, setPreviewScreen] = useState(null); 
   const [uploadedFile, setUploadedFile] = useState(null); 
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // 🔥 防呆強化：確保所有 Data Types 都唔會 Error
+  // --- 防呆處理：將 Firebase 真數據轉換 ---
   const processedScreens = useMemo(() => {
     if (!screens || !Array.isArray(screens) || screens.length === 0) return [];
     
-    return screens.map(s => {
+    return screens.map((s, index) => {
       let safeBanned = [];
       if (Array.isArray(s.bannedCategories)) {
           safeBanned = s.bannedCategories;
@@ -42,21 +55,27 @@ const CorporateBooking = ({ screens = [] }) => {
           safeBanned = [s.bannedCategories];
       }
 
+      // 確保有經緯度，如果 Firebase 冇入，俾個稍微偏移嘅香港坐標做 default
+      const defaultLat = 22.3193 + (index * 0.005);
+      const defaultLng = 114.1694 + (index * 0.005);
+
       return {
         id: String(s.id || Math.random()), 
         name: s.name || '未命名屏幕',
         group: s.district || s.bundleGroup || '未分類地區', 
-        type: 'district', 
+        type: 'district', // 如果之後有地鐵線可根據 bundleGroup 轉換
         basePrice: Number(s.basePrice) || 50,
         bannedCategories: safeBanned, 
         footfall: Number(s.footfall) || 100000, 
         specs: s.specifications || s.size || '標準屏幕',
-        image: (s.images && Array.isArray(s.images) && s.images.length > 0) ? s.images[0] : 'https://placehold.co/600x400?text=No+Image'
+        image: (s.images && Array.isArray(s.images) && s.images.length > 0) ? s.images[0] : 'https://placehold.co/600x400?text=No+Image',
+        lat: Number(s.lat) || defaultLat,
+        lng: Number(s.lng) || defaultLng,
       };
     });
   }, [screens]);
 
-  // Load 到真數據時，預設全選
+  // Load 到真數據時，預設幫大客「全選」
   useEffect(() => {
     if (processedScreens.length > 0 && selectedScreens.size === 0) {
       setSelectedScreens(new Set(processedScreens.map(s => s.id)));
@@ -181,43 +200,74 @@ const CorporateBooking = ({ screens = [] }) => {
                     })
                 )}
             </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl flex flex-col h-[300px]">
+                <div className="p-3 bg-slate-50 border-b font-bold text-sm text-slate-700 flex justify-between items-center">
+                    <span>詳細機位名單</span>
+                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs">已選 {processedScreens.filter(s => s.type === regionMode && selectedScreens.has(s.id)).length} 部</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                    {processedScreens.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                            <Monitor size={48} className="mb-2 opacity-50"/>
+                            <p>尚未載入任何機位數據</p>
+                        </div>
+                    ) : (
+                        processedScreens.filter(s => s.type === regionMode).map(screen => {
+                            const isBanned = industry && screen.bannedCategories.includes(industry);
+                            return (
+                            <div key={screen.id} className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                                <div className="flex items-center gap-3">
+                                    <div onClick={() => !isBanned && handleToggleScreen(screen.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
+                                        {selectedScreens.has(screen.id) && !isBanned && <CheckCircle size={12}/>}
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-sm text-slate-800 flex items-center gap-1">
+                                            {screen.name}
+                                            {isBanned && <AlertTriangle size={12} className="text-orange-500"/>}
+                                        </p>
+                                        <p className="text-[10px] text-slate-500">人流: {(screen.footfall/1000).toFixed(0)}k</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setPreviewScreen(screen)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
+                                    <Info size={16}/>
+                                </button>
+                            </div>
+                        )})
+                    )}
+                </div>
+            </div>
         </div>
         
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl flex flex-col h-[400px]">
-            <div className="p-3 bg-slate-50 border-b font-bold text-sm text-slate-700 flex justify-between items-center">
-                <span>詳細機位名單</span>
-                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs">已選 {processedScreens.filter(s => s.type === regionMode && selectedScreens.has(s.id)).length} 部</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                {processedScreens.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                        <Monitor size={48} className="mb-2 opacity-50"/>
-                        <p>尚未載入任何機位數據</p>
-                    </div>
-                ) : (
-                    processedScreens.filter(s => s.type === regionMode).map(screen => {
-                        const isBanned = industry && screen.bannedCategories.includes(industry);
-                        return (
-                        <div key={screen.id} className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
-                            <div className="flex items-center gap-3">
-                                <div onClick={() => !isBanned && handleToggleScreen(screen.id)} className={`w-6 h-6 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
-                                    {selectedScreens.has(screen.id) && !isBanned && <CheckCircle size={14}/>}
+        {/* 🔥 真・互動地圖區 (Leaflet) */}
+        <div className="lg:col-span-2 bg-slate-200 rounded-xl border border-slate-300 relative overflow-hidden h-[500px] z-0 shadow-inner">
+            <MapContainer 
+                center={[22.3193, 114.1694]} // 預設香港中心點
+                zoom={11} 
+                style={{ height: '100%', width: '100%', zIndex: 0 }}
+            >
+                {/* 免費的 OpenStreetMap 圖層 */}
+                <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                
+                {/* 將已選嘅機位變成地圖上嘅圖釘 */}
+                {processedScreens
+                    .filter(s => s.type === regionMode && selectedScreens.has(s.id))
+                    .map(screen => (
+                        <Marker key={screen.id} position={[screen.lat, screen.lng]}>
+                            <Popup>
+                                <div className="text-center font-sans">
+                                    <strong className="text-sm text-blue-700">{screen.name}</strong>
+                                    <p className="text-xs text-slate-500 mt-1 mb-2">預估日人流: {(screen.footfall/1000).toFixed(0)}k</p>
+                                    <img src={screen.image} alt={screen.name} className="w-full h-20 object-cover rounded shadow-sm" />
                                 </div>
-                                <div>
-                                    <p className="font-bold text-sm text-slate-800 flex items-center gap-1">
-                                        {screen.name}
-                                        {isBanned && <AlertTriangle size={12} className="text-orange-500"/>}
-                                    </p>
-                                    <p className="text-[10px] text-slate-500">人流: {(screen.footfall/1000).toFixed(0)}k | {screen.specs}</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setPreviewScreen(screen)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
-                                <Info size={18}/>
-                            </button>
-                        </div>
-                    )})
-                )}
-            </div>
+                            </Popup>
+                        </Marker>
+                    ))
+                }
+            </MapContainer>
         </div>
       </div>
     </div>
@@ -293,7 +343,7 @@ const CorporateBooking = ({ screens = [] }) => {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 py-8 px-4 font-sans relative">
+    <div className="min-h-screen bg-slate-50 py-8 px-4 font-sans relative z-0">
       
       {/* Preview Modal */}
       {previewScreen && (
@@ -335,7 +385,7 @@ const CorporateBooking = ({ screens = [] }) => {
         </div>
 
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[550px]">
-            {/* 如果未 Load 到 Data，出 Warning 提示而唔係死機 */}
+            {/* 數據未載入提示 */}
             {processedScreens.length === 0 && step !== 5 ? (
                 <div className="flex flex-col items-center justify-center h-[400px] text-slate-400 text-center">
                     <Monitor size={64} className="mb-4 text-slate-300"/>
