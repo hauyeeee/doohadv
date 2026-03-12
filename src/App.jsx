@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { initAnalytics, trackPageView, trackEvent } from './utils/analytics';
+import CorporateBooking from './CorporateBooking'; // 引入全新大客頁面
 
 // Pages & Components
 import AdminPanel from './pages/AdminPanel'; 
@@ -17,7 +18,7 @@ import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
 import TimeSlotSelector from './components/TimeSlotSelector';
 import PricingSummary from './components/PricingSummary';
-import ScanCheck from './pages/ScanCheck'; // 確保路徑同你擺嘅位置一樣
+import ScanCheck from './pages/ScanCheck'; 
 
 // Modals
 import ScreenDetailModal from './components/ScreenDetailModal';
@@ -27,6 +28,9 @@ import BuyoutModal from './components/BuyoutModal';
 import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
+// ==========================================
+// 原本嘅散客主系統 (完全無改動過)
+// ==========================================
 const DOOHBiddingSystem = () => {
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
@@ -59,7 +63,6 @@ const DOOHBiddingSystem = () => {
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
   const [restrictionAgreed, setRestrictionAgreed] = useState(false); 
 
-  // 🔥 修正：只保留 Purchase 追蹤，刪除舊版 ReactGA 呼叫，避免白畫面！
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     if (queryParams.get('success') === 'true') {
@@ -264,6 +267,42 @@ const DOOHBiddingSystem = () => {
   );
 };
 
+
+// ==========================================
+// 🔥 新增：首頁包裝器 (HomeWrapper)
+// 負責切換「原有散客系統」同埋「全新大客系統」
+// ==========================================
+const HomeWrapper = () => {
+  // 預設開啓 'standard' (你原本嘅系統)
+  const [currentView, setCurrentView] = useState('standard');
+
+  return (
+    <div className="flex flex-col min-h-screen relative bg-slate-50">
+      {/* 頂部黑條 Tab 切換 (開發/Demo 專用) */}
+      <div className="bg-slate-900 text-white p-2 flex justify-center gap-2 sm:gap-4 text-xs sm:text-sm font-bold z-[100] shadow-md relative">
+        <button
+          onClick={() => setCurrentView('standard')}
+          className={`px-3 sm:px-4 py-1.5 rounded-full transition-all ${currentView === 'standard' ? 'bg-blue-600 shadow-inner' : 'hover:bg-slate-700 text-slate-300'}`}
+        >
+          一般落單模式 (原有系統)
+        </button>
+        <button
+          onClick={() => setCurrentView('corporate')}
+          className={`px-3 sm:px-4 py-1.5 rounded-full transition-all ${currentView === 'corporate' ? 'bg-blue-600 shadow-inner' : 'hover:bg-slate-700 text-slate-300'}`}
+        >
+          🌟 企業專屬方案 (大客測試)
+        </button>
+      </div>
+
+      {/* 根據 State 切換顯示邊個 Component */}
+      <div className="flex-1 w-full">
+        {currentView === 'standard' ? <DOOHBiddingSystem /> : <CorporateBooking />}
+      </div>
+    </div>
+  );
+};
+
+
 // 統一路由及自動觸發 PageView
 const AnalyticsTracker = () => {
   const location = useLocation();
@@ -275,6 +314,7 @@ const AnalyticsTracker = () => {
   return null;
 };
 
+
 const App = () => {
   useEffect(() => {
     initAnalytics();
@@ -284,7 +324,9 @@ const App = () => {
     <>
       <AnalyticsTracker />
       <Routes>
-        <Route path="/" element={<DOOHBiddingSystem />} />
+        {/* 🔥 路由修改：將原本指向 DOOHBiddingSystem 嘅 '/' 改為指向 HomeWrapper */}
+        <Route path="/" element={<HomeWrapper />} />
+        
         <Route path="/scan-check" element={<ScanCheck />} />
         <Route path="/admin" element={<AdminPanel />} />
         <Route path="/privacy" element={<Privacy />} />
@@ -293,7 +335,7 @@ const App = () => {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       
-      {/* 👇 👇 👇 WhatsApp 懸浮按鈕 (貼喺度就啱晒) 👇 👇 👇 */}
+      {/* 👇 👇 👇 WhatsApp 懸浮按鈕 👇 👇 👇 */}
       {!window.location.pathname.includes('/player') && !window.location.pathname.includes('/admin') && (
         <button
             onClick={() => {
@@ -303,7 +345,6 @@ const App = () => {
                         'event_label': 'Floating_Button'
                     });
                 }
-                // 🔥 記得將下面呢個數字改做你真正聽緊嘅 WhatsApp 號碼 (唔洗加 + 號)
                 const phoneNumber = "85268786834"; 
                 const message = encodeURIComponent("你好，我對「自己廣告自己投」有興趣，想了解多啲！");
                 window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
