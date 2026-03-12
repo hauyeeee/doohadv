@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MapPin, Building2, Train, Target, FileText, CheckCircle, 
   ChevronRight, ChevronLeft, AlertTriangle, CalendarRange, 
-  Clock, BarChart3, UploadCloud, Info, X, Monitor, Loader2 
+  Clock, BarChart3, UploadCloud, Info, X, Monitor, Loader2, Sparkles 
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -11,6 +11,7 @@ import { db, storage } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
+// 修正 Leaflet Icon 遺失 Bug
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({ 
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png', 
@@ -25,19 +26,19 @@ const CATEGORIES = [
     { id: 'alcohol', name: '酒類飲品 (Alcohol)' } 
 ];
 
-// 🔥 更新 1：全日改成 24 小時
-const DAYPARTING_OPTIONS = [ 
-    { id: 'all_day', name: '全日霸屏 ROS (24小時)', hours: 24 }, 
-    { id: 'rush_hour', name: '黃金通勤 (08:00-10:00, 17:00-20:00)', hours: 5 }, 
-    { id: 'nightlife', name: '夜間消費 (19:00 - 02:00)', hours: 7 } 
+// 🔥 全新：智能時段區塊 (不再依賴死板鐘數)
+const DAYPARTING_BLOCKS = [ 
+    { 
+        id: 'smart_prime', 
+        name: '旗艦黃金時段 (Smart Prime)', 
+        desc: '系統自動抽取各屏幕最高人流之專屬時段 (無折扣)' 
+    }, 
+    { 
+        id: 'smart_gold_normal', 
+        name: '日常優質時段 (Gold & Normal)', 
+        desc: '非黃金時段，適合長線曝光維持聲量 (享 10% 折扣)' 
+    }
 ];
-
-// 時段 Map (0-23 點)
-const HOURS_MAP = { 
-    all_day: Array.from({length: 24}, (_, i) => i), // [0, 1, ..., 23]
-    rush_hour: [8,9,17,18,19], 
-    nightlife: [19,20,21,22,23,0,1] 
-};
 
 const SOV_OPTIONS = [
     { val: 10, label: "10% 標準" },
@@ -46,13 +47,14 @@ const SOV_OPTIONS = [
     { val: 100, label: "100% 獨家包場" }
 ];
 
-// 🔥 更新 2：接收 pricingConfig
 const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
   const [step, setStep] = useState(1);
   const [campaignName, setCampaignName] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [industry, setIndustry] = useState('');
-  const [dayparting, setDayparting] = useState('all_day');
+  
+  // 預設選擇全日 24 小時
+  const [selectedDayparts, setSelectedDayparts] = useState(['all_day']); 
   const [sov, setSov] = useState(30); 
   
   const [regionMode, setRegionMode] = useState('district'); 
@@ -62,6 +64,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
   const [isSubmitting, setIsSubmitting] = useState(false); 
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  // 防呆處理
   const processedScreens = useMemo(() => {
     if (!screens || !Array.isArray(screens) || screens.length === 0) return [];
     return screens.map((s, index) => {
@@ -75,7 +78,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
         bannedCategories: safeBanned, 
         footfall: Number(s.footfall) || 100000, 
         specs: s.specifications || s.size || '標準屏幕', 
-        tierRules: s.tierRules || {}, // 🔥 保留機位嘅時段規則
+        tierRules: s.tierRules || {}, // 🔥 保留最核心嘅 Database Tier Rules
         image: (s.images && Array.isArray(s.images) && s.images.length > 0) ? s.images[0] : 'https://placehold.co/600x400?text=No+Image',
         lat: Number(s.lat) || 22.3193 + (index * 0.005), 
         lng: Number(s.lng) || 114.1694 + (index * 0.005),
@@ -106,6 +109,17 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       setSelectedScreens(newSet); 
   };
 
+  const toggleDaypart = (id) => {
+      let newSet = new Set(selectedDayparts);
+      if (newSet.has('all_day')) newSet.delete('all_day'); 
+      
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+
+      if (newSet.size === 0) newSet.add('all_day'); 
+      setSelectedDayparts(Array.from(newSet));
+  };
+
   const currentGroups = useMemo(() => {
       return [...new Set(processedScreens.filter(s => s.type === regionMode).map(s => s.group))];
   }, [regionMode, processedScreens]);
@@ -118,18 +132,17 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       return processedScreens.filter(s => selectedScreens.has(s.id) && industry && s.bannedCategories.includes(industry));
   }, [selectedScreens, industry, processedScreens]);
 
-  // 🔥 更新 3：智能計算真實價格 (精準到逐個鐘)
+  // 🔥 終極定價引擎：讀取每部機嘅 Prime/Gold 並套用階梯折扣
   const metrics = useMemo(() => {
       let days = 30;
       if (dateRange.start && dateRange.end) { 
           days = Math.max(1, Math.ceil(Math.abs(new Date(dateRange.end) - new Date(dateRange.start)) / (1000 * 60 * 60 * 24))); 
       }
       
-      const strategy = DAYPARTING_OPTIONS.find(d => d.id === dayparting) || DAYPARTING_OPTIONS[0];
-      const targetHours = HOURS_MAP[strategy.id];
+      const isAllDay = selectedDayparts.includes('all_day');
       const sovMultiplier = sov / 100;
       
-      // 讀取後台設定的倍數
+      // 讀取 Admin 設定嘅倍數
       const p_prime = pricingConfig?.primeMultiplier || 3.5;
       const p_gold = pricingConfig?.goldMultiplier || 1.8;
       
@@ -138,32 +151,59 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       
       activeScreens.forEach(s => { 
           let screenDailyCost = 0;
+          let screenActiveHoursCount = 0;
           
-          // 逐個鐘頭計算倍數
-          targetHours.forEach(h => {
-              let multiplier = 1.0;
-              const rules = s.tierRules?.default || { prime: [], gold: [] };
-              const primeHours = (rules.prime || []).map(Number);
-              const goldHours = (rules.gold || []).map(Number);
+          // 預設讀取 Default，因為預測唔到具體星期幾，用 Default 做估算最準
+          const rules = s.tierRules?.default || { prime: [], gold: [] };
+          const primeHours = (rules.prime || []).map(Number);
+          const goldHours = (rules.gold || []).map(Number);
+          
+          for (let h = 0; h < 24; h++) {
+              const isPrime = primeHours.includes(h);
+              const isGold = goldHours.includes(h);
               
-              if (primeHours.includes(Number(h))) multiplier = p_prime;
-              else if (goldHours.includes(Number(h))) multiplier = p_gold;
-              
-              screenDailyCost += (s.basePrice * multiplier * sovMultiplier);
-          });
+              let includeHour = false;
+              let hourDiscount = 1.0; // 預設正價
+
+              if (isAllDay) {
+                  includeHour = true;
+                  hourDiscount = 0.75; // 🌟 24h ROS 獨享 25% Off
+              } else {
+                  if (selectedDayparts.includes('smart_prime') && isPrime) { 
+                      includeHour = true; 
+                      hourDiscount = 1.0; // Prime 無折
+                  }
+                  if (selectedDayparts.includes('smart_gold_normal') && !isPrime) { 
+                      includeHour = true; 
+                      hourDiscount = 0.9; // Gold & Normal 享 10% Off
+                  }
+              }
+
+              if (includeHour) {
+                  let multiplier = 1.0;
+                  if (isPrime) multiplier = p_prime;
+                  else if (isGold) multiplier = p_gold;
+                  
+                  screenDailyCost += (s.basePrice * multiplier * sovMultiplier * hourDiscount);
+                  screenActiveHoursCount++;
+              }
+          }
           
           totalCost += screenDailyCost * days;
-          totalImpressions += (s.footfall * (targetHours.length / 24) * days * sovMultiplier); 
+          // 按比例計算人流 (假設人流平均分佈於 24 小時)
+          totalImpressions += (s.footfall * (screenActiveHoursCount / 24) * days * sovMultiplier); 
       });
       
       return { 
           days, 
           cost: totalCost, 
           impressions: totalImpressions, 
-          cpm: totalImpressions > 0 ? (totalCost / (totalImpressions / 1000)) : 0 
+          cpm: totalImpressions > 0 ? (totalCost / (totalImpressions / 1000)) : 0,
+          isAllDay 
       };
-  }, [activeScreens, dateRange, dayparting, sov, pricingConfig]);
+  }, [activeScreens, dateRange, selectedDayparts, sov, pricingConfig]);
 
+  // 🔥 真實入單邏輯 (跟 Metrics 一致)
   const handleFinalSubmit = async () => {
       if (!campaignName || !dateRange.start || !dateRange.end) { 
           alert("請先填寫企劃名稱及廣告檔期"); 
@@ -193,37 +233,61 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
           };
           
           const dates = getDates(dateRange.start, dateRange.end);
-          const strategy = DAYPARTING_OPTIONS.find(d => d.id === dayparting) || DAYPARTING_OPTIONS[0];
-          const targetHours = HOURS_MAP[strategy.id];
-          
+          const isAllDay = selectedDayparts.includes('all_day');
           const p_prime = pricingConfig?.primeMultiplier || 3.5;
           const p_gold = pricingConfig?.goldMultiplier || 1.8;
           const detailedSlots = [];
 
+          // 逐日逐部機逐個鐘生成
           dates.forEach(d => {
               const dayOfWeek = new Date(d).getDay();
-              targetHours.forEach(h => {
-                  activeScreens.forEach(s => {
-                      // 寫入訂單時，同上面一樣計算精確價格
-                      let multiplier = 1.0;
-                      const rules = s.tierRules?.[dayOfWeek] || s.tierRules?.default || { prime: [], gold: [] };
-                      const primeHours = (rules.prime || []).map(Number);
-                      const goldHours = (rules.gold || []).map(Number);
+              
+              activeScreens.forEach(s => {
+                  // 讀取當天專屬嘅 Tier Rules
+                  const rules = s.tierRules?.[dayOfWeek] || s.tierRules?.default || { prime: [], gold: [] };
+                  const primeHours = (rules.prime || []).map(Number);
+                  const goldHours = (rules.gold || []).map(Number);
+                  
+                  for (let h = 0; h < 24; h++) {
+                      const isPrime = primeHours.includes(h);
+                      const isGold = goldHours.includes(h);
                       
-                      if (primeHours.includes(Number(h))) multiplier = p_prime;
-                      else if (goldHours.includes(Number(h))) multiplier = p_gold;
-                      
-                      detailedSlots.push({ 
-                          date: d, 
-                          hour: h, 
-                          screenId: String(s.id), 
-                          screenName: s.name, 
-                          isCorporate: true, 
-                          sov: sov, 
-                          slotStatus: 'won', 
-                          bidPrice: s.basePrice * multiplier * (sov/100) 
-                      }); 
-                  });
+                      let includeHour = false;
+                      let hourDiscount = 1.0;
+
+                      if (isAllDay) {
+                          includeHour = true;
+                          hourDiscount = 0.75;
+                      } else {
+                          if (selectedDayparts.includes('smart_prime') && isPrime) { 
+                              includeHour = true; 
+                              hourDiscount = 1.0; 
+                          }
+                          if (selectedDayparts.includes('smart_gold_normal') && !isPrime) { 
+                              includeHour = true; 
+                              hourDiscount = 0.9; 
+                          }
+                      }
+
+                      if (includeHour) {
+                          let multiplier = 1.0;
+                          if (isPrime) multiplier = p_prime;
+                          else if (isGold) multiplier = p_gold;
+                          
+                          const finalPrice = s.basePrice * multiplier * (sov/100) * hourDiscount;
+                          
+                          detailedSlots.push({ 
+                              date: d, 
+                              hour: h, 
+                              screenId: String(s.id), 
+                              screenName: s.name, 
+                              isCorporate: true, 
+                              sov: sov, 
+                              slotStatus: 'won', 
+                              bidPrice: finalPrice 
+                          }); 
+                      }
+                  }
               });
           });
           
@@ -233,7 +297,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
               campaignName, 
               sov, 
               industry, 
-              dayparting, 
+              dayparting: selectedDayparts.join(','), 
               detailedSlots, 
               status: 'paid', 
               createdAt: serverTimestamp(), 
@@ -262,21 +326,41 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-6 rounded-xl border border-slate-200">
           <div className="md:col-span-2 space-y-2">
               <label className="block text-sm font-bold text-slate-700">企劃名稱 (Campaign Name)</label>
-              <input type="text" placeholder="例如：2024 Q4 節日大促銷" value={campaignName} onChange={e => setCampaignName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 font-bold" />
+              <input 
+                  type="text" 
+                  placeholder="例如：2024 Q4 節日大促銷" 
+                  value={campaignName} 
+                  onChange={e => setCampaignName(e.target.value)} 
+                  className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 font-bold" 
+              />
           </div>
           <div className="space-y-2">
               <label className="block text-sm font-bold text-slate-700 flex items-center gap-1">
                   <CalendarRange size={16}/> 廣告檔期 (Flight Dates)
               </label>
               <div className="flex items-center gap-2">
-                  <input type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" />
+                  <input 
+                      type="date" 
+                      value={dateRange.start} 
+                      onChange={e => setDateRange({...dateRange, start: e.target.value})} 
+                      className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" 
+                  />
                   <span className="text-slate-400">至</span>
-                  <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" />
+                  <input 
+                      type="date" 
+                      value={dateRange.end} 
+                      onChange={e => setDateRange({...dateRange, end: e.target.value})} 
+                      className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" 
+                  />
               </div>
           </div>
           <div className="space-y-2">
               <label className="block text-sm font-bold text-slate-700">行業類別 (Industry)</label>
-              <select value={industry} onChange={e => setIndustry(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white">
+              <select 
+                  value={industry} 
+                  onChange={e => setIndustry(e.target.value)} 
+                  className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white"
+              >
                   <option value="">請選擇...</option>
                   {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -291,10 +375,16 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
           <MapPin className="text-blue-600" /> 第二步：網絡覆蓋與機位選擇
       </h2>
       <div className="flex gap-4">
-          <button onClick={() => setRegionMode('district')} className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'district' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+          <button 
+              onClick={() => setRegionMode('district')} 
+              className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'district' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+          >
               <Building2 size={20}/> 核心商業區 (Districts)
           </button>
-          <button onClick={() => setRegionMode('mtr')} className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'mtr' ? 'border-green-600 bg-green-50 text-green-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+          <button 
+              onClick={() => setRegionMode('mtr')} 
+              className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'mtr' ? 'border-green-600 bg-green-50 text-green-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+          >
               <Train size={20}/> 港鐵沿線 (MTR Lines)
           </button>
       </div>
@@ -303,13 +393,19 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
             <h3 className="font-bold text-slate-700">快速選擇群組 (一鍵全選)</h3>
             <div className="space-y-2 overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
                 {currentGroups.length === 0 ? (
-                    <div className="p-4 bg-slate-50 text-slate-400 text-center text-sm rounded-xl border border-slate-200">無可用群組資料</div>
+                    <div className="p-4 bg-slate-50 text-slate-400 text-center text-sm rounded-xl border border-slate-200">
+                        無可用群組資料
+                    </div>
                 ) : (
                     currentGroups.map(group => { 
                         const groupScreens = processedScreens.filter(s => s.group === group); 
                         const allSelected = groupScreens.every(s => selectedScreens.has(s.id)); 
                         return (
-                            <div key={group} onClick={() => handleGroupToggle(group)} className={`p-3 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${allSelected ? 'border-blue-500 bg-blue-600 text-white shadow-md' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                            <div 
+                                key={group} 
+                                onClick={() => handleGroupToggle(group)} 
+                                className={`p-3 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${allSelected ? 'border-blue-500 bg-blue-600 text-white shadow-md' : 'border-slate-200 bg-white hover:border-blue-300'}`}
+                            >
                                 <span className="font-bold text-sm">{group}</span>
                                 <span className={`text-xs px-2 py-1 rounded-full ${allSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                                     {groupScreens.length} 部
@@ -329,15 +425,22 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                 <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                     {processedScreens.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                            <Monitor size={48} className="mb-2 opacity-50"/><p>尚未載入任何機位數據</p>
+                            <Monitor size={48} className="mb-2 opacity-50"/>
+                            <p>尚未載入數據</p>
                         </div>
                     ) : (
                         processedScreens.filter(s => s.type === regionMode).map(screen => { 
                             const isBanned = industry && screen.bannedCategories.includes(industry); 
                             return (
-                                <div key={screen.id} className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                                <div 
+                                    key={screen.id} 
+                                    className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}
+                                >
                                     <div className="flex items-center gap-3">
-                                        <div onClick={() => !isBanned && handleToggleScreen(screen.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
+                                        <div 
+                                            onClick={() => !isBanned && handleToggleScreen(screen.id)} 
+                                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}
+                                        >
                                             {selectedScreens.has(screen.id) && !isBanned && <CheckCircle size={12}/>}
                                         </div>
                                         <div>
@@ -383,26 +486,67 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
           <BarChart3 className="text-blue-600" /> 第三步：聲量與預測指標 (SOV & Projections)
       </h2>
-      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <h3 className="font-bold text-blue-800 flex items-center gap-2 mb-3">
-              <Clock size={18}/> 播放時段策略 (Dayparting)
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {DAYPARTING_OPTIONS.map(opt => (
-                  <div key={opt.id} onClick={() => setDayparting(opt.id)} className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${dayparting === opt.id ? 'border-blue-600 bg-white shadow-sm' : 'border-blue-100 bg-blue-50/50 hover:border-blue-300'}`}>
-                      <p className={`font-bold text-sm ${dayparting === opt.id ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">每日 {opt.hours} 小時</p>
-                  </div>
-              ))}
+      
+      {/* 🔥 智能時段選擇器 */}
+      <div className="mb-6 p-5 bg-blue-50 border border-blue-200 rounded-xl shadow-sm">
+          <div className="flex justify-between items-start mb-4">
+              <h3 className="font-bold text-blue-800 flex items-center gap-2">
+                  <Clock size={18}/> 播放時段策略 (可多選組合)
+              </h3>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {DAYPARTING_BLOCKS.map(block => {
+                  const isSelected = selectedDayparts.includes(block.id);
+                  return (
+                      <div 
+                          key={block.id} 
+                          onClick={() => toggleDaypart(block.id)} 
+                          className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${isSelected ? 'border-blue-600 bg-white shadow-md transform scale-[1.02]' : 'border-blue-200 bg-blue-50/50 hover:border-blue-300 hover:bg-white'}`}
+                      >
+                          <div className="flex justify-between items-center mb-2">
+                              <p className={`font-bold text-base ${isSelected ? 'text-blue-700' : 'text-slate-600'}`}>{block.name}</p>
+                              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
+                                  {isSelected && <CheckCircle size={14} />}
+                              </div>
+                          </div>
+                          <p className="text-xs text-slate-500 font-medium leading-relaxed">{block.desc}</p>
+                      </div>
+                  )
+              })}
+          </div>
+
+          {/* ROS 獨立大掣 (25% Off) */}
+          <div 
+              onClick={() => setSelectedDayparts(['all_day'])} 
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between group ${selectedDayparts.includes('all_day') ? 'border-green-500 bg-green-50 shadow-lg transform scale-[1.01]' : 'border-green-200 bg-white hover:border-green-400'}`}
+          >
+              <div>
+                  <p className={`font-black text-lg flex items-center gap-2 mb-1 ${selectedDayparts.includes('all_day') ? 'text-green-700' : 'text-slate-700'}`}>
+                      🌟 全日霸屏 ROS (24小時)
+                      <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+                          <Sparkles size={10}/> 專享 25% 折扣
+                      </span>
+                  </p>
+                  <p className="text-xs text-slate-500">系統自動包攬屏幕全日 24 小時時段，將投資效益最大化！</p>
+              </div>
+              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedDayparts.includes('all_day') ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 bg-slate-50 group-hover:border-green-400'}`}>
+                  {selectedDayparts.includes('all_day') && <CheckCircle size={16} />}
+              </div>
           </div>
       </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-4">
               <label className="block font-bold text-slate-700 text-lg">選擇 Share of Voice (SOV %)</label>
               <p className="text-sm text-slate-500 mb-4">為企業專屬品牌包場方案，可選擇高達 100% 獨家聲量。</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {SOV_OPTIONS.map(opt => (
-                      <button key={opt.val} onClick={() => setSov(opt.val)} className={`py-4 rounded-xl border-2 font-bold transition-all ${sov === opt.val ? 'border-blue-600 bg-blue-600 text-white shadow-lg transform scale-105' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}>
+                      <button 
+                          key={opt.val} 
+                          onClick={() => setSov(opt.val)} 
+                          className={`py-4 rounded-xl border-2 font-bold transition-all ${sov === opt.val ? 'border-blue-600 bg-blue-600 text-white shadow-lg transform scale-105' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                      >
                           <div className="text-xl font-black">{opt.val}%</div>
                           <div className="text-[10px] opacity-80 mt-1">{opt.label}</div>
                       </button>
@@ -415,24 +559,42 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                   </div>
               )}
           </div>
-          <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-              <div className="absolute -right-10 -top-10 opacity-10"><BarChart3 size={150}/></div>
-              <h3 className="font-bold text-slate-300 uppercase tracking-wider text-xs mb-6">Estimated Campaign Metrics</h3>
+
+          <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
+              <div className="absolute -right-10 -top-10 opacity-5">
+                  <BarChart3 size={200}/>
+              </div>
+              
+              <div className="flex justify-between items-start mb-6 relative z-10">
+                  <h3 className="font-bold text-slate-400 uppercase tracking-wider text-xs">投資回報預測</h3>
+                  {metrics.isAllDay && (
+                      <span className="bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
+                          <CheckCircle size={10}/> ROS 25% Off 已啟動
+                      </span>
+                  )}
+              </div>
+
               <div className="space-y-6 relative z-10">
                   <div>
                       <p className="text-slate-400 text-sm mb-1">預估總曝光 (Est. Impressions)</p>
-                      <p className="text-4xl font-black text-green-400">
+                      <p className="text-4xl font-black text-white">
                           {metrics.impressions.toLocaleString(undefined, {maximumFractionDigits:0})} 
-                          <span className="text-lg font-normal text-slate-400">次</span>
+                          <span className="text-lg font-normal text-slate-400 ml-1">次</span>
                       </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 border-t border-slate-700 pt-6">
-                      <div><p className="text-slate-400 text-sm mb-1">預計千人成本 (CPM)</p><p className="text-2xl font-bold text-white">HK$ {metrics.cpm.toFixed(2)}</p></div>
-                      <div><p className="text-slate-400 text-sm mb-1">企劃日數 (Duration)</p><p className="text-2xl font-bold text-white">{metrics.days} 日</p></div>
+                      <div>
+                          <p className="text-slate-400 text-sm mb-1">預計千人成本 (CPM)</p>
+                          <p className="text-2xl font-bold text-blue-400">HK$ {metrics.cpm.toFixed(2)}</p>
+                      </div>
+                      <div>
+                          <p className="text-slate-400 text-sm mb-1">企劃日數 (Duration)</p>
+                          <p className="text-2xl font-bold text-blue-400">{metrics.days} 日</p>
+                      </div>
                   </div>
-                  <div className="mt-4 bg-slate-800 p-3 rounded-lg flex justify-between items-center">
-                      <span className="text-sm text-slate-300">預計總投資額 (Est. Cost)</span>
-                      <span className="text-xl font-bold text-blue-400">HK$ {metrics.cost.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                  <div className="mt-4 bg-slate-800 p-4 rounded-xl flex justify-between items-center border border-slate-700">
+                      <span className="text-sm text-slate-300 font-medium">預計總投資額 (Total Cost)</span>
+                      <span className="text-3xl font-black text-green-400">HK$ {metrics.cost.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
                   </div>
               </div>
           </div>
@@ -448,7 +610,12 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
         <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-center">
             <p className="text-sm text-slate-600 mb-4">請上載您嘅廣告影片。確認後系統將自動將影片分發至已選機位。</p>
             <label className="border-2 border-dashed border-blue-300 bg-white hover:bg-blue-50 transition-colors rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer max-w-xl mx-auto">
-                <input type="file" accept="video/mp4,video/mov" className="hidden" onChange={(e) => setUploadedFile(e.target.files[0])} />
+                <input 
+                    type="file" 
+                    accept="video/mp4,video/mov" 
+                    className="hidden" 
+                    onChange={(e) => setUploadedFile(e.target.files[0])} 
+                />
                 <UploadCloud size={48} className="text-blue-500 mb-3"/>
                 {uploadedFile ? (
                     <div className="text-green-600 font-bold flex items-center gap-2">
@@ -493,13 +660,17 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                               <span className="font-bold text-red-600">{previewScreen.bannedCategories.join(', ') || '無限制'}</span>
                           </div>
                       </div>
-                      <button onClick={() => setPreviewScreen(null)} className="mt-6 w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors">
+                      <button 
+                          onClick={() => setPreviewScreen(null)} 
+                          className="mt-6 w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors"
+                      >
                           關閉預覽
                       </button>
                   </div>
               </div>
           </div>
       )}
+      
       <div className="max-w-5xl mx-auto">
         <div className="bg-white rounded-2xl shadow-sm p-4 mb-6 flex justify-between items-center border border-slate-200">
             <div className="flex items-center gap-3">
@@ -522,6 +693,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                 ))}
             </div>
         </div>
+        
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[550px]">
             {processedScreens.length === 0 && step !== 5 ? (
                 <div className="flex flex-col items-center justify-center h-[400px] text-slate-400 text-center">
@@ -537,6 +709,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                     {step === 4 && renderStep4()}
                 </>
             )}
+            
             {step === 5 && (
                 <div className="text-center py-10 animate-in zoom-in duration-300">
                     <CheckCircle size={64} className="text-green-500 mx-auto mb-4"/>
@@ -551,6 +724,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                 </div>
             )}
         </div>
+        
         <div className="flex justify-between items-center mt-6">
             <button 
                 onClick={() => setStep(prev => Math.max(1, prev - 1))} 
