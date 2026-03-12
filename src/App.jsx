@@ -13,7 +13,6 @@ import Player from './pages/Player';
 import SEO from './components/SEO';
 import Footer from './components/Footer';
 import Header from './components/Header';
-import HeroSection from './components/HeroSection'; // 🔥 補回 HeroSection
 import TutorialModal from './components/TutorialModal'; 
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
