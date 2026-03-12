@@ -5,13 +5,10 @@ import { useLanguage } from '../context/LanguageContext';
 const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutClick }) => {
   const { t, lang } = useLanguage(); 
 
-  // 計算溢價百分比
   const premiumPercent = pricing.currentBundleMultiplier > 1 
     ? Math.round((pricing.currentBundleMultiplier - 1) * 100) 
     : 0;
 
-  // 🔥 修正：只有當真的有溢價 (> 0%) 時，才顯示 Bundle UI
-  // 這樣可以避免出現 "Bundle Active (+0%)" 的尷尬情況
   const showBundleBanner = isBundleMode && premiumPercent > 0;
 
   return (
@@ -20,11 +17,15 @@ const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutCli
         <div className="flex justify-between items-start mb-2">
           <h2 className="text-sm font-bold text-slate-400 flex items-center gap-2">
             <DollarSign size={16}/> {t('summary_title')} 
-            
-            {/* 使用新的 showBundleBanner 判斷 */}
             {showBundleBanner && <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><Sparkles size={10}/> Bundle Active</span>}
           </h2>
           <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">Total {pricing.totalSlots} {t('slot_unit')}</span>
+        </div>
+
+        {/* 🔥 解釋 1 個輪播位 */}
+        <div className="text-[10px] text-blue-300 bg-blue-900/40 p-2 rounded-lg border border-blue-800/50 mb-3 flex items-start gap-1.5 leading-relaxed">
+            <Info size={14} className="shrink-0 mt-0.5"/>
+            <span>💡 註：散客「一口價買斷 (Buyout)」僅代表買斷該時段的【1 個輪播位】(佔約 10% 聲量)，非獨佔 60 分鐘。</span>
         </div>
         
         <div className="flex items-center justify-between gap-4 mt-1">
@@ -40,7 +41,6 @@ const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutCli
         </div>
 
         <div className="space-y-1 mt-3 min-h-[20px]">
-          {/* 使用新的 showBundleBanner 判斷 */}
           {showBundleBanner && (
             <div className="text-xs text-purple-300 flex items-center gap-1 bg-purple-900/30 px-2 py-1 rounded border border-purple-800">
               <Sparkles size={12} className="text-purple-400"/> 
@@ -48,6 +48,20 @@ const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutCli
             </div>
           )}
           
+          {/* 🔥 顯示點解 Lock 咗 Buyout */}
+          {pricing.hasPrimeOrGoldLock && (
+              <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
+                  <Lock size={12}/>
+                  <span>包含黃金/優質時段 (僅開放競價 Bid)</span>
+              </div>
+          )}
+          {pricing.hasCorporateLock && (
+              <div className="text-xs text-orange-300 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded border border-orange-800">
+                  <Lock size={12}/>
+                  <span>包含大客進駐時段 (僅開放競價 Bid)</span>
+              </div>
+          )}
+
           {pricing.hasDateRestrictedBid && !pricing.hasUrgentRisk && (
             <div className="text-xs text-blue-300 flex items-center gap-1 bg-blue-900/30 px-2 py-1 rounded border border-blue-800">
               <Info size={12}/> 
@@ -59,13 +73,6 @@ const PricingSummary = ({ pricing, isBundleMode, handleBidClick, handleBuyoutCli
              <div className="text-xs text-orange-300 flex items-center gap-1 bg-orange-900/30 px-2 py-1 rounded border border-orange-800">
               <Clock size={12}/> 
               <span>{lang==='en'?"Urgent slots: Buyout Only":"急單時段：僅限 Buyout"}</span>
-            </div>
-          )}
-
-          {pricing.hasPrimeFarFutureLock && (
-            <div className="text-xs text-red-300 flex items-center gap-1 bg-red-900/30 px-2 py-1 rounded border border-red-800">
-              <Lock size={12}/> 
-              <span>Prime Future (Locked)</span>
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'; 
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
+import { Loader2, AlertTriangle, Monitor, Clock, CheckCircle } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { initAnalytics, trackPageView, trackEvent } from './utils/analytics';
 import CorporateBooking from './pages/CorporateBooking';
@@ -13,6 +13,7 @@ import Player from './pages/Player';
 import SEO from './components/SEO';
 import Footer from './components/Footer';
 import Header from './components/Header';
+import HeroSection from './components/HeroSection'; // 🔥 補回 HeroSection
 import TutorialModal from './components/TutorialModal'; 
 import ScreenSelector from './components/ScreenSelector';
 import DateSelector from './components/DateSelector';
@@ -29,12 +30,12 @@ import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
 // ==========================================
-// 原本嘅散客主系統 (加入咗 currentView 分流)
+// 原本嘅散客主系統
 // ==========================================
 const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
-    isScreensLoading, filteredScreens, // 🔥 呢度就有我哋需要嘅真數據！
+    isScreensLoading, filteredScreens, 
     currentDate, previewDate, mode, selectedWeekdays, weekCount, selectedSpecificDates,
     selectedScreens, selectedHours, screenSearchTerm,
     pricing, isBundleMode, generateAllSlots,
@@ -55,7 +56,7 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
     HOURS, getHourTier,
     getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed,
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
-    occupiedSlots, existingBids, 
+    occupiedSlots, corporateSlots, existingBids, 
     restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction,
     resumePayment, isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,   
   } = useDoohSystem();
@@ -85,12 +86,11 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
     }
   };
 
-  // 🔥 【神仙操作】如果係企業模式，直接 Render CorporateBooking，並將 filteredScreens 餵畀佢！
+  // 🔥 企業大客模式分流
   if (currentView === 'corporate') {
       return <CorporateBooking screens={filteredScreens} />;
   }
 
-  // 👇 下面全部係原本 Standard 模式嘅 Render，完全無郁過 👇
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-0">
       <SEO title="DOOH Adv Platform - 自己廣告自己投平台" />
@@ -100,6 +100,9 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
         onProfileClick={() => setIsProfileModalOpen(true)} 
         onHelpClick={() => setIsTutorialOpen(true)} 
       />
+
+      {/* 🔥 補回失蹤嘅 HeroSection */}
+      <HeroSection />
 
       <main className="max-w-5xl mx-auto p-3 md:p-6 space-y-4 md:space-y-8 mt-4">
         <ScreenSelector 
@@ -136,6 +139,7 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
             previewDate={previewDate} 
             selectedScreens={selectedScreens} 
             occupiedSlots={occupiedSlots} 
+            corporateSlots={corporateSlots} 
             getHourTier={getHourTier} 
             selectedHours={selectedHours} 
             toggleHour={toggleHour}
@@ -160,6 +164,7 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
         onChange={handleRealUpload} 
       />
 
+      {/* --- 限制條款 Modal --- */}
       {restrictionModalData && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl border-2 border-red-100 flex flex-col gap-4">
@@ -207,6 +212,7 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
           </div>
       )}
 
+      {/* --- 時間不匹配 Modal --- */}
       {isTimeMismatchModalOpen && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center relative overflow-hidden">
@@ -247,14 +253,71 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
           </div>
       )}
 
+      {/* --- Modals (已完全展開) --- */}
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
-      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} handleGoogleLogin={handleGoogleLogin} isLoginLoading={isLoginLoading} />
-      <ScreenDetailModal screen={viewingScreen} onClose={() => setViewingScreen(null)} />
-      <MyOrdersModal isOpen={isProfileModalOpen} user={user} myOrders={myOrders} existingBids={existingBids} onClose={() => setIsProfileModalOpen(false)} onLogout={handleLogout} onUploadClick={handleUploadClick} handleUpdateBid={handleUpdateBid} onResumePayment={resumePayment} />
-      <BuyoutModal isOpen={isBuyoutModalOpen} onClose={() => setIsBuyoutModalOpen(false)} pricing={pricing} selectedSpecificDates={selectedSpecificDates} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('buyout')} />
-      <BiddingModal isOpen={isBidModalOpen} onClose={() => setIsBidModalOpen(false)} generateAllSlots={generateAllSlots} slotBids={slotBids} handleSlotBidChange={handleSlotBidChange} batchBidInput={batchBidInput} setBatchBidInput={setBatchBidInput} handleBatchBid={handleBatchBid} isBundleMode={isBundleMode} pricing={pricing} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onConfirm={() => initiateTransaction('bid')} />
-      <UrgentUploadModal isOpen={isUrgentUploadModalOpen} modalPaymentStatus={modalPaymentStatus} creativeStatus={creativeStatus} isUploadingReal={isUploadingReal} uploadProgress={uploadProgress} handleRealUpload={handleRealUpload} emailStatus={emailStatus} onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} />
       
+      <LoginModal 
+        isOpen={isLoginModalOpen} 
+        onClose={() => setIsLoginModalOpen(false)} 
+        handleGoogleLogin={handleGoogleLogin} 
+        isLoginLoading={isLoginLoading} 
+      />
+      
+      <ScreenDetailModal 
+        screen={viewingScreen} 
+        onClose={() => setViewingScreen(null)} 
+      />
+      
+      <MyOrdersModal 
+        isOpen={isProfileModalOpen} 
+        user={user} 
+        myOrders={myOrders} 
+        existingBids={existingBids} 
+        onClose={() => setIsProfileModalOpen(false)} 
+        onLogout={handleLogout} 
+        onUploadClick={handleUploadClick} 
+        handleUpdateBid={handleUpdateBid} 
+        onResumePayment={resumePayment} 
+      />
+      
+      <BuyoutModal 
+        isOpen={isBuyoutModalOpen} 
+        onClose={() => setIsBuyoutModalOpen(false)} 
+        pricing={pricing} 
+        selectedSpecificDates={selectedSpecificDates} 
+        termsAccepted={termsAccepted} 
+        setTermsAccepted={setTermsAccepted} 
+        onConfirm={() => initiateTransaction('buyout')} 
+      />
+      
+      <BiddingModal 
+        isOpen={isBidModalOpen} 
+        onClose={() => setIsBidModalOpen(false)} 
+        generateAllSlots={generateAllSlots} 
+        slotBids={slotBids} 
+        handleSlotBidChange={handleSlotBidChange} 
+        batchBidInput={batchBidInput} 
+        setBatchBidInput={setBatchBidInput} 
+        handleBatchBid={handleBatchBid} 
+        isBundleMode={isBundleMode} 
+        pricing={pricing} 
+        termsAccepted={termsAccepted} 
+        setTermsAccepted={setTermsAccepted} 
+        onConfirm={() => initiateTransaction('bid')} 
+      />
+      
+      <UrgentUploadModal 
+        isOpen={isUrgentUploadModalOpen} 
+        modalPaymentStatus={modalPaymentStatus} 
+        creativeStatus={creativeStatus} 
+        isUploadingReal={isUploadingReal} 
+        uploadProgress={uploadProgress} 
+        handleRealUpload={handleRealUpload} 
+        emailStatus={emailStatus} 
+        onClose={() => { setIsUrgentUploadModalOpen(false); closeTransaction(); }} 
+      />
+      
+      {/* --- 交易狀態 Loading --- */}
       {transactionStep !== 'idle' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl max-w-md w-full p-6 text-center">
@@ -265,7 +328,12 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
                     <p className="text-xl font-bold text-blue-600 mb-6">HK$ {pendingTransaction.amount}</p>
                     <button onClick={processPayment} className="w-full bg-slate-900 text-white py-3 rounded font-bold">前往付款</button>
                 </>
-            ) : <><Loader2 className="animate-spin mx-auto mb-4"/><p>正在連接 Stripe...</p></>}
+            ) : (
+                <>
+                    <Loader2 className="animate-spin mx-auto mb-4"/>
+                    <p>正在連接 Stripe...</p>
+                </>
+            )}
           </div>
         </div>
       )}
@@ -299,25 +367,20 @@ const HomeWrapper = () => {
       </div>
 
       <div className="flex-1 w-full">
-        {/* 🔥 將 currentView 傳入去，等佢自己決定 Render 乜嘢 */}
         <DOOHBiddingSystem currentView={currentView} />
       </div>
     </div>
   );
 };
 
-
 // 統一路由及自動觸發 PageView
 const AnalyticsTracker = () => {
   const location = useLocation();
-  
   useEffect(() => {
     trackPageView(location.pathname + location.search);
   }, [location]);
-  
   return null;
 };
-
 
 const App = () => {
   useEffect(() => {
@@ -329,7 +392,6 @@ const App = () => {
       <AnalyticsTracker />
       <Routes>
         <Route path="/" element={<HomeWrapper />} />
-        
         <Route path="/scan-check" element={<ScanCheck />} />
         <Route path="/admin" element={<AdminPanel />} />
         <Route path="/privacy" element={<Privacy />} />

@@ -38,7 +38,6 @@ export const useDoohSystem = () => {
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [previewDate, setPreviewDate] = useState(new Date()); 
 
-  // 🔥 保證初始值為 String
   const [selectedScreens, setSelectedScreens] = useState(new Set(['1'])); 
   const [selectedHours, setSelectedHours] = useState(new Set());
   
@@ -54,6 +53,7 @@ export const useDoohSystem = () => {
   const [viewingScreen, setViewingScreen] = useState(null);
 
   const [occupiedSlots, setOccupiedSlots] = useState(new Set());
+  const [corporateSlots, setCorporateSlots] = useState(new Set()); // 🔥 新增：追蹤大客霸咗嘅位
   const [marketStats, setMarketStats] = useState({}); 
 
   const [toast, setToast] = useState(null);
@@ -101,12 +101,8 @@ export const useDoohSystem = () => {
       selectedScreens.forEach(id => {
           const stringId = String(id);
           const s = screens.find(sc => String(sc.id) === stringId);
-          
-          // 🔥 修正：嚴格跟隨 Admin Panel 設定，刪除舊版硬編碼的 fallback
           const rules = s?.tierRules || {};
           const todayRules = rules[currentDayKey] || rules["default"] || { prime: [], gold: [] };
-          
-          // 防彈機制：強制將所有時間轉為 Number 對比，防止 "18" 同 18 配對唔到
           const primeHours = (todayRules.prime || []).map(Number);
           const goldHours = (todayRules.gold || []).map(Number);
           
@@ -183,8 +179,22 @@ export const useDoohSystem = () => {
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
-          snapshot.docs.forEach(doc => { if (doc.data().detailedSlots) doc.data().detailedSlots.forEach(s => sold.add(`${s.date}-${s.hour}-${String(s.screenId)}`)); });
+          const corporate = new Set(); // 🔥 新增 Tracking
+          snapshot.docs.forEach(doc => { 
+              const data = doc.data();
+              if (data.detailedSlots) {
+                  data.detailedSlots.forEach(s => {
+                      const key = `${s.date}-${s.hour}-${String(s.screenId)}`;
+                      if (data.orderType === 'corporate' || s.isCorporate) {
+                          corporate.add(key); // 大客霸位
+                      } else if (data.type === 'buyout' && !data.orderType) {
+                          sold.add(key); // 散客買斷
+                      }
+                  }); 
+              }
+          });
           setOccupiedSlots(sold);
+          setCorporateSlots(corporate);
       });
 
       const unsubBidding = onSnapshot(qBidding, (snapshot) => {
@@ -437,7 +447,6 @@ export const useDoohSystem = () => {
   const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
   const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
   
-  // 🔥 強制 String ID
   const toggleScreen = (id) => {
     const stringId = String(id);
     const newSelected = new Set(selectedScreens);
@@ -453,7 +462,6 @@ export const useDoohSystem = () => {
   const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
   const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); trackEvent("Interaction", "Select_Date", key); setSelectedSpecificDates(newSet); };
   
-  // --- Bundle Multiplier 判斷 ---
   const getMultiplierForScreen = (screenId) => {
       const selectedIds = Array.from(selectedScreens).map(String); 
       let maxRuleMultiplier = 1.0;
@@ -466,7 +474,6 @@ export const useDoohSystem = () => {
                   if (m > maxRuleMultiplier) maxRuleMultiplier = m;
               }
           });
-          
           if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
           
           const currentScreen = screens.find(s => String(s.id) === String(screenId));
@@ -512,19 +519,28 @@ export const useDoohSystem = () => {
                 if (!screen) return;
                 const key = `${dateStr}-${h}-${String(screenId)}`; 
                 const isSoldOut = occupiedSlots.has(key);
+                
+                // 🔥 新邏輯：判斷 Buyout 鎖死狀態
+                const tier = getHourTier(h);
+                const isPrimeOrGold = (tier === 'prime' || tier === 'gold');
+                const hasCorporate = corporateSlots.has(key);
+                
                 const screenMultiplier = getMultiplierForScreen(screenId);
                 const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
                 let currentHighestBid = existingBids[key] || 0;
                 let finalBuyout = basePricing.buyoutPrice;
                 if (currentHighestBid > 0) { const dynamicFloor = Math.ceil(currentHighestBid * 1.5); if (dynamicFloor > finalBuyout) { finalBuyout = dynamicFloor; } }
+                
                 let canBid = basePricing.canBid && !basePricing.isLocked && !isSoldOut;
-                let isBuyoutDisabled = basePricing.isBuyoutDisabled; 
+                // 🔥 將 Prime/Gold 限制及大客佔位限制，直接影響 Buyout 掣
+                let isBuyoutDisabled = basePricing.isBuyoutDisabled || isPrimeOrGold || hasCorporate; 
+                
                 let warning = basePricing.warning;
                 const isLocked = basePricing.isLocked || isSoldOut;
                 slots.push({ 
                     key, dateStr, hour: h, screenId: String(screenId), screenName: screen.name, location: screen.location, 
                     minBid: basePricing.minBid, buyoutPrice: finalBuyout, marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
-                    isPrime: basePricing.isPrime, isBuyoutDisabled: isBuyoutDisabled, canBid, hoursUntil: basePricing.hoursUntil, 
+                    isPrime: basePricing.isPrime, isBuyoutDisabled, isPrimeOrGold, hasCorporate, canBid, hoursUntil: basePricing.hoursUntil, 
                     isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, competitorBid: currentHighestBid, 
                     isSoldOut: isLocked, warning, activeMultiplier: screenMultiplier 
                 });
@@ -532,7 +548,7 @@ export const useDoohSystem = () => {
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId.localeCompare(b.screenId));
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, corporateSlots, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -541,6 +557,7 @@ export const useDoohSystem = () => {
     let conflicts = [], missingBids = 0, invalidBids = 0; 
     let hasRestrictedBuyout = false, hasRestrictedBid = false, hasUrgentRisk = false;
     let hasDateRestrictedBid = false; let hasPrimeFarFutureLock = false; 
+    let hasPrimeOrGoldLock = false; let hasCorporateLock = false;
     let maxAppliedMultiplier = 1.0; let futureDateText = null; 
     
     availableSlots.forEach(slot => {
@@ -548,6 +565,9 @@ export const useDoohSystem = () => {
             maxAppliedMultiplier = slot.activeMultiplier;
         }
         
+        if (slot.isPrimeOrGold) hasPrimeOrGoldLock = true;
+        if (slot.hasCorporate) hasCorporateLock = true;
+
         if (!slot.canBid && slot.isBuyoutDisabled) hasPrimeFarFutureLock = true;
         if (!(!slot.canBid && slot.isBuyoutDisabled)) { buyoutTotal += slot.buyoutPrice; minBidTotal += slot.minBid; }
         if (slot.isBuyoutDisabled) hasRestrictedBuyout = true;
@@ -568,6 +588,7 @@ export const useDoohSystem = () => {
         canStartBidding: totalSlots > 0 && !hasRestrictedBid && !hasPrimeFarFutureLock, 
         isReadyToSubmit: missingBids === 0 && invalidBids === 0,
         hasRestrictedBuyout, hasRestrictedBid, hasUrgentRisk, hasDateRestrictedBid, hasPrimeFarFutureLock,
+        hasPrimeOrGoldLock, hasCorporateLock,
         currentBundleMultiplier: maxAppliedMultiplier, futureDateText 
     };
   }, [generateAllSlots, slotBids, selectedScreens]);
@@ -696,7 +717,7 @@ export const useDoohSystem = () => {
   const handleBuyoutClick = () => { 
     if (!user) { setIsLoginModalOpen(true); return; } 
     if (pricing.totalSlots === 0) { showToast('❌ 請先選擇'); return; } 
-    if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ Prime 時段限競價'); return; } 
+    if (pricing.hasRestrictedBuyout && !pricing.hasPrimeFarFutureLock) { showToast('❌ 此時段僅限競價'); return; } 
     trackEvent("E-commerce", "Initiate_Checkout", "Buyout", pricing.buyoutTotal);
     setTermsAccepted(false); 
     setIsBuyoutModalOpen(true); 
@@ -715,7 +736,7 @@ export const useDoohSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
+    occupiedSlots, corporateSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction, resumePayment,
     isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
