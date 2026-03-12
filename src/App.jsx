@@ -29,12 +29,12 @@ import LoginModal from './components/LoginModal';
 import UrgentUploadModal from './components/UrgentUploadModal';
 
 // ==========================================
-// 原本嘅散客主系統 (完全無改動過)
+// 原本嘅散客主系統 (加入咗 currentView 分流)
 // ==========================================
-const DOOHBiddingSystem = () => {
+const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
   const {
     user, isLoginModalOpen, isLoginLoading, isProfileModalOpen, myOrders,
-    isScreensLoading, filteredScreens,
+    isScreensLoading, filteredScreens, // 🔥 呢度就有我哋需要嘅真數據！
     currentDate, previewDate, mode, selectedWeekdays, weekCount, selectedSpecificDates,
     selectedScreens, selectedHours, screenSearchTerm,
     pricing, isBundleMode, generateAllSlots,
@@ -85,6 +85,12 @@ const DOOHBiddingSystem = () => {
     }
   };
 
+  // 🔥 【神仙操作】如果係企業模式，直接 Render CorporateBooking，並將 filteredScreens 餵畀佢！
+  if (currentView === 'corporate') {
+      return <CorporateBooking screens={filteredScreens} />;
+  }
+
+  // 👇 下面全部係原本 Standard 模式嘅 Render，完全無郁過 👇
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative pt-0">
       <SEO title="DOOH Adv Platform - 自己廣告自己投平台" />
@@ -269,16 +275,14 @@ const DOOHBiddingSystem = () => {
 
 
 // ==========================================
-// 🔥 新增：首頁包裝器 (HomeWrapper)
-// 負責切換「原有散客系統」同埋「全新大客系統」
+// 首頁包裝器 (HomeWrapper)
 // ==========================================
 const HomeWrapper = () => {
-  // 預設開啓 'standard' (你原本嘅系統)
   const [currentView, setCurrentView] = useState('standard');
 
   return (
     <div className="flex flex-col min-h-screen relative bg-slate-50">
-      {/* 頂部黑條 Tab 切換 (開發/Demo 專用) */}
+      {/* 頂部黑條 Tab 切換 */}
       <div className="bg-slate-900 text-white p-2 flex justify-center gap-2 sm:gap-4 text-xs sm:text-sm font-bold z-[100] shadow-md relative">
         <button
           onClick={() => setCurrentView('standard')}
@@ -294,9 +298,9 @@ const HomeWrapper = () => {
         </button>
       </div>
 
-      {/* 根據 State 切換顯示邊個 Component */}
       <div className="flex-1 w-full">
-        {currentView === 'standard' ? <DOOHBiddingSystem /> : <CorporateBooking screens={screens} />}
+        {/* 🔥 將 currentView 傳入去，等佢自己決定 Render 乜嘢 */}
+        <DOOHBiddingSystem currentView={currentView} />
       </div>
     </div>
   );
@@ -324,7 +328,6 @@ const App = () => {
     <>
       <AnalyticsTracker />
       <Routes>
-        {/* 🔥 路由修改：將原本指向 DOOHBiddingSystem 嘅 '/' 改為指向 HomeWrapper */}
         <Route path="/" element={<HomeWrapper />} />
         
         <Route path="/scan-check" element={<ScanCheck />} />
@@ -335,7 +338,7 @@ const App = () => {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       
-      {/* 👇 👇 👇 WhatsApp 懸浮按鈕 👇 👇 👇 */}
+      {/* WhatsApp 懸浮按鈕 */}
       {!window.location.pathname.includes('/player') && !window.location.pathname.includes('/admin') && (
         <button
             onClick={() => {
@@ -360,8 +363,6 @@ const App = () => {
             </span>
         </button>
       )}
-      {/* 👆 👆 👆 WhatsApp 懸浮按鈕完結 👆 👆 👆 */}
-      
     </>
   );
 };

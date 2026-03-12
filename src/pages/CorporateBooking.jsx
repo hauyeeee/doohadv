@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Map, MapPin, Building2, Train, Target, FileText, CheckCircle, ChevronRight, ChevronLeft, AlertTriangle, Users, CalendarRange, Clock, Download, BarChart3, UploadCloud, Info, X } from 'lucide-react';
+// 🔥 已經幫你補返漏咗嘅 Monitor！
+import { Map, MapPin, Building2, Train, Target, FileText, CheckCircle, ChevronRight, ChevronLeft, AlertTriangle, Users, CalendarRange, Clock, Download, BarChart3, UploadCloud, Info, X, Monitor } from 'lucide-react';
 
 const CATEGORIES = [
   { id: 'fnb', name: '餐飲美食 (F&B)' },
@@ -28,14 +29,12 @@ const CorporateBooking = ({ screens = [] }) => {
   const [selectedScreens, setSelectedScreens] = useState(new Set()); 
   const [previewScreen, setPreviewScreen] = useState(null); 
   const [uploadedFile, setUploadedFile] = useState(null); 
-  const [isSubmitted, setIsSubmitted] = useState(false);
 
   // 🔥 防呆強化：確保所有 Data Types 都唔會 Error
   const processedScreens = useMemo(() => {
     if (!screens || !Array.isArray(screens) || screens.length === 0) return [];
     
     return screens.map(s => {
-      // 安全處理 bannedCategories (確保一定係 Array)
       let safeBanned = [];
       if (Array.isArray(s.bannedCategories)) {
           safeBanned = s.bannedCategories;
@@ -164,7 +163,7 @@ const CorporateBooking = ({ screens = [] }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
             <h3 className="font-bold text-slate-700">快速選擇群組 (一鍵全選)</h3>
-            <div className="space-y-2 overflow-y-auto max-h-[350px] pr-2">
+            <div className="space-y-2 overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
                 {currentGroups.length === 0 ? (
                     <div className="p-4 bg-slate-50 text-slate-400 text-center text-sm rounded-xl border border-slate-200">
                         無可用群組資料
@@ -189,7 +188,7 @@ const CorporateBooking = ({ screens = [] }) => {
                 <span>詳細機位名單</span>
                 <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs">已選 {processedScreens.filter(s => s.type === regionMode && selectedScreens.has(s.id)).length} 部</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                 {processedScreens.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <Monitor size={48} className="mb-2 opacity-50"/>
@@ -341,7 +340,7 @@ const CorporateBooking = ({ screens = [] }) => {
                 <div className="flex flex-col items-center justify-center h-[400px] text-slate-400 text-center">
                     <Monitor size={64} className="mb-4 text-slate-300"/>
                     <h2 className="text-xl font-bold text-slate-600 mb-2">尚未載入機位數據</h2>
-                    <p className="text-sm">請確保您已正確傳入 screens prop，或等待系統從數據庫讀取資料。</p>
+                    <p className="text-sm">請等待系統從數據庫讀取資料，或檢查您的網絡連線。</p>
                 </div>
             ) : (
                 <>
