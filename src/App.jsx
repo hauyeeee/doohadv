@@ -296,7 +296,7 @@ const HomeWrapper = () => {
 
       {/* 根據 State 切換顯示邊個 Component */}
       <div className="flex-1 w-full">
-        {currentView === 'standard' ? <DOOHBiddingSystem /> : <CorporateBooking />}
+        {currentView === 'standard' ? <DOOHBiddingSystem /> : <CorporateBooking screens={screens} />}
       </div>
     </div>
   );
