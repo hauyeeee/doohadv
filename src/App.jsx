@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Loader2, UploadCloud, AlertTriangle, Monitor, Clock, CheckCircle, X } from 'lucide-react'; 
 import { useDoohSystem } from './hooks/useDoohSystem';
 import { initAnalytics, trackPageView, trackEvent } from './utils/analytics';
-import CorporateBooking from './CorporateBooking'; // 引入全新大客頁面
+import CorporateBooking from './pages/CorporateBooking';
 
 // Pages & Components
 import AdminPanel from './pages/AdminPanel'; 
