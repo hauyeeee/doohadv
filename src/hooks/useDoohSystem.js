@@ -951,7 +951,7 @@ export const useDoohSystem = () => {
     handleGoogleLogin, handleLogout, toggleScreen, toggleHour, toggleWeekday, toggleDate, handleBatchBid, handleSlotBidChange, handleBidClick, handleBuyoutClick, initiateTransaction, processPayment, handleRealUpload, closeTransaction, viewingScreen,
     handleUpdateBid, recalculateAllBids,
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
-    existingBids
+    existingBids,
     pricingConfig // 🔥 [新增] 將系統定價設定匯出，準備傳畀大客版面
   };
 };
