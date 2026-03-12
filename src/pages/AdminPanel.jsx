@@ -404,6 +404,48 @@ const AdminPanel = () => {
       }
   };
 
+  const upgradeDatabaseForB2B = async () => {
+    const confirmUpgrade = window.confirm("⚠️ 確定要一鍵升級 Database？系統會為所有機位補上 footfall, bannedCategories 等新欄位。");
+    if (!confirmUpgrade) return;
+
+    try {
+        console.log("開始升級 Database...");
+        const screensRef = collection(db, 'screens');
+        const snapshot = await getDocs(screensRef);
+        
+        let count = 0;
+        
+        // Loop 晒所有機位
+        for (const screenDoc of snapshot.docs) {
+            const data = screenDoc.data();
+            const screenRef = doc(db, 'screens', screenDoc.id);
+            
+            // 定義要補加嘅新欄位 (如果本身有，就 Keep 返本身嗰個；如果無，就塞 Default 值)
+            const updates = {
+                footfall: data.footfall || 100000, // 預設 10萬人流
+                bannedCategories: data.bannedCategories || [], // 預設無禁播
+                audience: data.audience || ['All'], // 預設受眾
+                district: data.district || '未分類地區', // 確保有地區用嚟做 Grouping
+                type: data.type || 'district', // 預設分類做商業區
+            };
+
+            // 寫入 Firestore，merge: true 保證唔會洗走舊 Data
+            await setDoc(screenRef, updates, { merge: true });
+            console.log(`✅ 已更新: ${data.name || screenDoc.id}`);
+            count++;
+        }
+        
+        alert(`🎉 Database 升級完成！共更新咗 ${count} 部機位。`);
+        
+        // 建議做完 Refresh 下個網頁
+        window.location.reload();
+        
+    } catch (error) {
+        console.error("升級 Database 時發生錯誤:", error);
+        alert("❌ 發生錯誤：" + error.message);
+    }
+};
+
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
       setLoading(true);
@@ -876,6 +918,13 @@ const handleClearAllRules = async () => {
                 <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100 transition-colors">
                     {t('logout')}
                 </button>
+
+                <button 
+    onClick={upgradeDatabaseForB2B}
+    className="bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-red-700 m-4"
+>
+    🛠️ [Tech Lead 專用] 一鍵升級 Database (B2B 欄位)
+</button>
             </div>
         </div>
 
