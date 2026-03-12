@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MapPin, Building2, Train, Target, FileText, CheckCircle, 
-  ChevronRight, ChevronLeft, AlertTriangle, Users, CalendarRange, 
-  Clock, Download, BarChart3, UploadCloud, Info, X, Monitor, Loader2 
+  ChevronRight, ChevronLeft, AlertTriangle, CalendarRange, 
+  Clock, BarChart3, UploadCloud, Info, X, Monitor, Loader2 
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -11,7 +11,6 @@ import { db, storage } from '../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
-// 修正 Leaflet Icon 遺失 Bug
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({ 
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png', 
@@ -26,11 +25,19 @@ const CATEGORIES = [
     { id: 'alcohol', name: '酒類飲品 (Alcohol)' } 
 ];
 
+// 🔥 更新 1：全日改成 24 小時
 const DAYPARTING_OPTIONS = [ 
-    { id: 'all_day', name: '全日霸屏 ROS (08:00 - 23:00)', hours: 15, multiplier: 1.0 }, 
-    { id: 'rush_hour', name: '黃金通勤 (08:00-10:00, 17:00-20:00)', hours: 5, multiplier: 1.5 }, 
-    { id: 'nightlife', name: '夜間消費 (19:00 - 02:00)', hours: 7, multiplier: 1.2 } 
+    { id: 'all_day', name: '全日霸屏 ROS (24小時)', hours: 24 }, 
+    { id: 'rush_hour', name: '黃金通勤 (08:00-10:00, 17:00-20:00)', hours: 5 }, 
+    { id: 'nightlife', name: '夜間消費 (19:00 - 02:00)', hours: 7 } 
 ];
+
+// 時段 Map (0-23 點)
+const HOURS_MAP = { 
+    all_day: Array.from({length: 24}, (_, i) => i), // [0, 1, ..., 23]
+    rush_hour: [8,9,17,18,19], 
+    nightlife: [19,20,21,22,23,0,1] 
+};
 
 const SOV_OPTIONS = [
     { val: 10, label: "10% 標準" },
@@ -39,7 +46,8 @@ const SOV_OPTIONS = [
     { val: 100, label: "100% 獨家包場" }
 ];
 
-const CorporateBooking = ({ screens = [] }) => {
+// 🔥 更新 2：接收 pricingConfig
+const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
   const [step, setStep] = useState(1);
   const [campaignName, setCampaignName] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -67,6 +75,7 @@ const CorporateBooking = ({ screens = [] }) => {
         bannedCategories: safeBanned, 
         footfall: Number(s.footfall) || 100000, 
         specs: s.specifications || s.size || '標準屏幕', 
+        tierRules: s.tierRules || {}, // 🔥 保留機位嘅時段規則
         image: (s.images && Array.isArray(s.images) && s.images.length > 0) ? s.images[0] : 'https://placehold.co/600x400?text=No+Image',
         lat: Number(s.lat) || 22.3193 + (index * 0.005), 
         lng: Number(s.lng) || 114.1694 + (index * 0.005),
@@ -109,25 +118,51 @@ const CorporateBooking = ({ screens = [] }) => {
       return processedScreens.filter(s => selectedScreens.has(s.id) && industry && s.bannedCategories.includes(industry));
   }, [selectedScreens, industry, processedScreens]);
 
+  // 🔥 更新 3：智能計算真實價格 (精準到逐個鐘)
   const metrics = useMemo(() => {
       let days = 30;
       if (dateRange.start && dateRange.end) { 
           days = Math.max(1, Math.ceil(Math.abs(new Date(dateRange.end) - new Date(dateRange.start)) / (1000 * 60 * 60 * 24))); 
       }
+      
       const strategy = DAYPARTING_OPTIONS.find(d => d.id === dayparting) || DAYPARTING_OPTIONS[0];
+      const targetHours = HOURS_MAP[strategy.id];
+      const sovMultiplier = sov / 100;
+      
+      // 讀取後台設定的倍數
+      const p_prime = pricingConfig?.primeMultiplier || 3.5;
+      const p_gold = pricingConfig?.goldMultiplier || 1.8;
+      
       let totalCost = 0;
       let totalImpressions = 0;
+      
       activeScreens.forEach(s => { 
-          totalCost += (s.basePrice * strategy.multiplier * strategy.hours * days * (sov/100)); 
-          totalImpressions += (s.footfall * (strategy.hours / 15) * days * (sov/100)); 
+          let screenDailyCost = 0;
+          
+          // 逐個鐘頭計算倍數
+          targetHours.forEach(h => {
+              let multiplier = 1.0;
+              const rules = s.tierRules?.default || { prime: [], gold: [] };
+              const primeHours = (rules.prime || []).map(Number);
+              const goldHours = (rules.gold || []).map(Number);
+              
+              if (primeHours.includes(Number(h))) multiplier = p_prime;
+              else if (goldHours.includes(Number(h))) multiplier = p_gold;
+              
+              screenDailyCost += (s.basePrice * multiplier * sovMultiplier);
+          });
+          
+          totalCost += screenDailyCost * days;
+          totalImpressions += (s.footfall * (targetHours.length / 24) * days * sovMultiplier); 
       });
+      
       return { 
           days, 
           cost: totalCost, 
           impressions: totalImpressions, 
           cpm: totalImpressions > 0 ? (totalCost / (totalImpressions / 1000)) : 0 
       };
-  }, [activeScreens, dateRange, dayparting, sov]);
+  }, [activeScreens, dateRange, dayparting, sov, pricingConfig]);
 
   const handleFinalSubmit = async () => {
       if (!campaignName || !dateRange.start || !dateRange.end) { 
@@ -158,17 +193,26 @@ const CorporateBooking = ({ screens = [] }) => {
           };
           
           const dates = getDates(dateRange.start, dateRange.end);
-          const hoursMap = { 
-              all_day: [8,9,10,11,12,13,14,15,16,17,18,19,20,21,22], 
-              rush_hour: [8,9,17,18,19], 
-              nightlife: [19,20,21,22,23,0,1] 
-          };
-          const targetHours = hoursMap[dayparting] || hoursMap['all_day'];
+          const strategy = DAYPARTING_OPTIONS.find(d => d.id === dayparting) || DAYPARTING_OPTIONS[0];
+          const targetHours = HOURS_MAP[strategy.id];
+          
+          const p_prime = pricingConfig?.primeMultiplier || 3.5;
+          const p_gold = pricingConfig?.goldMultiplier || 1.8;
           const detailedSlots = [];
 
           dates.forEach(d => {
+              const dayOfWeek = new Date(d).getDay();
               targetHours.forEach(h => {
                   activeScreens.forEach(s => {
+                      // 寫入訂單時，同上面一樣計算精確價格
+                      let multiplier = 1.0;
+                      const rules = s.tierRules?.[dayOfWeek] || s.tierRules?.default || { prime: [], gold: [] };
+                      const primeHours = (rules.prime || []).map(Number);
+                      const goldHours = (rules.gold || []).map(Number);
+                      
+                      if (primeHours.includes(Number(h))) multiplier = p_prime;
+                      else if (goldHours.includes(Number(h))) multiplier = p_gold;
+                      
                       detailedSlots.push({ 
                           date: d, 
                           hour: h, 
@@ -177,7 +221,7 @@ const CorporateBooking = ({ screens = [] }) => {
                           isCorporate: true, 
                           sov: sov, 
                           slotStatus: 'won', 
-                          bidPrice: s.basePrice * (sov/100) 
+                          bidPrice: s.basePrice * multiplier * (sov/100) 
                       }); 
                   });
               });
@@ -218,41 +262,21 @@ const CorporateBooking = ({ screens = [] }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-6 rounded-xl border border-slate-200">
           <div className="md:col-span-2 space-y-2">
               <label className="block text-sm font-bold text-slate-700">企劃名稱 (Campaign Name)</label>
-              <input 
-                  type="text" 
-                  placeholder="例如：2024 Q4 節日大促銷" 
-                  value={campaignName} 
-                  onChange={e => setCampaignName(e.target.value)} 
-                  className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 font-bold" 
-              />
+              <input type="text" placeholder="例如：2024 Q4 節日大促銷" value={campaignName} onChange={e => setCampaignName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 font-bold" />
           </div>
           <div className="space-y-2">
               <label className="block text-sm font-bold text-slate-700 flex items-center gap-1">
                   <CalendarRange size={16}/> 廣告檔期 (Flight Dates)
               </label>
               <div className="flex items-center gap-2">
-                  <input 
-                      type="date" 
-                      value={dateRange.start} 
-                      onChange={e => setDateRange({...dateRange, start: e.target.value})} 
-                      className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" 
-                  />
+                  <input type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" />
                   <span className="text-slate-400">至</span>
-                  <input 
-                      type="date" 
-                      value={dateRange.end} 
-                      onChange={e => setDateRange({...dateRange, end: e.target.value})} 
-                      className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" 
-                  />
+                  <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="flex-1 p-3 border border-slate-300 rounded-lg outline-none text-sm" />
               </div>
           </div>
           <div className="space-y-2">
               <label className="block text-sm font-bold text-slate-700">行業類別 (Industry)</label>
-              <select 
-                  value={industry} 
-                  onChange={e => setIndustry(e.target.value)} 
-                  className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white"
-              >
+              <select value={industry} onChange={e => setIndustry(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white">
                   <option value="">請選擇...</option>
                   {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -267,16 +291,10 @@ const CorporateBooking = ({ screens = [] }) => {
           <MapPin className="text-blue-600" /> 第二步：網絡覆蓋與機位選擇
       </h2>
       <div className="flex gap-4">
-          <button 
-              onClick={() => setRegionMode('district')} 
-              className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'district' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-          >
+          <button onClick={() => setRegionMode('district')} className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'district' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
               <Building2 size={20}/> 核心商業區 (Districts)
           </button>
-          <button 
-              onClick={() => setRegionMode('mtr')} 
-              className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'mtr' ? 'border-green-600 bg-green-50 text-green-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-          >
+          <button onClick={() => setRegionMode('mtr')} className={`flex-1 py-3 rounded-lg border-2 font-bold flex items-center justify-center gap-2 transition-all ${regionMode === 'mtr' ? 'border-green-600 bg-green-50 text-green-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
               <Train size={20}/> 港鐵沿線 (MTR Lines)
           </button>
       </div>
@@ -285,19 +303,13 @@ const CorporateBooking = ({ screens = [] }) => {
             <h3 className="font-bold text-slate-700">快速選擇群組 (一鍵全選)</h3>
             <div className="space-y-2 overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
                 {currentGroups.length === 0 ? (
-                    <div className="p-4 bg-slate-50 text-slate-400 text-center text-sm rounded-xl border border-slate-200">
-                        無可用群組資料
-                    </div>
+                    <div className="p-4 bg-slate-50 text-slate-400 text-center text-sm rounded-xl border border-slate-200">無可用群組資料</div>
                 ) : (
                     currentGroups.map(group => { 
                         const groupScreens = processedScreens.filter(s => s.group === group); 
                         const allSelected = groupScreens.every(s => selectedScreens.has(s.id)); 
                         return (
-                            <div 
-                                key={group} 
-                                onClick={() => handleGroupToggle(group)} 
-                                className={`p-3 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${allSelected ? 'border-blue-500 bg-blue-600 text-white shadow-md' : 'border-slate-200 bg-white hover:border-blue-300'}`}
-                            >
+                            <div key={group} onClick={() => handleGroupToggle(group)} className={`p-3 rounded-xl border-2 cursor-pointer flex justify-between items-center transition-all ${allSelected ? 'border-blue-500 bg-blue-600 text-white shadow-md' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
                                 <span className="font-bold text-sm">{group}</span>
                                 <span className={`text-xs px-2 py-1 rounded-full ${allSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                                     {groupScreens.length} 部
@@ -317,22 +329,15 @@ const CorporateBooking = ({ screens = [] }) => {
                 <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                     {processedScreens.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                            <Monitor size={48} className="mb-2 opacity-50"/>
-                            <p>尚未載入數據</p>
+                            <Monitor size={48} className="mb-2 opacity-50"/><p>尚未載入任何機位數據</p>
                         </div>
                     ) : (
                         processedScreens.filter(s => s.type === regionMode).map(screen => { 
                             const isBanned = industry && screen.bannedCategories.includes(industry); 
                             return (
-                                <div 
-                                    key={screen.id} 
-                                    className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}
-                                >
+                                <div key={screen.id} className={`p-2 rounded-lg border flex justify-between items-center transition-all ${isBanned ? 'bg-slate-50 border-slate-100 opacity-50' : selectedScreens.has(screen.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
                                     <div className="flex items-center gap-3">
-                                        <div 
-                                            onClick={() => !isBanned && handleToggleScreen(screen.id)} 
-                                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}
-                                        >
+                                        <div onClick={() => !isBanned && handleToggleScreen(screen.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isBanned ? 'cursor-not-allowed' : 'cursor-pointer'} ${selectedScreens.has(screen.id) && !isBanned ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
                                             {selectedScreens.has(screen.id) && !isBanned && <CheckCircle size={12}/>}
                                         </div>
                                         <div>
@@ -384,11 +389,7 @@ const CorporateBooking = ({ screens = [] }) => {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {DAYPARTING_OPTIONS.map(opt => (
-                  <div 
-                      key={opt.id} 
-                      onClick={() => setDayparting(opt.id)} 
-                      className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${dayparting === opt.id ? 'border-blue-600 bg-white shadow-sm' : 'border-blue-100 bg-blue-50/50 hover:border-blue-300'}`}
-                  >
+                  <div key={opt.id} onClick={() => setDayparting(opt.id)} className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${dayparting === opt.id ? 'border-blue-600 bg-white shadow-sm' : 'border-blue-100 bg-blue-50/50 hover:border-blue-300'}`}>
                       <p className={`font-bold text-sm ${dayparting === opt.id ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</p>
                       <p className="text-[10px] text-slate-500 mt-1">每日 {opt.hours} 小時</p>
                   </div>
@@ -401,11 +402,7 @@ const CorporateBooking = ({ screens = [] }) => {
               <p className="text-sm text-slate-500 mb-4">為企業專屬品牌包場方案，可選擇高達 100% 獨家聲量。</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {SOV_OPTIONS.map(opt => (
-                      <button 
-                          key={opt.val} 
-                          onClick={() => setSov(opt.val)} 
-                          className={`py-4 rounded-xl border-2 font-bold transition-all ${sov === opt.val ? 'border-blue-600 bg-blue-600 text-white shadow-lg transform scale-105' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
-                      >
+                      <button key={opt.val} onClick={() => setSov(opt.val)} className={`py-4 rounded-xl border-2 font-bold transition-all ${sov === opt.val ? 'border-blue-600 bg-blue-600 text-white shadow-lg transform scale-105' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}>
                           <div className="text-xl font-black">{opt.val}%</div>
                           <div className="text-[10px] opacity-80 mt-1">{opt.label}</div>
                       </button>
@@ -419,9 +416,7 @@ const CorporateBooking = ({ screens = [] }) => {
               )}
           </div>
           <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-              <div className="absolute -right-10 -top-10 opacity-10">
-                  <BarChart3 size={150}/>
-              </div>
+              <div className="absolute -right-10 -top-10 opacity-10"><BarChart3 size={150}/></div>
               <h3 className="font-bold text-slate-300 uppercase tracking-wider text-xs mb-6">Estimated Campaign Metrics</h3>
               <div className="space-y-6 relative z-10">
                   <div>
@@ -432,14 +427,8 @@ const CorporateBooking = ({ screens = [] }) => {
                       </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 border-t border-slate-700 pt-6">
-                      <div>
-                          <p className="text-slate-400 text-sm mb-1">預計千人成本 (CPM)</p>
-                          <p className="text-2xl font-bold text-white">HK$ {metrics.cpm.toFixed(2)}</p>
-                      </div>
-                      <div>
-                          <p className="text-slate-400 text-sm mb-1">企劃日數 (Duration)</p>
-                          <p className="text-2xl font-bold text-white">{metrics.days} 日</p>
-                      </div>
+                      <div><p className="text-slate-400 text-sm mb-1">預計千人成本 (CPM)</p><p className="text-2xl font-bold text-white">HK$ {metrics.cpm.toFixed(2)}</p></div>
+                      <div><p className="text-slate-400 text-sm mb-1">企劃日數 (Duration)</p><p className="text-2xl font-bold text-white">{metrics.days} 日</p></div>
                   </div>
                   <div className="mt-4 bg-slate-800 p-3 rounded-lg flex justify-between items-center">
                       <span className="text-sm text-slate-300">預計總投資額 (Est. Cost)</span>
@@ -459,12 +448,7 @@ const CorporateBooking = ({ screens = [] }) => {
         <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-center">
             <p className="text-sm text-slate-600 mb-4">請上載您嘅廣告影片。確認後系統將自動將影片分發至已選機位。</p>
             <label className="border-2 border-dashed border-blue-300 bg-white hover:bg-blue-50 transition-colors rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer max-w-xl mx-auto">
-                <input 
-                    type="file" 
-                    accept="video/mp4,video/mov" 
-                    className="hidden" 
-                    onChange={(e) => setUploadedFile(e.target.files[0])} 
-                />
+                <input type="file" accept="video/mp4,video/mov" className="hidden" onChange={(e) => setUploadedFile(e.target.files[0])} />
                 <UploadCloud size={48} className="text-blue-500 mb-3"/>
                 {uploadedFile ? (
                     <div className="text-green-600 font-bold flex items-center gap-2">
@@ -509,10 +493,7 @@ const CorporateBooking = ({ screens = [] }) => {
                               <span className="font-bold text-red-600">{previewScreen.bannedCategories.join(', ') || '無限制'}</span>
                           </div>
                       </div>
-                      <button 
-                          onClick={() => setPreviewScreen(null)} 
-                          className="mt-6 w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors"
-                      >
+                      <button onClick={() => setPreviewScreen(null)} className="mt-6 w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors">
                           關閉預覽
                       </button>
                   </div>

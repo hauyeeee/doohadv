@@ -952,5 +952,6 @@ export const useDoohSystem = () => {
     handleUpdateBid, recalculateAllBids,
     HOURS, WEEKDAYS_LABEL, getDaysInMonth, getFirstDayOfMonth, formatDateKey, isDateAllowed, getHourTier,
     existingBids
+    pricingConfig // 🔥 [新增] 將系統定價設定匯出，準備傳畀大客版面
   };
 };

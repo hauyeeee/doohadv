@@ -58,7 +58,8 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
     isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     occupiedSlots, corporateSOV, existingBids, 
     restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction,
-    resumePayment, isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,   
+    resumePayment, isTimeMismatchModalOpen, setIsTimeMismatchModalOpen, 
+    pricingConfig // 🔥 [新增] 接收系統設定  
   } = useDoohSystem();
 
   const [isTutorialOpen, setIsTutorialOpen] = useState(false); 
@@ -90,7 +91,7 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
 
   // 🔥 分流至企業版面 (將篩選後嘅機位傳入去)
   if (currentView === 'corporate') {
-      return <CorporateBooking screens={filteredScreens} />;
+      return <CorporateBooking screens={filteredScreens} pricingConfig={pricingConfig} />;
   }
 
   // 👇 散客 (自助投放) 模式嘅 Render 👇
