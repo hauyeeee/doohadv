@@ -53,7 +53,7 @@ export const useDoohSystem = () => {
   const [viewingScreen, setViewingScreen] = useState(null);
 
   const [occupiedSlots, setOccupiedSlots] = useState(new Set());
-  const [corporateSlots, setCorporateSlots] = useState(new Set()); // 🔥 新增：追蹤大客霸咗嘅位
+  const [corporateSOV, setCorporateSOV] = useState({}); // 🔥 追蹤企業佔用 SOV
   const [marketStats, setMarketStats] = useState({}); 
 
   const [toast, setToast] = useState(null);
@@ -127,7 +127,12 @@ export const useDoohSystem = () => {
         const screensData = querySnapshot.docs.map(doc => ({ id: String(doc.data().id), ...doc.data() })); 
         screensData.sort((a, b) => Number(a.id) - Number(b.id));
         setScreens(screensData.filter(s => s.isActive !== false));
-      } catch (error) { console.error("Error fetching screens:", error); showToast("❌ 無法載入屏幕資料"); } finally { setIsScreensLoading(false); }
+      } catch (error) { 
+        console.error("Error fetching screens:", error); 
+        showToast("❌ 無法載入屏幕資料"); 
+      } finally { 
+        setIsScreensLoading(false); 
+      }
     };
 
     const fetchConfig = () => {
@@ -159,7 +164,12 @@ export const useDoohSystem = () => {
   useEffect(() => {
     return onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        setUser({ uid: currentUser.uid, displayName: currentUser.displayName, email: currentUser.email, photoURL: currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName}&background=0D8ABC&color=fff` });
+        setUser({ 
+            uid: currentUser.uid, 
+            displayName: currentUser.displayName, 
+            email: currentUser.email, 
+            photoURL: currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName}&background=0D8ABC&color=fff` 
+        });
         const q = query(collection(db, "orders"), where("userId", "==", currentUser.uid), orderBy("createdAt", "desc"));
         onSnapshot(q, (snapshot) => {
           setMyOrders(snapshot.docs.map(doc => {
@@ -168,7 +178,10 @@ export const useDoohSystem = () => {
             return { id: doc.id, ...data, displayTime };
           }));
         });
-      } else { setUser(null); setMyOrders([]); }
+      } else { 
+          setUser(null); 
+          setMyOrders([]); 
+      }
       setIsAuthReady(true);
     });
   }, []);
@@ -179,22 +192,24 @@ export const useDoohSystem = () => {
 
       const unsubSold = onSnapshot(qSold, (snapshot) => {
           const sold = new Set();
-          const corporate = new Set(); // 🔥 新增 Tracking
+          const corpSOVMap = {}; // 🔥 紀錄已被企業佔用的 SOV (0-100)
+          
           snapshot.docs.forEach(doc => { 
               const data = doc.data();
               if (data.detailedSlots) {
                   data.detailedSlots.forEach(s => {
-                      const key = `${s.date}-${s.hour}-${String(s.screenId)}`;
+                      const key = `${s.date}-${parseInt(s.hour)}-${String(s.screenId)}`;
                       if (data.orderType === 'corporate' || s.isCorporate) {
-                          corporate.add(key); // 大客霸位
+                          const slotSov = s.sov || data.sov || 10; 
+                          corpSOVMap[key] = (corpSOVMap[key] || 0) + slotSov;
                       } else if (data.type === 'buyout' && !data.orderType) {
-                          sold.add(key); // 散客買斷
+                          sold.add(key); 
                       }
                   }); 
               }
           });
           setOccupiedSlots(sold);
-          setCorporateSlots(corporate);
+          setCorporateSOV(corpSOVMap);
       });
 
       const unsubBidding = onSnapshot(qBidding, (snapshot) => {
@@ -231,8 +246,19 @@ export const useDoohSystem = () => {
     } 
   };
   
-  const handleLogout = async () => { try { await signOut(auth); setUser(null); setTransactionStep('idle'); setIsProfileModalOpen(false); showToast("已登出"); } catch (error) { showToast("❌ 登出失敗"); } };
+  const handleLogout = async () => { 
+      try { 
+          await signOut(auth); 
+          setUser(null); 
+          setTransactionStep('idle'); 
+          setIsProfileModalOpen(false); 
+          showToast("已登出"); 
+      } catch (error) { 
+          showToast("❌ 登出失敗"); 
+      } 
+  };
   
+  // 🔥 [還原] checkAndNotifyLosers 邏輯完整版
   const checkAndNotifyLosers = async (buyoutOrder) => {
       if (!buyoutOrder || buyoutOrder.type !== 'buyout') return;
       const slots = buyoutOrder.detailedSlots;
@@ -260,7 +286,8 @@ export const useDoohSystem = () => {
               const totalSlots = updatedDetailedSlots.length;
               const outbidCount = updatedDetailedSlots.filter(s => s.slotStatus === 'outbid' || s.slotStatus === 'outbid_by_buyout').length;
               let newStatus = 'paid_pending_selection'; 
-              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; else if (outbidCount > 0) newStatus = 'partially_outbid';
+              if (outbidCount === totalSlots) newStatus = 'outbid_needs_action'; 
+              else if (outbidCount > 0) newStatus = 'partially_outbid';
               
               if (lostSlotsInfo.length > 0) {
                   const slotInfoStr = lostSlotsInfo.join(', ');
@@ -277,6 +304,7 @@ export const useDoohSystem = () => {
       if (losersFound) await batch.commit();
   };
 
+  // 🔥 [還原] checkAndNotifyStandardOutbid 邏輯完整版
   const checkAndNotifyStandardOutbid = async (newOrder) => {
       if (newOrder.type === 'buyout') return;
       const newSlots = newOrder.detailedSlots;
@@ -285,7 +313,12 @@ export const useDoohSystem = () => {
       const q = query(collection(db, "orders"), where("status", "in", ["paid_pending_selection", "partially_outbid", "outbid_needs_action", "won", "partially_won", "paid", "pending_reauth"]));
       
       let snapshot;
-      try { snapshot = await getDocs(q); } catch (error) { console.error("❌ [Outbid Check] Query Error:", error); return; }
+      try { 
+          snapshot = await getDocs(q); 
+      } catch (error) { 
+          console.error("❌ [Outbid Check] Query Error:", error); 
+          return; 
+      }
 
       const batch = writeBatch(db);
       let isBatchUsed = false;
@@ -360,9 +393,11 @@ export const useDoohSystem = () => {
       if (isBatchUsed) { await batch.commit(); }
   };
 
+  // 🔥 [還原] fetchAndFinalizeOrder 邏輯完整版
   const fetchAndFinalizeOrder = async (orderId, isUrlSuccess) => {
     if (!orderId) return;
     const orderRef = doc(db, "orders", orderId);
+    
     if (isUrlSuccess) { 
         setModalPaymentStatus('paid'); 
         setTimeout(async () => { 
@@ -371,9 +406,12 @@ export const useDoohSystem = () => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     const userInfo = { email: data.userEmail, displayName: data.userName };
-                    if (data.status === 'pending_reauth') { await updateDoc(orderRef, { status: 'paid_pending_selection' }); }
+                    if (data.status === 'pending_reauth') { 
+                        await updateDoc(orderRef, { status: 'paid_pending_selection' }); 
+                    }
                     if (!data.emailSent) {
-                         if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); else await sendBidReceivedEmail(userInfo, data);
+                         if (data.type === 'buyout') await sendBuyoutSuccessEmail(userInfo, data); 
+                         else await sendBidReceivedEmail(userInfo, data);
                          await updateDoc(orderRef, { emailSent: true });
                     }
                     if (data.type === 'buyout') {
@@ -385,14 +423,19 @@ export const useDoohSystem = () => {
             } catch(e) { console.error(e); } 
         }, 1500); 
     }
+    
     const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (docSnap.exists()) {
             const orderData = docSnap.data();
             setCreativeStatus(orderData.creativeStatus || 'empty');
             setCreativeName(orderData.videoName || ''); 
             const isPaid = ['won', 'paid_pending_selection', 'completed', 'paid'].includes(orderData.status);
-            if (isPaid) { setModalPaymentStatus('paid'); localStorage.removeItem('temp_txn_time'); } 
-            else { if (!isUrlSuccess) setModalPaymentStatus('verifying'); }
+            if (isPaid) { 
+                setModalPaymentStatus('paid'); 
+                localStorage.removeItem('temp_txn_time'); 
+            } else { 
+                if (!isUrlSuccess) setModalPaymentStatus('verifying'); 
+            }
         }
     });
     return unsubscribe;
@@ -408,34 +451,67 @@ export const useDoohSystem = () => {
     let urlId = queryParams.get('order_id') || queryParams.get('orderId');
     const isSuccess = queryParams.get('success') === 'true'; 
     const isCanceled = queryParams.get('canceled') === 'true'; 
-    if (isCanceled) { showToast("❌ 付款已取消"); setModalPaymentStatus('failed'); return; }
+    if (isCanceled) { 
+        showToast("❌ 付款已取消"); 
+        setModalPaymentStatus('failed'); 
+        return; 
+    }
     if (isSuccess) { setModalPaymentStatus('paid'); }
-    if (urlId) { setCurrentOrderId(urlId); setIsUrgentUploadModalOpen(true); fetchAndFinalizeOrder(urlId, isSuccess); }
+    if (urlId) { 
+        setCurrentOrderId(urlId); 
+        setIsUrgentUploadModalOpen(true); 
+        fetchAndFinalizeOrder(urlId, isSuccess); 
+    }
   }, []); 
 
   const handleRealUpload = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       let targetId = currentOrderId || localStorage.getItem('temp_order_id') || new URLSearchParams(window.location.search).get('order_id');
       if (!targetId) { showToast("❌ 錯誤：找不到訂單 ID"); return; }
-      setIsUploadingReal(true); setCreativeStatus('uploading');
+      
+      setIsUploadingReal(true); 
+      setCreativeStatus('uploading');
+      
       try {
           const storageRef = ref(storage, `uploads/${targetId}/${file.name}`);
           const uploadTask = uploadBytesResumable(storageRef, file);
-          uploadTask.on('state_changed', (snapshot) => { setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100); }, 
-          (error) => { showToast("❌ 上傳失敗"); setIsUploadingReal(false); setCreativeStatus('empty'); }, 
-          async () => { 
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
-              await updateDoc(doc(db, "orders", targetId), { hasVideo: true, videoUrl: downloadURL, videoName: file.name, uploadedAt: serverTimestamp(), creativeStatus: 'pending_review' }); 
-              setCreativeName(file.name); 
-              setCreativeStatus('pending_review'); 
-              setIsUploadingReal(false); 
-              showToast("⏳ 上傳成功！正在審核您的圖片...");
-              localStorage.removeItem('temp_order_id'); 
-          });
-      } catch (error) { console.error(error); showToast("上傳錯誤"); setIsUploadingReal(false); }
+          uploadTask.on('state_changed', 
+              (snapshot) => { 
+                  setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100); 
+              }, 
+              (error) => { 
+                  showToast("❌ 上傳失敗"); 
+                  setIsUploadingReal(false); 
+                  setCreativeStatus('empty'); 
+              }, 
+              async () => { 
+                  const downloadURL = await getDownloadURL(uploadTask.snapshot.ref); 
+                  await updateDoc(doc(db, "orders", targetId), { 
+                      hasVideo: true, 
+                      videoUrl: downloadURL, 
+                      videoName: file.name, 
+                      uploadedAt: serverTimestamp(), 
+                      creativeStatus: 'pending_review' 
+                  }); 
+                  setCreativeName(file.name); 
+                  setCreativeStatus('pending_review'); 
+                  setIsUploadingReal(false); 
+                  showToast("⏳ 上傳成功！正在審核您的圖片...");
+                  localStorage.removeItem('temp_order_id'); 
+              }
+          );
+      } catch (error) { 
+          console.error(error); 
+          showToast("上傳錯誤"); 
+          setIsUploadingReal(false); 
+      }
   };
 
-  const closeTransaction = () => { setTransactionStep('idle'); setPendingTransaction(null); setCurrentOrderId(null); };
+  const closeTransaction = () => { 
+      setTransactionStep('idle'); 
+      setPendingTransaction(null); 
+      setCurrentOrderId(null); 
+  };
 
   const filteredScreens = useMemo(() => {
     return screens.filter(s => {
@@ -444,7 +520,17 @@ export const useDoohSystem = () => {
     });
   }, [screenSearchTerm, screens]);
 
-  const handleBatchBid = () => { const val = parseInt(batchBidInput); if (!val) return; const newBids = { ...slotBids }; generateAllSlots.forEach(slot => { if (!slot.isSoldOut) newBids[slot.key] = val; }); setSlotBids(newBids); showToast(`已將 HK$${val} 應用到所有可用時段`); };
+  const handleBatchBid = () => { 
+      const val = parseInt(batchBidInput); 
+      if (!val) return; 
+      const newBids = { ...slotBids }; 
+      generateAllSlots.forEach(slot => { 
+          if (!slot.isSoldOut) newBids[slot.key] = val; 
+      }); 
+      setSlotBids(newBids); 
+      showToast(`已將 HK$${val} 應用到所有可用時段`); 
+  };
+  
   const handleSlotBidChange = (key, val) => setSlotBids(prev => ({ ...prev, [key]: val }));
   
   const toggleScreen = (id) => {
@@ -458,9 +544,34 @@ export const useDoohSystem = () => {
     setSelectedScreens(newSelected);
   };
   
-  const toggleHour = (val) => { const newSet = new Set(selectedHours); if (newSet.has(val)) newSet.delete(val); else newSet.add(val); setSelectedHours(newSet); };
-  const toggleWeekday = (dayIdx) => { const newSet = new Set(selectedWeekdays); if (newSet.has(dayIdx)) newSet.delete(dayIdx); else newSet.add(dayIdx); setSelectedWeekdays(newSet); const d = new Date(); const diff = (dayIdx - d.getDay() + 7) % 7; d.setDate(d.getDate() + diff); setPreviewDate(d); };
-  const toggleDate = (year, month, day) => { const key = formatDateKey(year, month, day); setPreviewDate(new Date(year, month, day)); if(!isDateAllowed(year, month, day)) return; const newSet = new Set(selectedSpecificDates); if (newSet.has(key)) newSet.delete(key); else newSet.add(key); trackEvent("Interaction", "Select_Date", key); setSelectedSpecificDates(newSet); };
+  const toggleHour = (val) => { 
+      const newSet = new Set(selectedHours); 
+      if (newSet.has(val)) newSet.delete(val); 
+      else newSet.add(val); 
+      setSelectedHours(newSet); 
+  };
+  
+  const toggleWeekday = (dayIdx) => { 
+      const newSet = new Set(selectedWeekdays); 
+      if (newSet.has(dayIdx)) newSet.delete(dayIdx); 
+      else newSet.add(dayIdx); 
+      setSelectedWeekdays(newSet); 
+      const d = new Date(); 
+      const diff = (dayIdx - d.getDay() + 7) % 7; 
+      d.setDate(d.getDate() + diff); 
+      setPreviewDate(d); 
+  };
+  
+  const toggleDate = (year, month, day) => { 
+      const key = formatDateKey(year, month, day); 
+      setPreviewDate(new Date(year, month, day)); 
+      if(!isDateAllowed(year, month, day)) return; 
+      const newSet = new Set(selectedSpecificDates); 
+      if (newSet.has(key)) newSet.delete(key); 
+      else newSet.add(key); 
+      trackEvent("Interaction", "Select_Date", key); 
+      setSelectedSpecificDates(newSet); 
+  };
   
   const getMultiplierForScreen = (screenId) => {
       const selectedIds = Array.from(selectedScreens).map(String); 
@@ -474,6 +585,7 @@ export const useDoohSystem = () => {
                   if (m > maxRuleMultiplier) maxRuleMultiplier = m;
               }
           });
+          
           if (maxRuleMultiplier > 1.0) return maxRuleMultiplier;
           
           const currentScreen = screens.find(s => String(s.id) === String(screenId));
@@ -504,51 +616,70 @@ export const useDoohSystem = () => {
     if (selectedScreens.size === 0 || selectedHours.size === 0 || screens.length === 0 || !pricingConfig) return [];
     let slots = [];
     let datesToProcess = [];
+    
     if (mode === 'specific') {
         datesToProcess = Array.from(selectedSpecificDates).map(dateStr => { const [y, m, d] = dateStr.split('-'); return new Date(y, m-1, d); });
     } else {
         const today = new Date();
-        if (selectedWeekdays.size > 0) { for (let i = 0; i < weekCount * 7; i++) { const d = new Date(today); d.setDate(today.getDate() + i); if (selectedWeekdays.has(d.getDay())) datesToProcess.push(d); } }
+        if (selectedWeekdays.size > 0) { 
+            for (let i = 0; i < weekCount * 7; i++) { 
+                const d = new Date(today); 
+                d.setDate(today.getDate() + i); 
+                if (selectedWeekdays.has(d.getDay())) datesToProcess.push(d); 
+            } 
+        }
     }
+    
     datesToProcess.forEach(d => {
         const dateStr = formatDateKey(d.getFullYear(), d.getMonth(), d.getDate());
         const dayOfWeek = new Date(d).getDay(); 
+        
         selectedHours.forEach(h => {
             selectedScreens.forEach(screenId => {
                 const screen = screens.find(s => String(s.id) === String(screenId));
                 if (!screen) return;
-                const key = `${dateStr}-${h}-${String(screenId)}`; 
-                const isSoldOut = occupiedSlots.has(key);
                 
-                // 🔥 新邏輯：判斷 Buyout 鎖死狀態
+                const key = `${dateStr}-${h}-${String(screenId)}`; 
+                const isNormalSoldOut = occupiedSlots.has(key);
+                const currentCorpSOV = corporateSOV[key] || 0;
+                
+                // 🔥 如果企業 SOV >= 100，連 Bid 都唔准 (全黑盒)
+                const isCompletelySoldOut = currentCorpSOV >= 100;
+                
                 const tier = getHourTier(h);
                 const isPrimeOrGold = (tier === 'prime' || tier === 'gold');
-                const hasCorporate = corporateSlots.has(key);
                 
                 const screenMultiplier = getMultiplierForScreen(screenId);
                 const basePricing = calculateDynamicPrice(new Date(d), h, screenMultiplier, screen, pricingConfig, specialRules);
+                
                 let currentHighestBid = existingBids[key] || 0;
                 let finalBuyout = basePricing.buyoutPrice;
-                if (currentHighestBid > 0) { const dynamicFloor = Math.ceil(currentHighestBid * 1.5); if (dynamicFloor > finalBuyout) { finalBuyout = dynamicFloor; } }
                 
-                let canBid = basePricing.canBid && !basePricing.isLocked && !isSoldOut;
-                // 🔥 將 Prime/Gold 限制及大客佔位限制，直接影響 Buyout 掣
-                let isBuyoutDisabled = basePricing.isBuyoutDisabled || isPrimeOrGold || hasCorporate; 
+                if (currentHighestBid > 0) { 
+                    const dynamicFloor = Math.ceil(currentHighestBid * 1.5); 
+                    if (dynamicFloor > finalBuyout) { finalBuyout = dynamicFloor; } 
+                }
                 
-                let warning = basePricing.warning;
-                const isLocked = basePricing.isLocked || isSoldOut;
+                let canBid = basePricing.canBid && !basePricing.isLocked && !isCompletelySoldOut;
+                
+                // 🔥 Buyout 鎖死條件：(1) 系統設定鎖死 (2) Prime/Gold 時段 (3) 企業已有佔位 (4) 一般客買斷 (5) 完全無位
+                let isBuyoutDisabled = basePricing.isBuyoutDisabled || isPrimeOrGold || currentCorpSOV > 0 || isNormalSoldOut || isCompletelySoldOut; 
+                
+                let finalMinBid = basePricing.minBid;
+                if (currentCorpSOV >= 50 && currentCorpSOV < 100) finalMinBid = Math.ceil(finalMinBid * 1.5); 
+
                 slots.push({ 
                     key, dateStr, hour: h, screenId: String(screenId), screenName: screen.name, location: screen.location, 
-                    minBid: basePricing.minBid, buyoutPrice: finalBuyout, marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
-                    isPrime: basePricing.isPrime, isBuyoutDisabled, isPrimeOrGold, hasCorporate, canBid, hoursUntil: basePricing.hoursUntil, 
+                    minBid: finalMinBid, buyoutPrice: finalBuyout, marketAverage: marketStats[`${screenId}_${dayOfWeek}_${h}`] || Math.ceil(basePricing.minBid * 1.5), 
+                    isPrime: basePricing.isPrime, isBuyoutDisabled, isPrimeOrGold, currentCorpSOV, canBid, hoursUntil: basePricing.hoursUntil, 
                     isUrgent: basePricing.hoursUntil > 0 && basePricing.hoursUntil <= 24, competitorBid: currentHighestBid, 
-                    isSoldOut: isLocked, warning, activeMultiplier: screenMultiplier 
+                    isSoldOut: isCompletelySoldOut, warning: basePricing.warning, activeMultiplier: screenMultiplier 
                 });
             });
         });
     });
     return slots.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.hour - b.hour || a.screenId.localeCompare(b.screenId));
-  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, corporateSlots, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
+  }, [selectedScreens, selectedHours, selectedSpecificDates, selectedWeekdays, weekCount, mode, existingBids, corporateSOV, screens, occupiedSlots, marketStats, pricingConfig, specialRules, bundleRules]);
 
   const pricing = useMemo(() => {
     const availableSlots = generateAllSlots.filter(s => !s.isSoldOut);
@@ -566,7 +697,7 @@ export const useDoohSystem = () => {
         }
         
         if (slot.isPrimeOrGold) hasPrimeOrGoldLock = true;
-        if (slot.hasCorporate) hasCorporateLock = true;
+        if (slot.currentCorpSOV > 0) hasCorporateLock = true;
 
         if (!slot.canBid && slot.isBuyoutDisabled) hasPrimeFarFutureLock = true;
         if (!(!slot.canBid && slot.isBuyoutDisabled)) { buyoutTotal += slot.buyoutPrice; minBidTotal += slot.minBid; }
@@ -581,7 +712,13 @@ export const useDoohSystem = () => {
         if (slot.hoursUntil < 1) hasUrgentRisk = true; 
         if (slot.isUrgent) urgentCount++; 
         const userPrice = slotBids[slot.key]; 
-        if (userPrice) { currentBidTotal += parseInt(userPrice); if (parseInt(userPrice) < slot.minBid) invalidBids++; if (parseInt(userPrice) <= slot.competitorBid) conflicts.push({ ...slot, userPrice }); } else { missingBids++; }
+        if (userPrice) { 
+            currentBidTotal += parseInt(userPrice); 
+            if (parseInt(userPrice) < slot.minBid) invalidBids++; 
+            if (parseInt(userPrice) <= slot.competitorBid) conflicts.push({ ...slot, userPrice }); 
+        } else { 
+            missingBids++; 
+        }
     });
     return { 
         totalSlots, buyoutTotal, currentBidTotal, minBidTotal, conflicts, missingBids, invalidBids, urgentCount,
@@ -596,7 +733,10 @@ export const useDoohSystem = () => {
   const checkOrderRestrictions = (type) => {
       const selectedScreenIds = Array.from(selectedScreens).map(String);
       const restrictedScreens = screens.filter(s => selectedScreenIds.includes(String(s.id)) && s.restrictions && s.restrictions.trim().length > 0);
-      if (restrictedScreens.length > 0) { setRestrictionModalData({ screens: restrictedScreens, type }); return false; }
+      if (restrictedScreens.length > 0) { 
+          setRestrictionModalData({ screens: restrictedScreens, type }); 
+          return false; 
+      }
       return true; 
   };
 
@@ -622,14 +762,50 @@ export const useDoohSystem = () => {
     if (!forceProceed && !checkOrderRestrictions(type)) return;
 
     const validSlots = generateAllSlots.filter(s => !s.isSoldOut);
-    const detailedSlots = validSlots.map(slot => ({ date: slot.dateStr, hour: slot.hour, screenId: String(slot.screenId), screenName: slot.screenName, bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), isBuyout: type === 'buyout', slotStatus: 'normal' }));
-    const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
-    const screenNamesStr = Array.from(selectedScreens).map(id => { const s = screens.find(sc => String(sc.id) === String(id)); return s ? s.name : `Screen ${id}`; }).join(', ');
-    let slotSummary = "";
-    if (mode === 'specific') { const datesStr = Array.from(selectedSpecificDates).join(', '); slotSummary = `日期: [${datesStr}] | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; } 
-    else { const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(','); slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; }
+    const detailedSlots = validSlots.map(slot => ({ 
+        date: slot.dateStr, 
+        hour: slot.hour, 
+        screenId: String(slot.screenId), 
+        screenName: slot.screenName, 
+        bidPrice: type === 'buyout' ? slot.buyoutPrice : (parseInt(slotBids[slot.key]) || 0), 
+        isBuyout: type === 'buyout', 
+        slotStatus: 'normal' 
+    }));
     
-    const txnData = { amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, type, detailedSlots, targetDate: detailedSlots[0]?.date || '', isBundle: isBundleMode, slotCount: pricing.totalSlots, creativeStatus: 'empty', conflicts: [], userId: user.uid, userEmail: user.email, userName: user.displayName || 'Guest', createdAt: serverTimestamp(), status: 'pending_auth', hasVideo: false, emailSent: false, screens: Array.from(selectedScreens).map(String), timeSlotSummary: slotSummary };
+    const hoursStr = Array.from(selectedHours).sort((a,b)=>a-b).map(h => `${String(h).padStart(2,'0')}:00`).join(', ');
+    const screenNamesStr = Array.from(selectedScreens).map(id => { 
+        const s = screens.find(sc => String(sc.id) === String(id)); 
+        return s ? s.name : `Screen ${id}`; 
+    }).join(', ');
+    
+    let slotSummary = "";
+    if (mode === 'specific') { 
+        const datesStr = Array.from(selectedSpecificDates).join(', '); 
+        slotSummary = `日期: [${datesStr}] | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; 
+    } else { 
+        const weekDaysStr = Array.from(selectedWeekdays).map(d=>WEEKDAYS_LABEL[d]).join(','); 
+        slotSummary = `週期: 逢星期[${weekDaysStr}] x ${weekCount}週 | 時間: [${hoursStr}] | 屏幕: [${screenNamesStr}]`; 
+    }
+    
+    const txnData = { 
+        amount: type === 'buyout' ? pricing.buyoutTotal : pricing.currentBidTotal, 
+        type, 
+        detailedSlots, 
+        targetDate: detailedSlots[0]?.date || '', 
+        isBundle: isBundleMode, 
+        slotCount: pricing.totalSlots, 
+        creativeStatus: 'empty', 
+        conflicts: [], 
+        userId: user.uid, 
+        userEmail: user.email, 
+        userName: user.displayName || 'Guest', 
+        createdAt: serverTimestamp(), 
+        status: 'pending_auth', 
+        hasVideo: false, 
+        emailSent: false, 
+        screens: Array.from(selectedScreens).map(String), 
+        timeSlotSummary: slotSummary 
+    };
     
     setIsBidModalOpen(false); 
     setIsBuyoutModalOpen(false);
@@ -661,41 +837,71 @@ export const useDoohSystem = () => {
   const processPayment = async () => {
     setTransactionStep('processing');
     const targetId = localStorage.getItem('temp_order_id') || currentOrderId;
-    if (!targetId) { showToast("訂單 ID 錯誤"); setTransactionStep('summary'); return; }
+    if (!targetId) { 
+        showToast("訂單 ID 錯誤"); 
+        setTransactionStep('summary'); 
+        return; 
+    }
     const currentUrl = window.location.origin + window.location.pathname;
     const captureMethod = pendingTransaction && pendingTransaction.type === 'buyout' ? 'automatic' : 'manual';
     try { 
         const response = await fetch('/.netlify/functions/create-checkout-session', { 
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, orderId: targetId, successUrl: `${currentUrl}?success=true&order_id=${targetId}`, cancelUrl: `${currentUrl}?canceled=true`, customerEmail: user.email, captureMethod: captureMethod, orderType: pendingTransaction.type }), 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ 
+                amount: pendingTransaction ? pendingTransaction.amount : pricing.buyoutTotal, 
+                productName: `${pendingTransaction && pendingTransaction.type === 'buyout' ? '買斷' : '競價'} - ${pendingTransaction ? pendingTransaction.slotCount : 0} 時段`, 
+                orderId: targetId, 
+                successUrl: `${currentUrl}?success=true&order_id=${targetId}`, 
+                cancelUrl: `${currentUrl}?canceled=true`, 
+                customerEmail: user.email, 
+                captureMethod: captureMethod, 
+                orderType: pendingTransaction.type 
+            }), 
         }); 
         const data = await response.json(); 
-        if (response.ok && data.url) { window.location.href = data.url; } 
-        else { throw new Error(data.error); } 
+        if (response.ok && data.url) { 
+            window.location.href = data.url; 
+        } else { 
+            throw new Error(data.error); 
+        } 
     } catch (error) { 
-        console.error("❌ Payment Error:", error); showToast(`❌ 系統錯誤: ${error.message}`); setTransactionStep('summary'); 
+        console.error("❌ Payment Error:", error); 
+        showToast(`❌ 系統錯誤: ${error.message}`); 
+        setTransactionStep('summary'); 
     }
   };
 
+  // 🔥 [還原] handleUpdateBid 邏輯完整版
   const handleUpdateBid = async (orderId, slotIndex, newPrice, newTotalAmount) => {
       if (!user) return alert("請先登入");
       const orderRef = doc(db, "orders", orderId);
       const orderSnap = await getDoc(orderRef);
       if (!orderSnap.exists()) return alert("找不到訂單");
+      
       const orderData = orderSnap.data();
       const oldSlots = [...orderData.detailedSlots];
       const targetSlot = oldSlots[slotIndex];
       const slotDateTimeStr = `${targetSlot.date} ${String(targetSlot.hour).padStart(2, '0')}:00`;
       const slotDateObj = new Date(slotDateTimeStr);
+      
       if (new Date() >= slotDateObj) return alert(`❌ 截標失敗：時段已過期`);
       
       oldSlots[slotIndex] = { ...targetSlot, bidPrice: newPrice, slotStatus: 'normal' };
       
       try {
-          await updateDoc(orderRef, { detailedSlots: oldSlots, amount: newTotalAmount, status: 'pending_reauth', lastUpdated: serverTimestamp() });
+          await updateDoc(orderRef, { 
+              detailedSlots: oldSlots, 
+              amount: newTotalAmount, 
+              status: 'pending_reauth', 
+              lastUpdated: serverTimestamp() 
+          });
           const tempOrder = { ...orderData, detailedSlots: oldSlots, id: orderId };
           await checkAndNotifyStandardOutbid(tempOrder);
-      } catch (e) { console.error("Update DB Error", e); return alert("更新失敗"); }
+      } catch (e) { 
+          console.error("Update DB Error", e); 
+          return alert("更新失敗"); 
+      }
       
       setCurrentOrderId(orderId);
       localStorage.setItem('temp_order_id', orderId);
@@ -736,7 +942,7 @@ export const useDoohSystem = () => {
     pricing, isBundleMode, generateAllSlots,
     toast, transactionStep, pendingTransaction,
     modalPaymentStatus, creativeStatus, creativeName, isUrgentUploadModalOpen, uploadProgress, isUploadingReal, emailStatus,
-    occupiedSlots, corporateSlots, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
+    occupiedSlots, corporateSOV, isBuyoutModalOpen, isBidModalOpen, slotBids, batchBidInput, termsAccepted,
     restrictionModalData, setRestrictionModalData, handleProceedAfterRestriction, resumePayment,
     isTimeMismatchModalOpen, setIsTimeMismatchModalOpen,
     setIsLoginModalOpen, setIsProfileModalOpen, setIsBuyoutModalOpen, setIsBidModalOpen, setIsUrgentUploadModalOpen,
