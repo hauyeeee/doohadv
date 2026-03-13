@@ -2,13 +2,16 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   BarChart3, TrendingUp, Users, DollarSign, Search, Video, Monitor, Save, Trash2, 
   List, Settings, Star, AlertTriangle, ArrowUp, ArrowDown, Lock, Unlock, Clock, Calendar, Plus, X, CheckCircle, XCircle,
-  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff, Briefcase, Loader2
+  Mail, MessageCircle, ChevronLeft, ChevronRight, AlertCircle, Edit, MapPin, Layers, Trophy, Copy, Eye, EyeOff, Briefcase, Loader2, PlayCircle, Film, Image as ImageIcon, UploadCloud
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { StatCard, StatusBadge, ConfigSection, ConfigInput } from './AdminUI';
 import { useLanguage } from '../context/LanguageContext';
+import { collection, query, onSnapshot, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../firebase';
 
 const WEEKDAYS_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -95,10 +98,6 @@ const WithdrawalSection = ({ currentBalance, onWithdrawRequest }) => {
     );
 };
 
-// ==========================================
-// 各大主要分頁 (Tabs)
-// ==========================================
-
 export const DashboardView = ({ stats, COLORS }) => {
     const { t } = useLanguage();
     return (
@@ -143,9 +142,6 @@ export const DashboardView = ({ stats, COLORS }) => {
     );
 };
 
-// ==========================================
-// 1.1 財務配置視圖 (Financial Config)
-// ==========================================
 export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
     const handleOverrideChange = (screenId, field, value) => {
         const numVal = value === '' ? undefined : parseFloat(value);
@@ -180,7 +176,7 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
                 <ConfigSection title="全域成本設定">
                     <ConfigInput 
                         label="預估營運成本" 
-                        val={config.costFactor ?? 0.5} // 🔥 改用 ??
+                        val={config.costFactor ?? 0.5} 
                         onChange={v => setConfig({...config, costFactor: v === '' ? 0 : parseFloat(v)})} 
                         desc="扣除此比例後計算利潤" 
                     />
@@ -188,13 +184,13 @@ export const FinancialConfigView = ({ config, setConfig, onSave, screens }) => {
                 <ConfigSection title="全域分紅比例">
                     <ConfigInput 
                         label="合作伙伴總池 %" 
-                        val={config.partnerPoolRatio ?? 0.3} // 🔥 改用 ??
+                        val={config.partnerPoolRatio ?? 0.3} 
                         onChange={v => setConfig({...config, partnerPoolRatio: v === '' ? 0 : parseFloat(v)})} 
                         desc="佔利潤比例" 
                     />
                     <ConfigInput 
                         label="商家佔池比例" 
-                        val={config.merchantRatioOfPool ?? 0.5} // 🔥 改用 ??
+                        val={config.merchantRatioOfPool ?? 0.5} 
                         onChange={v => setConfig({...config, merchantRatioOfPool: v === '' ? 0 : parseFloat(v)})} 
                         desc="0 = 充電寶全取" 
                     />
@@ -386,8 +382,10 @@ export const OrdersView = ({ orders, selectedIds = new Set(), onSelect, onBulkAc
                 <div className="flex items-center gap-2 flex-1">
                     <Search className="text-slate-400" size={16}/>
                     <input 
-                        type="text" placeholder={t('search')} 
-                        value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} 
+                        type="text" 
+                        placeholder={t('search')} 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)} 
                         className="pl-2 border rounded px-2 py-1 text-sm outline-none w-64"
                     />
                     <select 
@@ -492,7 +490,7 @@ export const ReviewView = ({ orders, onReview, reviewNote, setReviewNote }) => {
                         <div className="flex gap-2">
                             <input 
                                 type="text" placeholder={t('review_reason')} 
-                                className="flex-1 border rounded px-2 text-xs" 
+                                className="flex-1 border rounded px-2 text-xs outline-none focus:border-blue-500" 
                                 onChange={e => setReviewNote(e.target.value)} 
                             />
                             <button 
@@ -666,7 +664,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
             return;
         }
 
-        // 移除 'all' 如果有
         currentIds = currentIds.filter(x => x !== 'all');
 
         if (currentIds.includes(String(id))) {
@@ -682,8 +679,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
             <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit shadow-sm">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-800"><Plus size={20} className="text-blue-600"/> 新增特別規則</h3>
                 <div className="space-y-4">
-                    
-                    {/* 🔥 全新多選屏幕 UI */}
                     <div>
                         <label className="text-xs font-bold text-slate-500 mb-1 block">目標屏幕 (可多選)</label>
                         <div className="border border-slate-300 rounded-lg p-2 max-h-48 overflow-y-auto space-y-1 bg-slate-50 focus-within:ring-2 ring-blue-100 custom-scrollbar">
@@ -795,7 +790,6 @@ export const RulesView = ({ rules, screens, newRule, setNewRule, onAdd, onDelete
                 </div>
             </div>
 
-            {/* 右邊：已設定規則列表 */}
             <div className="lg:col-span-2 space-y-3">
                 <div className="flex justify-between items-center mb-2">
                     <h4 className="font-bold text-slate-700">已生效的特別規則</h4>
@@ -920,4 +914,176 @@ export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy
             </div>
         </div>
     );
+};
+
+// ==========================================
+// 🔥 全新分頁：HouseAds 墊底廣告管理 (完整解壓縮)
+// ==========================================
+export const HouseAdsView = () => {
+  const [screens, setScreens] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [uploadingScreenId, setUploadingScreenId] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  useEffect(() => {
+    const q = query(collection(db, "screens"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const screensData = snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+      }));
+      screensData.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      setScreens(screensData);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleUpload = async (e, screenId) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+      alert("檔案太大！請上載 50MB 以內的檔案。");
+      return;
+    }
+
+    setUploadingScreenId(screenId);
+    setUploadProgress(0);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const storageRef = ref(storage, `houseAds/screen_${screenId}_${Date.now()}.${fileExt}`);
+      
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      uploadTask.on('state_changed', 
+        (snapshot) => { 
+            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)); 
+        }, 
+        (error) => { 
+            alert("上載失敗: " + error.message); 
+            setUploadingScreenId(null); 
+        }, 
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          const screenRef = doc(db, "screens", String(screenId));
+          await updateDoc(screenRef, { 
+              houseAds: arrayUnion(downloadURL) 
+          });
+          setUploadingScreenId(null);
+          setUploadProgress(0);
+          e.target.value = '';
+        }
+      );
+    } catch (error) {
+      alert("系統錯誤");
+      setUploadingScreenId(null);
+    }
+  };
+
+  const handleDeleteAd = async (screenId, adUrl) => {
+    if (!window.confirm("確定要刪除這條墊底廣告嗎？")) return;
+    try {
+      const screenRef = doc(db, "screens", String(screenId));
+      await updateDoc(screenRef, { 
+          houseAds: arrayRemove(adUrl) 
+      });
+    } catch (error) { 
+        alert("刪除失敗"); 
+    }
+  };
+
+  const isImageUrl = (url) => /\.(jpeg|jpg|gif|png|webp|avif)(\?.*)?$/i.test(url);
+
+  if (isLoading) {
+      return (
+          <div className="flex justify-center py-10">
+              <Loader2 className="animate-spin text-blue-500" size={40} />
+          </div>
+      );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 animate-in fade-in">
+      <div className="mb-6 border-b pb-4">
+        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+          <PlayCircle className="text-purple-600" /> House Ads 墊底廣告管理
+        </h2>
+        <p className="text-slate-500 text-sm mt-1">
+          當屏幕出現空置時段，將自動循環播放此處設定的圖片或影片 (圖片每張停留 10 秒)。
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {screens.map(screen => {
+          const ads = screen.houseAds || [];
+          const isUploading = uploadingScreenId === screen.id;
+
+          return (
+            <div key={screen.id} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden flex flex-col">
+              <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                    <Monitor size={18} className="text-blue-400" />
+                    <span className="font-bold">{screen.name}</span>
+                </div>
+                <span className="bg-slate-700 px-2 py-0.5 rounded text-xs font-mono">ID: {screen.id}</span>
+              </div>
+
+              <div className="p-4 flex-1">
+                <div className="flex justify-between items-center mb-3">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">現有廣告 ({ads.length})</span>
+                </div>
+                {ads.length === 0 ? (
+                  <div className="bg-white border-2 border-dashed border-slate-200 rounded-lg h-24 flex flex-col items-center justify-center text-slate-400 text-xs">
+                      <Film size={24} className="mb-1 opacity-50" />
+                      無廣告
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {ads.map((url, idx) => (
+                      <div key={idx} className="relative group bg-black rounded-lg overflow-hidden border border-slate-300 aspect-video flex items-center justify-center">
+                        {isImageUrl(url) ? (
+                            <img src={url} alt="ad" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                        ) : (
+                            <video src={url} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" muted loop playsInline onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()} />
+                        )}
+                        <button 
+                            onClick={() => handleDeleteAd(screen.id, url)} 
+                            className="absolute top-1 right-1 bg-red-600 text-white p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700 shadow-lg"
+                        >
+                            <Trash2 size={12} />
+                        </button>
+                        {isImageUrl(url) && (
+                            <ImageIcon size={14} className="absolute bottom-1 left-1 text-white/70 bg-black/30 p-0.5 rounded" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 bg-white border-t border-slate-100">
+                {isUploading ? (
+                  <div className="w-full bg-slate-100 rounded-lg p-3 text-center">
+                      <Loader2 className="animate-spin mx-auto text-blue-500 mb-2" size={20} />
+                      <div className="w-full bg-slate-200 rounded-full h-1.5 mb-1 overflow-hidden">
+                          <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                      </div>
+                      <span className="text-xs text-slate-500 font-bold">上載中 {uploadProgress}%</span>
+                  </div>
+                ) : (
+                  <label className="w-full flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-2.5 rounded-lg cursor-pointer transition-colors text-sm font-bold shadow-sm">
+                    <UploadCloud size={18} />
+                    上載相片/影片
+                    <input type="file" accept="video/*,image/*" className="hidden" onChange={(e) => handleUpload(e, screen.id)} />
+                  </label>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };

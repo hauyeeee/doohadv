@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
+  collection, query, orderBy, onSnapshot, updateDoc, doc, getDocs, 
+  writeBatch, setDoc, getDoc, deleteDoc, addDoc, serverTimestamp, where 
 } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; 
 import { 
-  ref, uploadBytes, getDownloadURL 
-} from "firebase/storage"; 
-import { 
-  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, Gavel, Flag, Globe, Plus, DollarSign, Briefcase 
+  LayoutDashboard, List, Settings, Video, Monitor, TrendingUp, Calendar, 
+  Gavel, Flag, Globe, Plus, DollarSign, Briefcase, PlayCircle
 } from 'lucide-react';
 import { db, auth, storage } from '../firebase'; 
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -16,14 +16,16 @@ import { useLanguage } from '../context/LanguageContext';
 
 import { LoadingScreen, ScreenModal, SlotGroupModal } from '../components/AdminUI';
 import { 
-  DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, CalendarView, RulesView, ScreensView,
-  FinancialConfigView, PlatformOwnerSettlementView, MerchantSettlementView 
+  DashboardView, OrdersView, ReviewView, AnalyticsView, ConfigView, 
+  CalendarView, RulesView, ScreensView, FinancialConfigView, 
+  PlatformOwnerSettlementView, MerchantSettlementView, 
+  HouseAdsView // 🔥 墊底廣告 View
 } from '../components/AdminTabs';
 import AdminManualOrder from '../components/AdminManualOrder';
 
 // --- 👑 權限及常數設定 ---
 const ADMIN_EMAILS = ["hauyeeee@gmail.com"];
-const PLATFORM_BOSS_EMAILS = ["powerbankboss@gmail.com"]; // 充電寶老闆專用登入
+const PLATFORM_BOSS_EMAILS = ["powerbankboss@gmail.com"]; 
 const EMPTY_DAY_RULE = { prime: [], gold: [] };
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -32,7 +34,7 @@ const AdminPanel = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState(null); // 'admin' | 'boss' | 'merchant'
+  const [userRole, setUserRole] = useState(null); 
   
   // --- Data States ---
   const [orders, setOrders] = useState([]);
@@ -73,27 +75,34 @@ const AdminPanel = () => {
   
   const [newScreenData, setNewScreenData] = useState({
     name: '', location: '', district: '', basePrice: 50, images: ['', '', ''], specifications: '', mapUrl: '', bundleGroup: '',
-    merchantEmail: '', // 綁定商家專用電郵
+    merchantEmail: '', 
     footfall: '', audience: '', operatingHours: '', resolution: '', lat: '', lng: '', 
-    tierRules: { 0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} }
+    tierRules: { 
+        0: {...EMPTY_DAY_RULE}, 1: {...EMPTY_DAY_RULE}, 2: {...EMPTY_DAY_RULE}, 
+        3: {...EMPTY_DAY_RULE}, 4: {...EMPTY_DAY_RULE}, 5: {...EMPTY_DAY_RULE}, 6: {...EMPTY_DAY_RULE} 
+    }
   });
 
   const [calendarDate, setCalendarDate] = useState(new Date()); 
   const [calendarViewMode, setCalendarViewMode] = useState('month'); 
   const [newRule, setNewRule] = useState({ 
     screenIds: ['all'],
-    startDate: '', // 🔥 改咗呢度
-    endDate: '',   // 🔥 加咗呢度
-    hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
+    startDate: '', 
+    endDate: '',   
+    hoursStr: '', action: 'price_override', overridePrice: '', note: '' 
+  });
 
-  // --- 1. 權限認證與資料讀取 ---
+  // ==========================================
+  // 1. 權限認證與資料讀取
+  // ==========================================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) { navigate("/"); return; }
+      if (!currentUser) { 
+          navigate("/"); 
+          return; 
+      }
       
       const userEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
-      
-      // 判斷身份
       let role = 'merchant'; 
       if (ADMIN_EMAILS.includes(userEmail)) {
           role = 'admin';
@@ -104,7 +113,7 @@ const AdminPanel = () => {
       setUserRole(role);
       setUser(currentUser);
       
-      // 根據身份跳轉去對應嘅 Tab
+      // 根據權限自動跳轉預設 Tab
       if (role === 'boss') setActiveTab('platform_settle');
       if (role === 'merchant') setActiveTab('merchant_settle');
       
@@ -116,7 +125,7 @@ const AdminPanel = () => {
   const fetchAllData = () => {
       setLoading(true);
 
-      // 🔥 讀取 Orders (加入 Error 攔截，防止 Firebase Block 導致卡死)
+      // 讀取訂單
       const unsubOrders = onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), 
       (snap) => {
           setOrders(snap.docs.map(d => ({ 
@@ -128,20 +137,18 @@ const AdminPanel = () => {
       }, 
       (error) => {
           console.error("Firebase Orders Error:", error);
-          alert("⚠️ 無法讀取訂單數據！如果持續發生，請檢查 Firebase Security Rules 權限設定。");
-          setLoading(false); // 發生錯誤都要解除 Loading！
+          alert("⚠️ 無法讀取訂單數據！請檢查權限。");
+          setLoading(false); 
       });
 
-      // 讀取財務配置
+      // 讀取財務設定
       getDoc(doc(db, "system_config", "financials"))
           .then(docSnap => {
-              if (docSnap.exists()) {
-                  setFinancialConfig(docSnap.data());
-              }
+              if (docSnap.exists()) setFinancialConfig(docSnap.data());
           })
           .catch(err => console.error("Financial Config Error:", err));
 
-      // 讀取 Screens
+      // 讀取屏幕列表
       const unsubScreens = onSnapshot(query(collection(db, "screens"), orderBy("id")), 
       (snap) => {
           const sorted = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() })).sort((a,b) => Number(a.id) - Number(b.id));
@@ -170,10 +177,17 @@ const AdminPanel = () => {
           })
           .catch(err => console.error("Pricing Config Error:", err));
 
-      return () => { unsubOrders(); unsubScreens(); unsubRules(); };
+      return () => { 
+          unsubOrders(); 
+          unsubScreens(); 
+          unsubRules(); 
+      };
   };
 
-  // --- API Handlers ---
+  // ==========================================
+  // 2. 核心功能 Functions
+  // ==========================================
+  
   const saveFinancialConfig = async () => {
       try {
           await setDoc(doc(db, "system_config", "financials"), financialConfig);
@@ -192,14 +206,17 @@ const AdminPanel = () => {
               status: 'pending',
               createdAt: serverTimestamp()
           });
-          alert("✅ 提現申請已提交，請耐心等候至少 3 個工作天處理轉帳。");
+          alert("✅ 提現申請已提交，請耐心等候處理。");
       } catch (e) {
           console.error(e);
           alert("❌ 提交失敗，請檢查網絡連線");
       }
   };
 
-  // --- Logic Helpers (已還原為易讀格式) ---
+  // ==========================================
+  // 3. 數據計算 (useMemo)
+  // ==========================================
+
   const customerHistory = useMemo(() => { 
       const h = {}; 
       if (orders) {
@@ -380,9 +397,10 @@ const AdminPanel = () => {
       }); 
   }, [orders, activeTab, searchTerm, statusFilter]);
 
+  // ==========================================
+  // 4. 各種管理功能 Functions
+  // ==========================================
 
-  // --- Event Handlers (完全展開版) ---
-  
   const handleScreenImageUpload = async (file, index) => {
       if (!file) return;
       setIsUploadingImage(true);
@@ -409,42 +427,30 @@ const AdminPanel = () => {
     if (!confirmUpgrade) return;
 
     try {
-        console.log("開始升級 Database...");
         const screensRef = collection(db, 'screens');
         const snapshot = await getDocs(screensRef);
-        
         let count = 0;
         
-        // Loop 晒所有機位
         for (const screenDoc of snapshot.docs) {
             const data = screenDoc.data();
             const screenRef = doc(db, 'screens', screenDoc.id);
-            
-            // 定義要補加嘅新欄位 (如果本身有，就 Keep 返本身嗰個；如果無，就塞 Default 值)
             const updates = {
-                footfall: data.footfall || 100000, // 預設 10萬人流
-                bannedCategories: data.bannedCategories || [], // 預設無禁播
-                audience: data.audience || ['All'], // 預設受眾
-                district: data.district || '未分類地區', // 確保有地區用嚟做 Grouping
-                type: data.type || 'district', // 預設分類做商業區
+                footfall: data.footfall || 100000, 
+                bannedCategories: data.bannedCategories || [], 
+                audience: data.audience || ['All'], 
+                district: data.district || '未分類地區', 
+                type: data.type || 'district', 
             };
-
-            // 寫入 Firestore，merge: true 保證唔會洗走舊 Data
             await setDoc(screenRef, updates, { merge: true });
-            console.log(`✅ 已更新: ${data.name || screenDoc.id}`);
             count++;
         }
         
         alert(`🎉 Database 升級完成！共更新咗 ${count} 部機位。`);
-        
-        // 建議做完 Refresh 下個網頁
         window.location.reload();
-        
     } catch (error) {
-        console.error("升級 Database 時發生錯誤:", error);
         alert("❌ 發生錯誤：" + error.message);
     }
-};
+  };
 
   const handleAutoResolve = async () => {
       if (!confirm(t('alert_confirm_resolve'))) return;
@@ -455,14 +461,7 @@ const AdminPanel = () => {
           const snapshot = await getDocs(q);
           const allOrders = snapshot.docs.map(d => {
               const data = d.data();
-              let timeVal;
-              if (data.createdAt && typeof data.createdAt.toMillis === 'function') {
-                  timeVal = data.createdAt.toMillis();
-              } else if (data.createdAt instanceof Date) {
-                  timeVal = data.createdAt.getTime();
-              } else {
-                  timeVal = Date.now(); 
-              }
+              let timeVal = data.createdAt && typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : Date.now();
               return { id: d.id, ...data, timeVal };
           });
 
@@ -474,45 +473,26 @@ const AdminPanel = () => {
               order.detailedSlots.forEach(slot => {
                   if (!slot.date || !slot.screenId) return;
 
-                  const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId);
-                  const key = `${slot.date}-${hourInt}-${screenIdStr}`;
-                  
+                  const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                   const myPrice = parseInt(slot.bidPrice) || 0;
-                  const myTime = order.timeVal;
 
-                  if (!slotWars[key]) {
-                      slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                  } else {
-                      const currentKing = slotWars[key];
-                      if (myPrice > currentKing.maxPrice) {
-                          slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                      } 
-                      else if (myPrice === currentKing.maxPrice) {
-                          if (myTime < currentKing.timeVal) {
-                              slotWars[key] = { maxPrice: myPrice, timeVal: myTime, winnerOrderId: order.id, winnerEmail: order.userEmail };
-                          }
-                      }
+                  if (!slotWars[key] || myPrice > slotWars[key].maxPrice || (myPrice === slotWars[key].maxPrice && order.timeVal < slotWars[key].timeVal)) {
+                      slotWars[key] = { maxPrice: myPrice, timeVal: order.timeVal, winnerOrderId: order.id, winnerEmail: order.userEmail };
                   }
               });
           });
 
           const batch = writeBatch(db);
-          let updateCount = 0;
 
           allOrders.forEach(order => {
               if(!order.detailedSlots || !Array.isArray(order.detailedSlots)) return;
               
               let winCount = 0;
               let loseCount = 0;
-              let newDetailedSlots = [...order.detailedSlots];
               let hasChange = false;
 
-              newDetailedSlots = newDetailedSlots.map(slot => {
-                  const hourInt = parseInt(slot.hour);
-                  const screenIdStr = String(slot.screenId);
-                  const key = `${slot.date}-${hourInt}-${screenIdStr}`;
-                  
+              const newDetailedSlots = order.detailedSlots.map(slot => {
+                  const key = `${slot.date}-${parseInt(slot.hour)}-${String(slot.screenId)}`;
                   const winner = slotWars[key];
                   let newSlotStatus = 'normal';
 
@@ -525,7 +505,7 @@ const AdminPanel = () => {
                           newSlotStatus = 'winning'; 
                       }
                   }
-                  if (slot.slotStatus !== newSlotStatus) { 
+                  if (slot.slotStatus !== newSlotStatus) {
                       hasChange = true; 
                   }
                   return { ...slot, slotStatus: newSlotStatus };
@@ -536,16 +516,16 @@ const AdminPanel = () => {
                   newStatus = 'outbid_needs_action'; 
               } else if (loseCount > 0 && winCount > 0) {
                   newStatus = 'partially_outbid'; 
-              } else if (loseCount === 0 && winCount > 0) {
-                  if (newStatus !== 'paid' && newStatus !== 'completed' && newStatus !== 'won') {
-                      newStatus = 'paid_pending_selection'; 
-                  }
+              } else if (loseCount === 0 && winCount > 0 && !['paid','completed','won'].includes(newStatus)) {
+                  newStatus = 'paid_pending_selection'; 
               }
 
               if (hasChange || newStatus !== order.status) {
-                  const orderRef = doc(db, "orders", order.id);
-                  batch.update(orderRef, { detailedSlots: newDetailedSlots, status: newStatus, lastUpdated: serverTimestamp() });
-                  updateCount++;
+                  batch.update(doc(db, "orders", order.id), { 
+                      detailedSlots: newDetailedSlots, 
+                      status: newStatus, 
+                      lastUpdated: serverTimestamp() 
+                  });
               }
           });
 
@@ -553,7 +533,6 @@ const AdminPanel = () => {
           alert(t('alert_resolve_success'));
 
       } catch (error) { 
-          console.error("Auto Resolve Error:", error); 
           alert(`Error: ${error.message}`); 
       } finally { 
           setLoading(false); 
@@ -573,10 +552,7 @@ const AdminPanel = () => {
           for(const d of snapshot.docs) {
               const o = d.data();
               if(o.detailedSlots && o.detailedSlots.length > 0) {
-                  const allSlotsExpired = o.detailedSlots.every(s => { 
-                      const slotTime = new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`); 
-                      return now > slotTime; 
-                  });
+                  const allSlotsExpired = o.detailedSlots.every(s => now > new Date(`${s.date} ${String(s.hour).padStart(2,'0')}:00`));
                   if (allSlotsExpired) {
                       batch.update(doc(db,"orders",d.id), {status:'lost', finalizedAt: serverTimestamp()});
                       await sendBidLostEmail({email:o.userEmail, displayName:o.userName}, {id:d.id});
@@ -584,6 +560,7 @@ const AdminPanel = () => {
                   }
               }
           }
+          
           if(count > 0) { 
               await batch.commit(); 
               alert(t('alert_finalize_success')); 
@@ -591,7 +568,6 @@ const AdminPanel = () => {
               alert(t('alert_no_expired'));
           }
       } catch(e) { 
-          console.error(e); 
           alert("Failed"); 
       } finally { 
           setLoading(false); 
@@ -609,16 +585,14 @@ const AdminPanel = () => {
           }); 
           
           const o = orders.find(x=>x.id===id);
-          const userInfo = {email: o.userEmail, displayName: o.userName};
-
-          if(action === 'approve') { 
-              await sendBidConfirmation(userInfo, o, 'video_approved'); 
+          if(action === 'approve') {
+              await sendBidConfirmation({email: o.userEmail, displayName: o.userName}, o, 'video_approved'); 
           } else {
-              await sendBidConfirmation(userInfo, o, 'video_rejected', reviewNote);
+              await sendBidConfirmation({email: o.userEmail, displayName: o.userName}, o, 'video_rejected', reviewNote);
           }
+          
           alert("Processed successfully"); 
       } catch(e){ 
-          console.error(e);
           alert("Error processing review"); 
       } 
   };
@@ -634,7 +608,9 @@ const AdminPanel = () => {
       if(confirm('Confirm bulk action?')) { 
           const b = writeBatch(db); 
           selectedOrderIds.forEach(id => {
-              if(act === 'cancel') b.update(doc(db,"orders",id),{status:'cancelled'});
+              if(act === 'cancel') {
+                  b.update(doc(db,"orders",id),{status:'cancelled'});
+              }
           }); 
           await b.commit(); 
           alert("Done"); 
@@ -648,16 +624,11 @@ const AdminPanel = () => {
       }
   };
   
-const handleAddRule = async () => { 
+  const handleAddRule = async () => { 
       if(!newRule.startDate) return alert("請選擇開始日期！"); 
       if(!newRule.screenIds || newRule.screenIds.length === 0) return alert("請至少選擇一部屏幕！");
 
-      let hours = []; 
-      if(!newRule.hoursStr) {
-          hours = Array.from({length:24},(_,i)=>i); 
-      } else {
-          hours = newRule.hoursStr.split(',').map(Number); 
-      }
+      let hours = newRule.hoursStr ? newRule.hoursStr.split(',').map(Number) : Array.from({length:24},(_,i)=>i); 
       
       try {
           const getDatesInRange = (startStr, endStr) => {
@@ -667,10 +638,7 @@ const handleAddRule = async () => {
               const stopDate = new Date(endStr);
               if (currentDate > stopDate) return [startStr]; 
               while (currentDate <= stopDate) {
-                  const y = currentDate.getFullYear();
-                  const m = String(currentDate.getMonth() + 1).padStart(2, '0');
-                  const d = String(currentDate.getDate()).padStart(2, '0');
-                  dateArray.push(`${y}-${m}-${d}`);
+                  dateArray.push(`${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`);
                   currentDate.setDate(currentDate.getDate() + 1);
               }
               return dateArray;
@@ -678,23 +646,16 @@ const handleAddRule = async () => {
 
           const datesToProcess = getDatesInRange(newRule.startDate, newRule.endDate);
           const batch = writeBatch(db);
+          const targetScreens = newRule.screenIds.includes('all') ? ['all'] : newRule.screenIds;
 
-          // 🔥 決定要處理嘅屏幕
-          let targetScreens = newRule.screenIds;
-          if (targetScreens.includes('all')) {
-              targetScreens = ['all']; // 如果有剔 'all'，就只寫一條 global rule
-          }
-
-          // 🔥 雙重 Loop：每日 + 每一部機
           datesToProcess.forEach(dateStr => {
               targetScreens.forEach(sId => {
-                  const ruleRef = doc(collection(db, "special_rules"));
-                  batch.set(ruleRef, {
-                      screenId: sId, // 寫入獨立嘅屏幕 ID 或 'all'
-                      date: dateStr,
+                  batch.set(doc(collection(db, "special_rules")), {
+                      screenId: sId, 
+                      date: dateStr, 
                       hours: hours, 
                       type: newRule.action, 
-                      value: parseFloat(newRule.overridePrice) || 0,
+                      value: parseFloat(newRule.overridePrice) || 0, 
                       note: newRule.note || ''
                   });
               });
@@ -702,12 +663,8 @@ const handleAddRule = async () => {
 
           await batch.commit(); 
           alert(`✅ 成功新增 ${datesToProcess.length * targetScreens.length} 條特別規則！`); 
-          
-          // 成功後清空表單
           setNewRule({ screenIds: ['all'], startDate: '', endDate: '', hoursStr: '', action: 'price_override', overridePrice: '', note: '' });
-
       } catch (error) {
-          console.error("Add Rule Error:", error);
           alert("❌ 儲存失敗: " + error.message);
       }
   };
@@ -718,8 +675,7 @@ const handleAddRule = async () => {
       }
   };
 
-
-const handleClearAllRules = async () => { 
+  const handleClearAllRules = async () => { 
       if(confirm("⚠️ 警告：確定要刪除【所有】特別規則嗎？此操作無法復原！")) {
           try {
               const snapshot = await getDocs(collection(db, "special_rules"));
@@ -730,16 +686,15 @@ const handleClearAllRules = async () => {
               await batch.commit();
               alert("✅ 已成功清空所有特別規則！");
           } catch(e) {
-              console.error(e);
               alert("❌ 清空失敗");
           }
       }
   };
 
   const savePricingConfig = async () => { 
-      const rules = localBundleRules.map(r => ({
+      const rules = localBundleRules.map(r => ({ 
           screens: r.screensStr.split(','), 
-          multiplier: parseFloat(r.multiplier)
+          multiplier: parseFloat(r.multiplier) 
       })); 
       
       if (selectedConfigTarget === 'global') {
@@ -755,13 +710,13 @@ const handleClearAllRules = async () => {
   const handleAddBundleRule = () => {
       setLocalBundleRules([...localBundleRules, {screensStr:"", multiplier:1.2}]);
   };
-  
+
   const handleBundleRuleChange = (i,f,v) => { 
       const n = [...localBundleRules]; 
       n[i][f] = v; 
       setLocalBundleRules(n); 
   };
-  
+
   const handleRemoveBundleRule = (i) => { 
       const n = [...localBundleRules]; 
       n.splice(i,1); 
@@ -800,7 +755,6 @@ const handleClearAllRules = async () => {
       setIsAddScreenModalOpen(true); 
   };
 
-  // 🔥 已修正的 saveScreenFull (強制轉 String ID)
   const saveScreenFull = async () => { 
       try {
           const p = { 
@@ -815,7 +769,6 @@ const handleClearAllRules = async () => {
           delete p.firestoreId; 
           
           if(editingScreenId) { 
-              // 確保編輯時更新的 ID 也是 String
               p.id = String(p.id || editingScreenId.replace('screen_', ''));
               await setDoc(doc(db,"screens",editingScreenId), p, { merge: true }); 
           } else {
@@ -829,7 +782,7 @@ const handleClearAllRules = async () => {
               
               await setDoc(doc(db, "screens", newDocId), { 
                   ...p, 
-                  id: String(nextId), // 強制 String
+                  id: String(nextId), 
                   createdAt: serverTimestamp(), 
                   isActive: true 
               });
@@ -837,7 +790,6 @@ const handleClearAllRules = async () => {
           alert(t('alert_saved')); 
           setIsAddScreenModalOpen(false); 
       } catch (e) { 
-          console.error("Save Error", e); 
           alert("Save Failed: " + e.message); 
       }
   };
@@ -868,7 +820,9 @@ const handleClearAllRules = async () => {
 
   if (loading) return <LoadingScreen />;
 
-  // 🔥 權限隔離：定義所有的 Tabs 導航
+  // ==========================================
+  // 🔥 定義 Tab 選單
+  // ==========================================
   const ADMIN_TABS = [
       { id: 'dashboard', icon: <LayoutDashboard size={16}/>, label: t('tab_dashboard') },
       { id: 'financial_config', icon: <Briefcase size={16}/>, label: '財務分成配置' }, 
@@ -879,12 +833,12 @@ const handleClearAllRules = async () => {
       { id: 'screens', icon: <Monitor size={16}/>, label: t('tab_screens') },
       { id: 'calendar', icon: <Calendar size={16}/>, label: t('tab_calendar') },
       { id: 'manualOrder', icon: <Plus size={16}/>, label: '手動加單/排期' },
+      { id: 'houseAds', icon: <PlayCircle size={16}/>, label: '墊底廣告管理' }, // 🔥 新增 House Ads Tab
       { id: 'analytics', icon: <TrendingUp size={16}/>, label: t('tab_analytics') },
       { id: 'rules', icon: <Settings size={16}/>, label: t('tab_rules') },
       { id: 'config', icon: <Settings size={16}/>, label: t('tab_config') }
   ];
 
-  // 🔥 權限隔離：過濾用戶可見的 Tabs
   const VISIBLE_TABS = ADMIN_TABS.filter(tab => {
       if (userRole === 'admin') return true; 
       if (userRole === 'boss') return tab.id === 'platform_settle'; 
@@ -892,6 +846,9 @@ const handleClearAllRules = async () => {
       return false;
   });
 
+  // ==========================================
+  // Render
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto space-y-6">
@@ -902,29 +859,44 @@ const handleClearAllRules = async () => {
                 <span className="bg-slate-900 text-white px-2 py-1 rounded text-xs">ADMIN</span> DOOH {t('admin_title')}
             </h1>
             <div className="flex gap-2">
-                <button onClick={toggleLanguage} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200">
+                <button 
+                    onClick={toggleLanguage} 
+                    className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold flex items-center gap-1 hover:bg-slate-200"
+                >
                     <Globe size={16}/> {lang === 'zh' ? 'EN' : '繁'}
                 </button>
+                
                 {userRole === 'admin' && (
-                    <button onClick={handleAutoResolve} className="bg-purple-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg">
+                    <button 
+                        onClick={handleAutoResolve} 
+                        className="bg-purple-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-purple-700 shadow-lg"
+                    >
                         <Gavel size={16}/> {t('btn_smart_resolve')}
                     </button>
                 )}
+                
                 {userRole === 'admin' && (
-                    <button onClick={handleFinalizeAuction} className="bg-red-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg">
+                    <button 
+                        onClick={handleFinalizeAuction} 
+                        className="bg-red-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 shadow-lg"
+                    >
                         <Flag size={16}/> {t('btn_finalize')}
                     </button>
                 )}
-                <button onClick={() => signOut(auth)} className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100 transition-colors">
+                
+                <button 
+                    onClick={() => signOut(auth)} 
+                    className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100 transition-colors"
+                >
                     {t('logout')}
                 </button>
 
                 <button 
-    onClick={upgradeDatabaseForB2B}
-    className="bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-red-700 m-4"
->
-    🛠️ [Tech Lead 專用] 一鍵升級 Database (B2B 欄位)
-</button>
+                    onClick={upgradeDatabaseForB2B} 
+                    className="bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-red-700 ml-4"
+                >
+                    🛠️ 一鍵升級 Database
+                </button>
             </div>
         </div>
 
@@ -933,8 +905,15 @@ const handleClearAllRules = async () => {
             {VISIBLE_TABS.map(tab => (
                 <button 
                     key={tab.id} 
-                    onClick={() => { setActiveTab(tab.id); setSelectedOrderIds(new Set()); }} 
-                    className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border'}`}
+                    onClick={() => { 
+                        setActiveTab(tab.id); 
+                        setSelectedOrderIds(new Set()); 
+                    }} 
+                    className={`px-4 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${
+                        activeTab === tab.id 
+                            ? 'bg-blue-600 text-white shadow-md' 
+                            : 'bg-white text-slate-500 hover:bg-slate-100 border'
+                    }`}
                 >
                     {tab.icon} {tab.label} 
                     {tab.alert && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>}
@@ -942,27 +921,18 @@ const handleClearAllRules = async () => {
             ))}
         </div>
 
+        {/* ========================================== */}
         {/* 渲染各個 Views */}
+        {/* ========================================== */}
+        
         {activeTab === 'dashboard' && <DashboardView stats={stats} COLORS={COLORS} />}
         
-        {/* 新增財務相關 Views */}
         {activeTab === 'financial_config' && <FinancialConfigView config={financialConfig} setConfig={setFinancialConfig} onSave={saveFinancialConfig} screens={screens} />}
         
         {activeTab === 'platform_settle' && <PlatformOwnerSettlementView stats={stats} config={financialConfig} orders={orders} screens={screens} onWithdrawRequest={handleWithdrawRequest} />}
         
-        {/* 商家專屬結算視圖：傳遞過濾後的 Screens */}
-        {activeTab === 'merchant_settle' && (
-            <MerchantSettlementView 
-                stats={stats} 
-                config={financialConfig} 
-                orders={orders} 
-                screens={userRole === 'admin' ? screens : screens.filter(s => s.merchantEmail === user.email)} 
-                userRole={userRole}
-                onWithdrawRequest={handleWithdrawRequest} 
-            />
-        )}
+        {activeTab === 'merchant_settle' && <MerchantSettlementView stats={stats} config={financialConfig} orders={orders} screens={userRole === 'admin' ? screens : screens.filter(s => s.merchantEmail === user.email)} userRole={userRole} onWithdrawRequest={handleWithdrawRequest} />}
         
-        {/* 原有 Views */}
         {activeTab === 'orders' && <OrdersView orders={filteredOrders} selectedIds={selectedOrderIds} onSelect={setSelectedOrderIds} onBulkAction={handleBulkAction} customerHistory={customerHistory} statusFilter={statusFilter} setStatusFilter={setStatusFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onDeleteOrder={handleDeleteOrder} />}
         
         {activeTab === 'review' && <ReviewView orders={filteredOrders} onReview={handleReview} reviewNote={reviewNote} setReviewNote={setReviewNote} />}
@@ -973,13 +943,39 @@ const handleClearAllRules = async () => {
         
         {activeTab === 'screens' && <ScreensView screens={screens} editingScreens={editingScreens} onAdd={handleAddScreen} onEditFull={handleEditScreenFull} onCopy={handleCopyScreen} onSaveSimple={saveScreenSimple} onChange={handleScreenChange} onToggle={toggleScreenActive} />}
         
-        {activeTab === 'calendar' && <CalendarView date={calendarDate} setDate={setCalendarDate} mode={calendarViewMode} setMode={setCalendarViewMode} monthData={monthViewData} dayGrid={dayViewGrid} screens={screens} onSelectSlot={setSelectedSlotGroup} onPrev={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); setCalendarDate(d); }} onNext={() => { const d = new Date(calendarDate); if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); setCalendarDate(d); }} />}
+        {activeTab === 'calendar' && (
+            <CalendarView 
+                date={calendarDate} 
+                setDate={setCalendarDate} 
+                mode={calendarViewMode} 
+                setMode={setCalendarViewMode} 
+                monthData={monthViewData} 
+                dayGrid={dayViewGrid} 
+                screens={screens} 
+                onSelectSlot={setSelectedSlotGroup} 
+                onPrev={() => { 
+                    const d = new Date(calendarDate); 
+                    if(calendarViewMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-1); 
+                    setCalendarDate(d); 
+                }} 
+                onNext={() => { 
+                    const d = new Date(calendarDate); 
+                    if(calendarViewMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+1); 
+                    setCalendarDate(d); 
+                }} 
+            />
+        )}
         
         {activeTab === 'manualOrder' && <AdminManualOrder screens={screens} />}
+        
+        {activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} onClearAll={handleClearAllRules} />}
+        
+        {/* 🔥 全新：House Ads 分頁 */}
+        {activeTab === 'houseAds' && <HouseAdsView />}
 
-{activeTab === 'rules' && <RulesView rules={specialRules} screens={screens} newRule={newRule} setNewRule={setNewRule} onAdd={handleAddRule} onDelete={handleDeleteRule} onClearAll={handleClearAllRules} />}
-
-        {/* Modals */}
+        {/* ========================================== */}
+        {/* 彈出視窗 Modals */}
+        {/* ========================================== */}
         <ScreenModal 
             isOpen={isAddScreenModalOpen} 
             onClose={() => setIsAddScreenModalOpen(false)} 
@@ -994,9 +990,9 @@ const handleClearAllRules = async () => {
             toggleTierHour={(t,h) => {
                 const r = {...newScreenData.tierRules}; 
                 const d = r[activeDayTab][t]; 
-                if(d.includes(h)) {
+                if(d.includes(h)) { 
                     r[activeDayTab][t] = d.filter(x => x !== h); 
-                } else {
+                } else { 
                     r[activeDayTab][t] = [...d,h]; 
                 }
                 setNewScreenData({...newScreenData, tierRules:r});
