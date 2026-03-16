@@ -917,7 +917,7 @@ export const ScreensView = ({ screens, editingScreens, onAdd, onEditFull, onCopy
 };
 
 // ==========================================
-// 🔥 全新分頁：HouseAds 墊底廣告管理 (完整解壓縮)
+// 🔥 新增：HouseAds 墊底廣告管理分頁 (已修復 100% 卡死 Bug)
 // ==========================================
 export const HouseAdsView = () => {
   const [screens, setScreens] = useState([]);
@@ -929,18 +929,19 @@ export const HouseAdsView = () => {
     const q = query(collection(db, "screens"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const screensData = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
+          ...doc.data(), 
+          firestoreId: doc.id // 🔥 修正 1：將真正嘅 Database ID 獨立存起，避免被覆蓋
       }));
-      screensData.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      screensData.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
       setScreens(screensData);
       setIsLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const handleUpload = async (e, screenId) => {
+  const handleUpload = async (e, firestoreId) => {
     const file = e.target.files[0];
+    const inputElement = e.target; // 🔥 修正 2：鎖定 Input，避免 React 清空事件
     if (!file) return;
 
     if (file.size > 50 * 1024 * 1024) {
@@ -948,12 +949,12 @@ export const HouseAdsView = () => {
       return;
     }
 
-    setUploadingScreenId(screenId);
+    setUploadingScreenId(firestoreId);
     setUploadProgress(0);
 
     try {
       const fileExt = file.name.split('.').pop();
-      const storageRef = ref(storage, `houseAds/screen_${screenId}_${Date.now()}.${fileExt}`);
+      const storageRef = ref(storage, `houseAds/${firestoreId}_${Date.now()}.${fileExt}`);
       
       const uploadTask = uploadBytesResumable(storageRef, file);
 
@@ -966,14 +967,20 @@ export const HouseAdsView = () => {
             setUploadingScreenId(null); 
         }, 
         async () => {
-          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          const screenRef = doc(db, "screens", String(screenId));
-          await updateDoc(screenRef, { 
-              houseAds: arrayUnion(downloadURL) 
-          });
-          setUploadingScreenId(null);
-          setUploadProgress(0);
-          e.target.value = '';
+          // 🔥 修正 3：加入 try...catch 捕捉 Database 寫入錯誤
+          try {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              const screenRef = doc(db, "screens", firestoreId); // 使用正確的 Database ID
+              await updateDoc(screenRef, { houseAds: arrayUnion(downloadURL) });
+              
+              setUploadingScreenId(null);
+              setUploadProgress(0);
+              inputElement.value = '';
+          } catch (dbError) {
+              console.error("Database Error:", dbError);
+              alert("寫入資料庫失敗，請檢查權限: " + dbError.message);
+              setUploadingScreenId(null);
+          }
         }
       );
     } catch (error) {
@@ -982,14 +989,13 @@ export const HouseAdsView = () => {
     }
   };
 
-  const handleDeleteAd = async (screenId, adUrl) => {
+  const handleDeleteAd = async (firestoreId, adUrl) => {
     if (!window.confirm("確定要刪除這條墊底廣告嗎？")) return;
     try {
-      const screenRef = doc(db, "screens", String(screenId));
-      await updateDoc(screenRef, { 
-          houseAds: arrayRemove(adUrl) 
-      });
+      const screenRef = doc(db, "screens", firestoreId); // 使用正確的 Database ID
+      await updateDoc(screenRef, { houseAds: arrayRemove(adUrl) });
     } catch (error) { 
+        console.error(error);
         alert("刪除失敗"); 
     }
   };
@@ -1018,10 +1024,10 @@ export const HouseAdsView = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {screens.map(screen => {
           const ads = screen.houseAds || [];
-          const isUploading = uploadingScreenId === screen.id;
+          const isUploading = uploadingScreenId === screen.firestoreId;
 
           return (
-            <div key={screen.id} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden flex flex-col">
+            <div key={screen.firestoreId} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden flex flex-col">
               <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <Monitor size={18} className="text-blue-400" />
@@ -1049,7 +1055,7 @@ export const HouseAdsView = () => {
                             <video src={url} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" muted loop playsInline onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()} />
                         )}
                         <button 
-                            onClick={() => handleDeleteAd(screen.id, url)} 
+                            onClick={() => handleDeleteAd(screen.firestoreId, url)} 
                             className="absolute top-1 right-1 bg-red-600 text-white p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700 shadow-lg"
                         >
                             <Trash2 size={12} />
@@ -1076,7 +1082,12 @@ export const HouseAdsView = () => {
                   <label className="w-full flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-2.5 rounded-lg cursor-pointer transition-colors text-sm font-bold shadow-sm">
                     <UploadCloud size={18} />
                     上載相片/影片
-                    <input type="file" accept="video/*,image/*" className="hidden" onChange={(e) => handleUpload(e, screen.id)} />
+                    <input 
+                        type="file" 
+                        accept="video/*,image/*" 
+                        className="hidden" 
+                        onChange={(e) => handleUpload(e, screen.firestoreId)} 
+                    />
                   </label>
                 )}
               </div>
