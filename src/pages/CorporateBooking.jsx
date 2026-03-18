@@ -26,7 +26,6 @@ const CATEGORIES = [
     { id: 'alcohol', name: '酒類飲品 (Alcohol)' } 
 ];
 
-// 🔥 全新：智能時段區塊 (不再依賴死板鐘數)
 const DAYPARTING_BLOCKS = [ 
     { 
         id: 'smart_prime', 
@@ -36,7 +35,7 @@ const DAYPARTING_BLOCKS = [
     { 
         id: 'smart_gold_normal', 
         name: '日常優質時段 (Gold & Normal)', 
-        desc: '非黃金時段，適合長線曝光維持聲量 (原價計費)' // 🔥 改咗呢度
+        desc: '非黃金時段，適合長線曝光維持聲量 (原價計費)' 
     }
 ];
 
@@ -53,7 +52,6 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [industry, setIndustry] = useState('');
   
-  // 預設選擇全日 24 小時
   const [selectedDayparts, setSelectedDayparts] = useState(['all_day']); 
   const [sov, setSov] = useState(30); 
   
@@ -64,7 +62,6 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
   const [isSubmitting, setIsSubmitting] = useState(false); 
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // 防呆處理
   const processedScreens = useMemo(() => {
     if (!screens || !Array.isArray(screens) || screens.length === 0) return [];
     return screens.map((s, index) => {
@@ -78,7 +75,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
         bannedCategories: safeBanned, 
         footfall: Number(s.footfall) || 100000, 
         specs: s.specifications || s.size || '標準屏幕', 
-        tierRules: s.tierRules || {}, // 🔥 保留最核心嘅 Database Tier Rules
+        tierRules: s.tierRules || {}, 
         image: (s.images && Array.isArray(s.images) && s.images.length > 0) ? s.images[0] : 'https://placehold.co/600x400?text=No+Image',
         lat: Number(s.lat) || 22.3193 + (index * 0.005), 
         lng: Number(s.lng) || 114.1694 + (index * 0.005),
@@ -132,7 +129,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       return processedScreens.filter(s => selectedScreens.has(s.id) && industry && s.bannedCategories.includes(industry));
   }, [selectedScreens, industry, processedScreens]);
 
-  // 🔥 終極定價引擎：讀取每部機嘅 Prime/Gold 並套用階梯折扣
+  // 🔥 終極定價引擎 (已修復 Prime Time 顯示 $0 的 Bug)
   const metrics = useMemo(() => {
       let days = 30;
       if (dateRange.start && dateRange.end) { 
@@ -140,9 +137,11 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       }
       
       const isAllDay = selectedDayparts.includes('all_day');
-      const sovMultiplier = sov / 100;
       
-      // 讀取 Admin 設定嘅倍數
+      // 🔥 精準 SOV 倍數：10% SOV 等於 1 個 basePrice
+      const costMultiplier = sov / 10; 
+      const impressionMultiplier = sov / 100;
+      
       const p_prime = pricingConfig?.primeMultiplier || 3.5;
       const p_gold = pricingConfig?.goldMultiplier || 1.8;
       
@@ -153,8 +152,10 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
           let screenDailyCost = 0;
           let screenActiveHoursCount = 0;
           
-          // 預設讀取 Default，因為預測唔到具體星期幾，用 Default 做估算最準
-          const rules = s.tierRules?.default || { prime: [], gold: [] };
+          // 🔥 核心修正：嘗試讀取星期一到日任何一日嘅數據作為預估，避免 default 不存在
+          const fallbackRules = { prime: [], gold: [] };
+          const rules = s.tierRules?.[1] || s.tierRules?.[2] || s.tierRules?.[3] || s.tierRules?.[4] || s.tierRules?.[5] || s.tierRules?.[6] || s.tierRules?.[0] || fallbackRules;
+          
           const primeHours = (rules.prime || []).map(Number);
           const goldHours = (rules.gold || []).map(Number);
           
@@ -163,19 +164,19 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
               const isGold = goldHours.includes(h);
               
               let includeHour = false;
-              let hourDiscount = 1.0; // 預設正價
+              let hourDiscount = 1.0; 
 
               if (isAllDay) {
                   includeHour = true;
-                  hourDiscount = 0.90; // 🔥 改為 0.90 (即 10% Off)
+                  hourDiscount = 0.90; // 🔥 10% Off
               } else {
                   if (selectedDayparts.includes('smart_prime') && isPrime) { 
                       includeHour = true; 
-                      hourDiscount = 1.0; // Prime 無折
+                      hourDiscount = 1.0; 
                   }
                   if (selectedDayparts.includes('smart_gold_normal') && !isPrime) { 
                       includeHour = true; 
-                      hourDiscount = 1.0; // 🔥 取消 5% 優惠，改為 1.0
+                      hourDiscount = 1.0; // 原價
                   }
               }
 
@@ -184,14 +185,14 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                   if (isPrime) multiplier = p_prime;
                   else if (isGold) multiplier = p_gold;
                   
-                  screenDailyCost += (s.basePrice * multiplier * sovMultiplier * hourDiscount);
+                  // 🔥 精準算式：底價 x 時段倍數 x (SOV/10) x 折扣
+                  screenDailyCost += (s.basePrice * multiplier * costMultiplier * hourDiscount);
                   screenActiveHoursCount++;
               }
           }
           
           totalCost += screenDailyCost * days;
-          // 按比例計算人流 (假設人流平均分佈於 24 小時)
-          totalImpressions += (s.footfall * (screenActiveHoursCount / 24) * days * sovMultiplier); 
+          totalImpressions += (s.footfall * (screenActiveHoursCount / 24) * days * impressionMultiplier); 
       });
       
       return { 
@@ -203,7 +204,6 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       };
   }, [activeScreens, dateRange, selectedDayparts, sov, pricingConfig]);
 
-  // 🔥 真實入單邏輯 (跟 Metrics 一致)
   const handleFinalSubmit = async () => {
       if (!campaignName || !dateRange.start || !dateRange.end) { 
           alert("請先填寫企劃名稱及廣告檔期"); 
@@ -234,17 +234,17 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
           
           const dates = getDates(dateRange.start, dateRange.end);
           const isAllDay = selectedDayparts.includes('all_day');
+          const costMultiplier = sov / 10; 
+          
           const p_prime = pricingConfig?.primeMultiplier || 3.5;
           const p_gold = pricingConfig?.goldMultiplier || 1.8;
           const detailedSlots = [];
 
-          // 逐日逐部機逐個鐘生成
           dates.forEach(d => {
               const dayOfWeek = new Date(d).getDay();
               
               activeScreens.forEach(s => {
-                  // 讀取當天專屬嘅 Tier Rules
-                  const rules = s.tierRules?.[dayOfWeek] || s.tierRules?.default || { prime: [], gold: [] };
+                  const rules = s.tierRules?.[dayOfWeek] || { prime: [], gold: [] };
                   const primeHours = (rules.prime || []).map(Number);
                   const goldHours = (rules.gold || []).map(Number);
                   
@@ -257,14 +257,15 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
 
                       if (isAllDay) {
                           includeHour = true;
-                          hourDiscount = 0.90; // 🔥 改為 0.90 (10% Off)
+                          hourDiscount = 0.90; // 10% Off
                       } else {
                           if (selectedDayparts.includes('smart_prime') && isPrime) { 
                               includeHour = true; 
                               hourDiscount = 1.0; 
                           }
                           if (selectedDayparts.includes('smart_gold_normal') && !isPrime) { 
-                              includeHour = true; hourDiscount = 1.0; // 🔥 改為 1.0
+                              includeHour = true; 
+                              hourDiscount = 1.0; 
                           }
                       }
 
@@ -273,7 +274,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                           if (isPrime) multiplier = p_prime;
                           else if (isGold) multiplier = p_gold;
                           
-                          const finalPrice = s.basePrice * multiplier * (sov/100) * hourDiscount;
+                          const finalPrice = s.basePrice * multiplier * costMultiplier * hourDiscount;
                           
                           detailedSlots.push({ 
                               date: d, 
@@ -490,7 +491,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
       <div className="mb-6 p-5 bg-blue-50 border border-blue-200 rounded-xl shadow-sm">
           <div className="flex justify-between items-start mb-4">
               <h3 className="font-bold text-blue-800 flex items-center gap-2">
-                  <Clock size={18}/> 播放時段策略 (可多選組合)
+                  <Clock size={18}/> 智能播放時段策略 (可多選組合)
               </h3>
           </div>
           
@@ -515,16 +516,15 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
               })}
           </div>
 
-          {/* ROS 獨立大掣 (25% Off) */}
           <div 
               onClick={() => setSelectedDayparts(['all_day'])} 
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between group ${selectedDayparts.includes('all_day') ? 'border-green-500 bg-green-50 shadow-lg transform scale-[1.01]' : 'border-green-200 bg-white hover:border-green-400'}`}
           >
               <div>
                   <p className={`font-black text-lg flex items-center gap-2 mb-1 ${selectedDayparts.includes('all_day') ? 'text-green-700' : 'text-slate-700'}`}>
-                      🌟 全日霸屏 ROS (24小時)
+                      🌟 全日霸屏 ROS (24小時全覆蓋)
                       <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
-                          <Sparkles size={10}/> 專享 10% 折扣
+                          <Sparkles size={10}/> 專享 10% 組合折扣
                       </span>
                   </p>
                   <p className="text-xs text-slate-500">系統自動包攬屏幕全日 24 小時時段，將投資效益最大化！</p>
@@ -568,7 +568,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                   <h3 className="font-bold text-slate-400 uppercase tracking-wider text-xs">投資回報預測</h3>
                   {metrics.isAllDay && (
                       <span className="bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
-                          <CheckCircle size={10}/> ROS 25% Off 已啟動
+                          <CheckCircle size={10}/> ROS 10% Off 已啟動
                       </span>
                   )}
               </div>
@@ -698,7 +698,7 @@ const CorporateBooking = ({ screens = [], pricingConfig = {} }) => {
                 <div className="flex flex-col items-center justify-center h-[400px] text-slate-400 text-center">
                     <Monitor size={64} className="mb-4 text-slate-300"/>
                     <h2 className="text-xl font-bold text-slate-600 mb-2">尚未載入機位數據</h2>
-                    <p className="text-sm">請等待系統從數據庫讀取資料。</p>
+                    <p className="text-sm">請確保您已於管理後台設置屏幕，或等待網絡連線。</p>
                 </div>
             ) : (
                 <>

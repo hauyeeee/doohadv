@@ -27,3 +27,4 @@ dist-ssr
 .netlify
 serviceAccountKey.json
 functions/.env
+service-account-key.json
