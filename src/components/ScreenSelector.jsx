@@ -25,6 +25,9 @@ const ScreenSelector = ({
 }) => {
   const { t, lang } = useLanguage();
   const [isLocating, setIsLocating] = useState(false);
+  
+  // 🔥 新增：地區篩選狀態
+  const [selectedDistrict, setSelectedDistrict] = useState('All');
 
   const safeT = (key, defaultText) => {
       const text = t(key);
@@ -78,6 +81,10 @@ const ScreenSelector = ({
           if (!selectedScreens.has(closestScreen.id)) {
              toggleScreen(closestScreen.id); 
           }
+          // 自動跳去該區
+          const districtName = closestScreen.district?.trim() || (lang === 'en' ? 'Other Districts' : '未分類區域');
+          setSelectedDistrict(districtName);
+
           if (!isAutoTrigger) {
              alert(lang === 'en' 
                 ? `📍 Found the nearest screen: ${closestScreen.name} (${Math.round(minDistance)}m away)`
@@ -111,12 +118,11 @@ const ScreenSelector = ({
     }
   }, [isScreensLoading, filteredScreens]);
 
-  // 🔥 新增：智能分區邏輯 (Group screens by District)
+  // 智能分區邏輯 (Group screens by District)
   const groupedScreens = useMemo(() => {
     if (!filteredScreens || filteredScreens.length === 0) return {};
     
     return filteredScreens.reduce((acc, screen) => {
-      // 如果冇填 District，就放入「未分類區域」
       const districtName = screen.district?.trim() || (lang === 'en' ? 'Other Districts' : '未分類區域');
       if (!acc[districtName]) {
         acc[districtName] = [];
@@ -125,6 +131,18 @@ const ScreenSelector = ({
       return acc;
     }, {});
   }, [filteredScreens, lang]);
+
+  // 🔥 提取所有獨特的地區名稱
+  const districtList = useMemo(() => {
+    return Object.keys(groupedScreens).sort();
+  }, [groupedScreens]);
+
+  // 防呆：如果搜尋結果令到目前選擇嘅地區消失，自動變返 'All'
+  useEffect(() => {
+      if (selectedDistrict !== 'All' && !districtList.includes(selectedDistrict)) {
+          setSelectedDistrict('All');
+      }
+  }, [districtList, selectedDistrict]);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full max-h-[600px]">
@@ -167,6 +185,36 @@ const ScreenSelector = ({
           />
       </div>
 
+      {/* 🔥 新增：地區篩選標籤列 (Horizontal Scrollable Pills) */}
+      {districtList.length > 0 && (
+          <div className="flex items-center gap-2 p-3 border-b border-slate-100 bg-white overflow-x-auto custom-scrollbar shrink-0">
+              <button 
+                  onClick={() => setSelectedDistrict('All')}
+                  className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                      selectedDistrict === 'All' 
+                          ? 'bg-slate-800 text-white border-slate-800 shadow-sm' 
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+              >
+                  {lang === 'en' ? 'All Districts' : '全部區域'}
+              </button>
+              {districtList.map(district => (
+                  <button 
+                      key={district}
+                      onClick={() => setSelectedDistrict(district)}
+                      className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-bold transition-all border flex items-center gap-1 ${
+                          selectedDistrict === district 
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                              : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100'
+                      }`}
+                  >
+                      <MapPin size={12} className={selectedDistrict === district ? 'text-white' : 'text-blue-500'}/>
+                      {district}
+                  </button>
+              ))}
+          </div>
+      )}
+
       {/* 列表標題列 */}
       <div className="grid grid-cols-12 gap-2 bg-slate-100 text-slate-500 font-bold border-b border-slate-200 p-3 text-xs uppercase tracking-wider shrink-0 pr-4">
           <div className="col-span-2 text-center">{safeT('filter_selected', lang==='en'?'Selected':'已選')}</div>
@@ -174,7 +222,7 @@ const ScreenSelector = ({
           <div className="col-span-2 text-right"></div>
       </div>
 
-      {/* 🔥 Scrollable 內容區 (分區顯示) */}
+      {/* Scrollable 內容區 (分區顯示) */}
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 pb-4">
         {isScreensLoading ? (
             <div className="p-10 flex flex-col items-center justify-center text-slate-400 gap-3">
@@ -186,8 +234,10 @@ const ScreenSelector = ({
                 {lang === 'en' ? 'No screens found.' : '找不到符合條件的屏幕。'}
             </div>
         ) : (
-            Object.entries(groupedScreens).map(([district, districtScreens]) => (
-                <div key={district} className="mb-4 bg-white border-y border-slate-100 first:border-t-0 shadow-sm">
+            Object.entries(groupedScreens)
+                .filter(([district]) => selectedDistrict === 'All' || district === selectedDistrict) // 🔥 過濾邏輯
+                .map(([district, districtScreens]) => (
+                <div key={district} className="mb-4 bg-white border-y border-slate-100 first:border-t-0 shadow-sm animate-in fade-in">
                     {/* 區域 Header */}
                     <div className="bg-slate-800 text-white px-4 py-2 text-xs font-bold flex items-center gap-2 tracking-wide sticky top-0 z-10 shadow-sm">
                         <Map size={14} className="text-blue-400"/>
