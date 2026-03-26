@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+/* ==========================================
+  🔥 針對 Desktop 自動整體放大 (Global REM Scaling)
+  ==========================================
+*/
+html {
+  /* 手機預設係 16px (100%) - 保持不變，手機繼續咁靚 */
+  font-size: 16px; 
+}
+
+/* Desktop (手提電腦/普通 Mon)，整體放大 */
+@media (min-width: 1024px) {
+  html {
+    font-size: 18px; 
+  }
+}
+
+/* 大電視 / iMac 27吋以上，整體再放大 */
+@media (min-width: 1536px) {
+  html {
+    font-size: 20px; 
+  }
+}
