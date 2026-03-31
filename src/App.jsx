@@ -108,7 +108,8 @@ const DOOHBiddingSystem = ({ currentView = 'standard' }) => {
       
      
 
-      <main className="max-w-5xl mx-auto p-3 md:p-6 space-y-4 md:space-y-8 mt-4">
+    
+<main className="max-w-[1400px] w-full mx-auto p-3 md:p-6 space-y-4 md:space-y-8 mt-4">
         
         {/* 選擇屏幕 */}
         <ScreenSelector 
