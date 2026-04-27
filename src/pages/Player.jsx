@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+// 🔥 1. 記得喺頂部 import 加多個 useRef
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -10,6 +11,9 @@ const Player = () => {
   
   const [playlist, setPlaylist] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // 🔥 2. 新增一個 Ref 嚟記住「未洗牌」嘅基礎廣告名單
+  const basePlaylistRef = useRef("");
 
   useEffect(() => {
     if (!screenId) return;
@@ -36,13 +40,16 @@ const Player = () => {
     return () => unsubscribe();
   }, []);
 
+  // 🔥 3. 換晒呢個修復版嘅 useEffect
   useEffect(() => {
     if (!screenData) return;
 
     const checkSchedule = () => {
+      // 處理緊急插播
       if (screenData.emergencyOverride && screenData.emergencyOverride.trim() !== "") {
         const overrideUrl = screenData.emergencyOverride;
-        if (JSON.stringify(playlist) !== JSON.stringify([overrideUrl])) {
+        if (basePlaylistRef.current !== overrideUrl) {
+            basePlaylistRef.current = overrideUrl; // 記錄狀態
             setPlaylist([overrideUrl]); 
             setCurrentIndex(0);
         }
@@ -91,12 +98,19 @@ const Player = () => {
           if (defaultVid) finalPlaylist.push(defaultVid);
       }
 
-      for (let i = finalPlaylist.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [finalPlaylist[i], finalPlaylist[j]] = [finalPlaylist[j], finalPlaylist[i]];
-      }
+      // 🔥 防護機制：將陣列 Sort 完先轉 String，確保次序唔同都當作同一條 List
+      const currentBaseStr = JSON.stringify([...finalPlaylist].sort());
 
-      if (JSON.stringify(finalPlaylist) !== JSON.stringify(playlist)) {
+      // 只有當實際廣告名單有變（例如有人買咗新廣告），先至執行洗牌！
+      if (currentBaseStr !== basePlaylistRef.current) {
+          basePlaylistRef.current = currentBaseStr; // 更新 Ref
+
+          // 確定名單有變，開始洗牌
+          for (let i = finalPlaylist.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [finalPlaylist[i], finalPlaylist[j]] = [finalPlaylist[j], finalPlaylist[i]];
+          }
+
           setPlaylist(finalPlaylist); 
           setCurrentIndex(0); 
       }
@@ -105,7 +119,7 @@ const Player = () => {
     checkSchedule();
     const interval = setInterval(checkSchedule, 10000); 
     return () => clearInterval(interval);
-  }, [screenData, activeOrders, screenId, playlist]);
+  }, [screenData, activeOrders, screenId]); // 🔥 致命傷已切除：徹底抽走 `playlist`
 
   const handleMediaEnded = () => {
       if (playlist.length > 1) {
@@ -114,17 +128,14 @@ const Player = () => {
   };
 
   const currentMediaUrl = playlist[currentIndex] || '';
-  
-  // 🔥 核心：判斷當前媒體是否為圖片
   const isImage = /\.(jpeg|jpg|gif|png|webp|avif)(\?.*)?$/i.test(currentMediaUrl);
 
-  // 🔥 核心：如果是圖片，啟動 10 秒倒數計時器
   useEffect(() => {
       if (isImage && currentMediaUrl && playlist.length > 1) {
           const timer = setTimeout(() => {
               handleMediaEnded();
-          }, 10000); // 10000 毫秒 = 10 秒
-          return () => clearTimeout(timer); // 清除計時器防止記憶體洩漏
+          }, 10000);
+          return () => clearTimeout(timer); 
       }
   }, [currentIndex, currentMediaUrl, isImage, playlist.length]);
 
